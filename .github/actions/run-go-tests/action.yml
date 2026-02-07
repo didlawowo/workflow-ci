@@ -1,0 +1,111 @@
+name: "Run Go Tests"
+description: "Execute Go tests with coverage reporting"
+
+inputs:
+  go-version:
+    description: "Go version"
+    required: false
+    default: "1.24"
+  coverage-threshold:
+    description: "Minimum coverage percentage"
+    required: false
+    default: "15"
+  working-directory:
+    description: "Working directory (where go.mod is)"
+    required: false
+    default: "."
+  test-args:
+    description: "Additional go test arguments"
+    required: false
+    default: ""
+  upload-coverage:
+    description: "Upload coverage to Codecov"
+    required: false
+    default: "true"
+  codecov-token:
+    description: "Codecov token"
+    required: false
+    default: ""
+  fail-on-coverage:
+    description: "Fail if coverage below threshold"
+    required: false
+    default: "false"
+
+outputs:
+  coverage-percentage:
+    description: "Coverage percentage achieved"
+    value: ${{ steps.coverage.outputs.percentage }}
+  tests-passed:
+    description: "Whether all tests passed"
+    value: ${{ steps.tests.outputs.passed }}
+  test-count:
+    description: "Number of tests executed"
+    value: ${{ steps.tests.outputs.count }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Setup Go environment
+      uses: didlawowo/workflow-ci/.github/actions/setup-go-env@main
+      with:
+        go-version: ${{ inputs.go-version }}
+        working-directory: ${{ inputs.working-directory }}
+
+    - name: Run Go tests with coverage
+      id: tests
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: |
+        go test -v -race -coverprofile=coverage.out -covermode=atomic ${{ inputs.test-args }} ./... 2>&1 | tee test-output.txt
+
+        TEST_COUNT=$(grep -c "^=== RUN" test-output.txt || echo 0)
+        echo "count=${TEST_COUNT}" >> "$GITHUB_OUTPUT"
+
+        if grep -q "^FAIL" test-output.txt; then
+          echo "passed=false" >> "$GITHUB_OUTPUT"
+        else
+          echo "passed=true" >> "$GITHUB_OUTPUT"
+        fi
+
+    - name: Extract coverage
+      id: coverage
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: |
+        if [ -f coverage.out ]; then
+          PCT=$(go tool cover -func=coverage.out | grep total | awk '{print $3}' | sed 's/%//')
+          echo "percentage=${PCT}" >> "$GITHUB_OUTPUT"
+        else
+          echo "percentage=0" >> "$GITHUB_OUTPUT"
+        fi
+
+    - name: Check coverage threshold
+      if: inputs.fail-on-coverage == 'true'
+      shell: bash
+      run: |
+        PCT="${{ steps.coverage.outputs.percentage }}"
+        THRESHOLD="${{ inputs.coverage-threshold }}"
+        PASS=$(echo "$PCT >= $THRESHOLD" | bc -l 2>/dev/null || echo 0)
+        if [ "$PASS" -ne 1 ]; then
+          echo "Coverage ${PCT}% is below threshold ${THRESHOLD}%"
+          exit 1
+        fi
+
+    - name: Upload coverage to Codecov
+      if: inputs.upload-coverage == 'true'
+      uses: codecov/codecov-action@v5
+      with:
+        files: ${{ inputs.working-directory }}/coverage.out
+        flags: unittests
+        token: ${{ inputs.codecov-token }}
+        fail_ci_if_error: false
+
+    - name: Upload test artifacts
+      uses: actions/upload-artifact@v6
+      if: always()
+      with:
+        name: go-test-results
+        path: |
+          ${{ inputs.working-directory }}/coverage.out
+          ${{ inputs.working-directory }}/test-output.txt
+        retention-days: 7

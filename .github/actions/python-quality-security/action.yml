@@ -1,0 +1,136 @@
+name: "Python Quality & Security"
+description: "Ruff linting, Bandit security, TruffleHog secrets, Safety deps"
+
+inputs:
+  python-version:
+    description: "Python version"
+    required: false
+    default: "3.12"
+  run-bandit:
+    description: "Run Bandit security scan"
+    required: false
+    default: "true"
+  run-mypy:
+    description: "Run MyPy type checking"
+    required: false
+    default: "false"
+  run-trufflehog:
+    description: "Run TruffleHog secret detection"
+    required: false
+    default: "true"
+  bandit-skip-rules:
+    description: "Bandit rules to skip (comma-separated)"
+    required: false
+    default: "B104,B311"
+  bandit-paths:
+    description: "Paths for Bandit to scan"
+    required: false
+    default: "src/"
+
+outputs:
+  quality-passed:
+    description: "Whether all quality checks passed"
+    value: ${{ steps.summary.outputs.passed }}
+  security-issues:
+    description: "Number of security issues found"
+    value: ${{ steps.summary.outputs.security-issues }}
+  linting-status:
+    description: "Linting status"
+    value: ${{ steps.summary.outputs.linting-status }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Setup Python environment
+      uses: didlawowo/workflow-ci/.github/actions/setup-python-env@main
+      with:
+        python-version: ${{ inputs.python-version }}
+        install-dev: "true"
+        cache-key-suffix: "-quality"
+
+    - name: Run Ruff linting
+      id: ruff-lint
+      shell: bash
+      run: |
+        if uv run ruff check . --output-format=github; then
+          echo "status=passed" >> "$GITHUB_OUTPUT"
+        else
+          echo "status=failed" >> "$GITHUB_OUTPUT"
+        fi
+      continue-on-error: true
+
+    - name: Check code formatting
+      id: ruff-format
+      shell: bash
+      run: |
+        if uv run ruff format --check .; then
+          echo "status=passed" >> "$GITHUB_OUTPUT"
+        else
+          echo "status=failed" >> "$GITHUB_OUTPUT"
+        fi
+      continue-on-error: true
+
+    - name: Run MyPy
+      if: inputs.run-mypy == 'true'
+      shell: bash
+      run: uv run mypy . --junit-xml=mypy-report.xml || true
+
+    - name: Run Bandit
+      id: bandit
+      if: inputs.run-bandit == 'true'
+      shell: bash
+      run: |
+        uv run bandit -r ${{ inputs.bandit-paths }} -f json -o bandit-report.json --skip ${{ inputs.bandit-skip-rules }} || true
+        uv run bandit -r ${{ inputs.bandit-paths }} --skip ${{ inputs.bandit-skip-rules }} || true
+
+    - name: TruffleHog secret detection
+      if: inputs.run-trufflehog == 'true'
+      uses: trufflesecurity/trufflehog@main
+      with:
+        path: ./
+        base: ${{ github.event.before || github.sha }}
+        head: ${{ github.sha }}
+        extra_args: --only-verified
+      continue-on-error: true
+
+    - name: Safety dependency check
+      shell: bash
+      run: uv run safety check --json --output safety-report.json || true
+      continue-on-error: true
+
+    - name: Analyze results
+      id: summary
+      shell: bash
+      run: |
+        SECURITY_ISSUES=0
+        QUALITY_PASSED=true
+        LINTING_STATUS="passed"
+
+        if [ "${{ steps.ruff-lint.outputs.status }}" != "passed" ]; then
+          QUALITY_PASSED=false
+          LINTING_STATUS="failed"
+        fi
+        if [ "${{ steps.ruff-format.outputs.status }}" != "passed" ]; then
+          QUALITY_PASSED=false
+        fi
+        if [ -f bandit-report.json ]; then
+          BANDIT_ISSUES=$(jq '.results | length' bandit-report.json 2>/dev/null || echo 0)
+          SECURITY_ISSUES=$((SECURITY_ISSUES + BANDIT_ISSUES))
+        fi
+
+        {
+          echo "passed=${QUALITY_PASSED}"
+          echo "security-issues=${SECURITY_ISSUES}"
+          echo "linting-status=${LINTING_STATUS}"
+        } >> "$GITHUB_OUTPUT"
+
+    - name: Upload reports
+      uses: actions/upload-artifact@v6
+      if: always()
+      with:
+        name: python-quality-reports
+        path: |
+          mypy-report.xml
+          bandit-report.json
+          safety-report.json
+        retention-days: 7

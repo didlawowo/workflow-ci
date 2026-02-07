@@ -1,0 +1,160 @@
+# =============================================================================
+# Security - Comprehensive Scan (Python)
+# =============================================================================
+# Runs on: daily cron (02:00 UTC) + manual dispatch
+#
+# To adapt: Change RUNNER, PYTHON_VERSION, BANDIT_SKIP_RULES
+# =============================================================================
+
+name: "Security - Comprehensive Scan"
+
+on:
+  schedule:
+    - cron: "0 2 * * *"
+  workflow_dispatch:
+    inputs:
+      scan-level:
+        description: "Security scan level"
+        required: false
+        type: choice
+        options: ["standard", "comprehensive", "critical-only"]
+        default: "standard"
+      fail-on-issues:
+        description: "Fail workflow on security issues"
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  security-events: write
+  issues: write
+
+# ─────────────────────────────────────────────────────────────────────────────
+# PROJECT CONFIGURATION
+# ─────────────────────────────────────────────────────────────────────────────
+env:
+  RUNNER: "ubuntu-latest"
+  PYTHON_VERSION: "3.12"
+  BANDIT_SKIP_RULES: "B104,B311"
+
+jobs:
+  # ═══════════════════════════════════════════════════════════════════════════
+  # 🔍 FILESYSTEM SECURITY
+  # ═══════════════════════════════════════════════════════════════════════════
+  filesystem-security:
+    name: "Filesystem Security"
+    runs-on: ${{ vars.RUNNER || 'ubuntu-latest' }}
+    permissions:
+      contents: read
+      security-events: write
+    outputs:
+      vulnerabilities-found: ${{ steps.scan.outputs.vulnerabilities-found }}
+      secrets-found: ${{ steps.scan.outputs.secrets-found }}
+      misconfigurations-found: ${{ steps.scan.outputs.misconfigurations-found }}
+      scan-status: ${{ steps.scan.outputs.scan-status }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Determine severity
+        id: severity
+        run: |
+          LEVEL="${{ inputs.scan-level || 'standard' }}"
+          case "$LEVEL" in
+            "critical-only") echo "level=CRITICAL" >> "$GITHUB_OUTPUT" ;;
+            "comprehensive") echo "level=CRITICAL,HIGH,MEDIUM,LOW" >> "$GITHUB_OUTPUT" ;;
+            *) echo "level=CRITICAL,HIGH,MEDIUM" >> "$GITHUB_OUTPUT" ;;
+          esac
+
+      - name: Trivy filesystem scan
+        id: scan
+        uses: didlawowo/workflow-ci/.github/actions/trivy-filesystem-scan@main
+        with:
+          severity: ${{ steps.severity.outputs.level }}
+          fail-on-critical: ${{ inputs.fail-on-issues || 'false' }}
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # 🔒 CODE SECURITY
+  # ═══════════════════════════════════════════════════════════════════════════
+  code-security:
+    name: "Code Security"
+    runs-on: ${{ vars.RUNNER || 'ubuntu-latest' }}
+    permissions:
+      contents: read
+      security-events: write
+    outputs:
+      quality-passed: ${{ steps.checks.outputs.quality-passed }}
+      security-issues: ${{ steps.checks.outputs.security-issues }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Security checks
+        id: checks
+        uses: didlawowo/workflow-ci/.github/actions/python-quality-security@main
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          bandit-skip-rules: ${{ env.BANDIT_SKIP_RULES }}
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # 📊 COMPLIANCE
+  # ═══════════════════════════════════════════════════════════════════════════
+  compliance:
+    name: "Compliance Analysis"
+    needs: [filesystem-security, code-security]
+    if: always()
+    runs-on: ${{ vars.RUNNER || 'ubuntu-latest' }}
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - name: Analyze compliance
+        id: analyze
+        run: |
+          FS_VULNS="${{ needs.filesystem-security.outputs.vulnerabilities-found || '0' }}"
+          FS_SECRETS="${{ needs.filesystem-security.outputs.secrets-found || '0' }}"
+          FS_MISCONFIGS="${{ needs.filesystem-security.outputs.misconfigurations-found || '0' }}"
+          CODE_ISSUES="${{ needs.code-security.outputs.security-issues || '0' }}"
+
+          TOTAL=$((FS_VULNS + FS_SECRETS + FS_MISCONFIGS + CODE_ISSUES))
+          CRITICAL=$((FS_SECRETS + (FS_VULNS / 4)))
+
+          if [ "$CRITICAL" -eq 0 ] && [ "$TOTAL" -le 5 ]; then
+            STATUS="compliant"; SCORE=95
+          elif [ "$CRITICAL" -le 2 ] && [ "$TOTAL" -le 15 ]; then
+            STATUS="mostly-compliant"; SCORE=75
+          elif [ "$CRITICAL" -le 5 ]; then
+            STATUS="needs-improvement"; SCORE=50
+          else
+            STATUS="non-compliant"; SCORE=25
+          fi
+
+          cat >> "$GITHUB_STEP_SUMMARY" << EOF
+          ## Security Scan Summary
+
+          | Category | Count |
+          |----------|-------|
+          | Vulnerabilities | ${FS_VULNS} |
+          | Secrets | ${FS_SECRETS} |
+          | Misconfigurations | ${FS_MISCONFIGS} |
+          | Code Issues | ${CODE_ISSUES} |
+          | **Total** | **${TOTAL}** |
+
+          **Compliance**: ${STATUS} (${SCORE}%) | **Critical**: ${CRITICAL}
+          EOF
+
+      - name: Create issue for critical findings
+        if: steps.analyze.outputs.critical-issues != '0' && steps.analyze.outputs.critical-issues != ''
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: '🚨 Security: critical issues detected',
+              body: 'See [workflow run](https://github.com/' + context.repo.owner + '/' + context.repo.repo + '/actions/runs/' + context.runId + ')',
+              labels: ['security', 'automated']
+            });

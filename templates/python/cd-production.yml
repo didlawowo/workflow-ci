@@ -1,0 +1,140 @@
+# =============================================================================
+# CD - Production Release (Python)
+# =============================================================================
+# Runs on: push to main
+# Uses: Release Please for versioning, composite actions for build/test/security
+#
+# To adapt for your project:
+# 1. Change RUNNER, IMAGE_NAME, PYTHON_VERSION
+# 2. Set release-type (python, node, go, simple, etc.)
+# 3. Set secrets: DOCKER_USERNAME, DOCKER_PASSWORD, RELEASE_PLEASE_TOKEN
+# =============================================================================
+
+name: "CD - Production Release"
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+  pull-requests: write
+  packages: write
+  id-token: write
+  security-events: write
+
+# ─────────────────────────────────────────────────────────────────────────────
+# PROJECT CONFIGURATION
+# ─────────────────────────────────────────────────────────────────────────────
+env:
+  RUNNER: "ubuntu-latest"
+  IMAGE_NAME: ${{ secrets.DOCKER_USERNAME }}/my-app  # <-- change this
+  PYTHON_VERSION: "3.12"
+  RELEASE_TYPE: "python"  # python, node, go, simple
+
+jobs:
+  # ═══════════════════════════════════════════════════════════════════════════
+  # 🏷️ RELEASE PLEASE
+  # ═══════════════════════════════════════════════════════════════════════════
+  release-please:
+    name: "Release Please"
+    runs-on: ${{ vars.RUNNER || 'ubuntu-latest' }}
+    outputs:
+      release_created: ${{ steps.release.outputs.release_created }}
+      tag_name: ${{ steps.release.outputs.tag_name }}
+      version: ${{ steps.release.outputs.version }}
+    steps:
+      - name: Release Please
+        id: release
+        uses: googleapis/release-please-action@v4
+        with:
+          release-type: ${{ env.RELEASE_TYPE }}
+          token: ${{ secrets.RELEASE_PLEASE_TOKEN || secrets.GITHUB_TOKEN }}
+
+      - name: Auto-merge Release Please PR
+        if: steps.release.outputs.pr
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          PR_NUMBER=$(echo '${{ steps.release.outputs.pr }}' | jq -r '.number')
+          sleep 10
+          gh pr merge "${PR_NUMBER}" --auto --squash --repo ${{ github.repository }}
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # 🧪 FINAL VALIDATION
+  # ═══════════════════════════════════════════════════════════════════════════
+  validation:
+    name: "Final Validation"
+    needs: release-please
+    if: needs.release-please.outputs.release_created == 'true'
+    runs-on: ${{ vars.RUNNER || 'ubuntu-latest' }}
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Run tests
+        uses: didlawowo/workflow-ci/.github/actions/run-python-tests@main
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Run quality checks
+        uses: didlawowo/workflow-ci/.github/actions/python-quality-security@main
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # 🐳 PRODUCTION BUILD
+  # ═══════════════════════════════════════════════════════════════════════════
+  production-build:
+    name: "Production Docker Build"
+    needs: [release-please, validation]
+    if: needs.release-please.outputs.release_created == 'true'
+    runs-on: ${{ vars.RUNNER || 'ubuntu-latest' }}
+    outputs:
+      digest: ${{ steps.build.outputs.digest }}
+      image-full-name: ${{ steps.build.outputs.image-full-name }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Build, push, sign
+        id: build
+        uses: didlawowo/workflow-ci/.github/actions/docker-build-push@main
+        with:
+          image-name: ${{ env.IMAGE_NAME }}
+          image-tag: ${{ needs.release-please.outputs.tag_name }}
+          push: "true"
+          sign: "true"
+          sbom: "true"
+          provenance: "true"
+          add-latest-tag: "true"
+          registry-username: ${{ secrets.DOCKER_USERNAME }}
+          registry-password: ${{ secrets.DOCKER_PASSWORD }}
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # 📊 SUMMARY
+  # ═══════════════════════════════════════════════════════════════════════════
+  summary:
+    name: "Release Summary"
+    if: always() && needs.release-please.outputs.release_created == 'true'
+    needs: [release-please, validation, production-build]
+    runs-on: ${{ vars.RUNNER || 'ubuntu-latest' }}
+    steps:
+      - name: Create summary
+        run: |
+          cat >> "$GITHUB_STEP_SUMMARY" << EOF
+          ## Production Release ${{ needs.release-please.outputs.tag_name }}
+
+          | Stage | Status |
+          |-------|--------|
+          | **Release** | ${{ needs.release-please.outputs.tag_name }} |
+          | **Validation** | ${{ needs.validation.result == 'success' && '✅' || '❌' }} |
+          | **Docker Build** | ${{ needs.production-build.result == 'success' && '✅' || '❌' }} |
+          | **Image** | \`${{ needs.production-build.outputs.image-full-name }}\` |
+          | **Digest** | \`${{ needs.production-build.outputs.digest }}\` |
+          | **Signed** | ✅ Cosign |
+          EOF

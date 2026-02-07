@@ -1,0 +1,44 @@
+name: "Setup Go Environment"
+description: "Setup Go with caching"
+
+inputs:
+  go-version:
+    description: "Go version to install"
+    required: false
+    default: "1.24"
+  cache-dependency-path:
+    description: "Path to go.sum for cache key"
+    required: false
+    default: "go.sum"
+  working-directory:
+    description: "Working directory for go commands"
+    required: false
+    default: "."
+
+outputs:
+  go-version:
+    description: "Go version installed"
+    value: ${{ steps.setup.outputs.go-version }}
+  cache-hit:
+    description: "Whether the cache was hit"
+    value: ${{ steps.setup.outputs.cache-hit }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Setup Go
+      id: setup
+      uses: actions/setup-go@v6
+      with:
+        go-version: ${{ inputs.go-version }}
+        cache: true
+        cache-dependency-path: ${{ inputs.cache-dependency-path }}
+
+    - name: Download dependencies
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: go mod download
+
+    - name: Verify installation
+      shell: bash
+      run: echo "go-version=$(go version | awk '{print $3}')" >> "$GITHUB_OUTPUT"

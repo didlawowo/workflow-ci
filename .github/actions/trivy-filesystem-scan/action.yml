@@ -1,0 +1,170 @@
+name: "Trivy Filesystem Security Scan"
+description: "Comprehensive filesystem security scanning with Trivy (vuln, secrets, misconfig, licenses)"
+
+inputs:
+  scan-path:
+    description: "Path to scan"
+    required: false
+    default: "."
+  severity:
+    description: "Vulnerability severity levels"
+    required: false
+    default: "CRITICAL,HIGH,MEDIUM"
+  scanners:
+    description: "Trivy scanners to use (comma-separated)"
+    required: false
+    default: "vuln,secret,misconfig,license"
+  fail-on-critical:
+    description: "Fail workflow on critical vulnerabilities"
+    required: false
+    default: "false"
+  ignore-unfixed:
+    description: "Ignore unfixed vulnerabilities"
+    required: false
+    default: "true"
+
+outputs:
+  vulnerabilities-found:
+    description: "Number of vulnerabilities found"
+    value: ${{ steps.analysis.outputs.vuln-count }}
+  secrets-found:
+    description: "Number of secrets found"
+    value: ${{ steps.analysis.outputs.secret-count }}
+  misconfigurations-found:
+    description: "Number of misconfigurations found"
+    value: ${{ steps.analysis.outputs.misconfig-count }}
+  scan-status:
+    description: "Overall scan status"
+    value: ${{ steps.analysis.outputs.status }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Run Trivy vulnerability scan
+      uses: aquasecurity/trivy-action@master
+      with:
+        scan-type: "fs"
+        scan-ref: ${{ inputs.scan-path }}
+        format: "sarif"
+        output: "trivy-fs-vulnerabilities.sarif"
+        severity: ${{ inputs.severity }}
+        scanners: "vuln"
+        ignore-unfixed: ${{ inputs.ignore-unfixed }}
+        exit-code: 0
+      continue-on-error: true
+
+    - name: Run Trivy secret detection
+      uses: aquasecurity/trivy-action@master
+      with:
+        scan-type: "fs"
+        scan-ref: ${{ inputs.scan-path }}
+        format: "sarif"
+        output: "trivy-fs-secrets.sarif"
+        scanners: "secret"
+        exit-code: 0
+      continue-on-error: true
+
+    - name: Run Trivy misconfiguration scan
+      uses: aquasecurity/trivy-action@master
+      with:
+        scan-type: "fs"
+        scan-ref: ${{ inputs.scan-path }}
+        format: "sarif"
+        output: "trivy-fs-misconfig.sarif"
+        scanners: "misconfig"
+        severity: ${{ inputs.severity }}
+        exit-code: 0
+      continue-on-error: true
+
+    - name: Run Trivy license scan
+      uses: aquasecurity/trivy-action@master
+      with:
+        scan-type: "fs"
+        scan-ref: ${{ inputs.scan-path }}
+        format: "sarif"
+        output: "trivy-fs-licenses.sarif"
+        scanners: "license"
+        exit-code: 0
+      continue-on-error: true
+
+    - name: Upload vulnerability results
+      uses: github/codeql-action/upload-sarif@v4
+      if: always()
+      with:
+        sarif_file: "trivy-fs-vulnerabilities.sarif"
+        category: "trivy-fs-vulnerabilities"
+      continue-on-error: true
+
+    - name: Upload secret detection results
+      uses: github/codeql-action/upload-sarif@v4
+      if: always()
+      with:
+        sarif_file: "trivy-fs-secrets.sarif"
+        category: "trivy-fs-secrets"
+      continue-on-error: true
+
+    - name: Upload misconfiguration results
+      uses: github/codeql-action/upload-sarif@v4
+      if: always()
+      with:
+        sarif_file: "trivy-fs-misconfig.sarif"
+        category: "trivy-fs-misconfig"
+      continue-on-error: true
+
+    - name: Upload license results
+      uses: github/codeql-action/upload-sarif@v4
+      if: always()
+      with:
+        sarif_file: "trivy-fs-licenses.sarif"
+        category: "trivy-fs-licenses"
+      continue-on-error: true
+
+    - name: Check for critical issues
+      if: inputs.fail-on-critical == 'true'
+      uses: aquasecurity/trivy-action@master
+      with:
+        scan-type: "fs"
+        scan-ref: ${{ inputs.scan-path }}
+        format: "table"
+        severity: "CRITICAL"
+        scanners: "vuln,secret"
+        exit-code: 1
+        ignore-unfixed: false
+
+    - name: Analyze scan results
+      id: analysis
+      shell: bash
+      run: |
+        VULN_COUNT=0
+        SECRET_COUNT=0
+        MISCONFIG_COUNT=0
+        STATUS="success"
+
+        if [ -f trivy-fs-vulnerabilities.sarif ]; then
+          VULN_COUNT=$(jq '.runs[0].results | length' trivy-fs-vulnerabilities.sarif 2>/dev/null || echo 0)
+        fi
+        if [ -f trivy-fs-secrets.sarif ]; then
+          SECRET_COUNT=$(jq '.runs[0].results | length' trivy-fs-secrets.sarif 2>/dev/null || echo 0)
+        fi
+        if [ -f trivy-fs-misconfig.sarif ]; then
+          MISCONFIG_COUNT=$(jq '.runs[0].results | length' trivy-fs-misconfig.sarif 2>/dev/null || echo 0)
+        fi
+
+        if [ "$VULN_COUNT" -gt 0 ] || [ "$SECRET_COUNT" -gt 0 ] || [ "$MISCONFIG_COUNT" -gt 0 ]; then
+          STATUS="issues-found"
+        fi
+
+        {
+          echo "vuln-count=${VULN_COUNT}"
+          echo "secret-count=${SECRET_COUNT}"
+          echo "misconfig-count=${MISCONFIG_COUNT}"
+          echo "status=${STATUS}"
+        } >> "$GITHUB_OUTPUT"
+
+    - name: Upload scan artifacts
+      uses: actions/upload-artifact@v6
+      if: always()
+      with:
+        name: trivy-filesystem-results
+        path: trivy-fs-*.sarif
+        retention-days: 30

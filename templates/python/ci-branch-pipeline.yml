@@ -1,0 +1,143 @@
+# =============================================================================
+# CI - Branch Pipeline (Python)
+# =============================================================================
+# Runs on: push to branches (except main), pull requests to main
+# Uses composite actions from: didlawowo/workflow-ci
+#
+# To adapt for your project:
+# 1. Change RUNNER to your runner (or ubuntu-latest)
+# 2. Adjust PYTHON_VERSION, COVERAGE_THRESHOLD
+# 3. Adjust IMAGE_NAME to your Docker Hub image
+# 4. Set secrets: DOCKER_USERNAME, DOCKER_PASSWORD, CODECOV_TOKEN
+# =============================================================================
+
+name: "CI - Branch Pipeline"
+
+on:
+  push:
+    branches:
+      - "**"
+      - "!main"
+  pull_request:
+    branches: [main]
+
+# ─────────────────────────────────────────────────────────────────────────────
+# PROJECT CONFIGURATION - Edit these values for your project
+# ─────────────────────────────────────────────────────────────────────────────
+env:
+  RUNNER: "ubuntu-latest"
+  PYTHON_VERSION: "3.12"
+  COVERAGE_THRESHOLD: "30"
+  IMAGE_NAME: ${{ secrets.DOCKER_USERNAME }}/my-app  # <-- change this
+  BANDIT_SKIP_RULES: "B104,B311"
+
+jobs:
+  # ═══════════════════════════════════════════════════════════════════════════
+  # 🧪 TESTS & COVERAGE
+  # ═══════════════════════════════════════════════════════════════════════════
+  tests:
+    name: "Tests & Coverage"
+    runs-on: ${{ vars.RUNNER || 'ubuntu-latest' }}
+    permissions:
+      contents: read
+      pull-requests: write
+    outputs:
+      coverage-percentage: ${{ steps.test.outputs.coverage-percentage }}
+      tests-passed: ${{ steps.test.outputs.tests-passed }}
+      test-count: ${{ steps.test.outputs.test-count }}
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Run tests
+        id: test
+        uses: didlawowo/workflow-ci/.github/actions/run-python-tests@main
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          coverage-threshold: ${{ env.COVERAGE_THRESHOLD }}
+          codecov-token: ${{ secrets.CODECOV_TOKEN }}
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # 🔍 QUALITY & SECURITY
+  # ═══════════════════════════════════════════════════════════════════════════
+  quality-security:
+    name: "Quality & Security"
+    runs-on: ${{ vars.RUNNER || 'ubuntu-latest' }}
+    permissions:
+      contents: read
+      security-events: write
+    outputs:
+      quality-passed: ${{ steps.checks.outputs.quality-passed }}
+      security-issues: ${{ steps.checks.outputs.security-issues }}
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Run quality & security checks
+        id: checks
+        uses: didlawowo/workflow-ci/.github/actions/python-quality-security@main
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          bandit-skip-rules: ${{ env.BANDIT_SKIP_RULES }}
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # 🐳 DOCKER BUILD
+  # ═══════════════════════════════════════════════════════════════════════════
+  docker-build:
+    name: "Docker Build & Scan"
+    needs: [tests, quality-security]
+    if: always() && needs.tests.result == 'success'
+    runs-on: ${{ vars.RUNNER || 'ubuntu-latest' }}
+    permissions:
+      contents: read
+      security-events: write
+      packages: write
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Generate tag
+        id: tag
+        run: |
+          BRANCH=$(echo "${{ github.ref_name }}" | sed 's/[^a-zA-Z0-9]/-/g' | tr '[:upper:]' '[:lower:]')
+          SHA=$(git rev-parse --short HEAD)
+          echo "branch-tag=${BRANCH}-${SHA}" >> "$GITHUB_OUTPUT"
+
+      - name: Build and push
+        uses: didlawowo/workflow-ci/.github/actions/docker-build-push@main
+        with:
+          image-name: ${{ env.IMAGE_NAME }}
+          image-tag: ${{ steps.tag.outputs.branch-tag }}
+          push: ${{ github.event_name == 'push' }}
+          registry-username: ${{ secrets.DOCKER_USERNAME }}
+          registry-password: ${{ secrets.DOCKER_PASSWORD }}
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # 📊 PIPELINE SUMMARY
+  # ═══════════════════════════════════════════════════════════════════════════
+  summary:
+    name: "Pipeline Summary"
+    if: always()
+    needs: [tests, quality-security, docker-build]
+    runs-on: ${{ vars.RUNNER || 'ubuntu-latest' }}
+    steps:
+      - name: Create summary
+        run: |
+          cat >> "$GITHUB_STEP_SUMMARY" << EOF
+          ## CI Branch Pipeline Summary
+
+          | Stage | Status |
+          |-------|--------|
+          | **Tests** | ${{ needs.tests.result == 'success' && '✅ Passed' || '❌ Failed' }} |
+          | **Coverage** | ${{ needs.tests.outputs.coverage-percentage || 'N/A' }}% (threshold: ${{ env.COVERAGE_THRESHOLD }}%) |
+          | **Quality** | ${{ needs.quality-security.result == 'success' && '✅ Passed' || '❌ Issues' }} |
+          | **Docker** | ${{ needs.docker-build.result == 'success' && '✅ Built' || needs.docker-build.result == 'skipped' && '⏭️ Skipped' || '❌ Failed' }} |
+
+          **Branch**: \`${{ github.ref_name }}\` | **Commit**: \`${{ github.sha }}\`
+          EOF

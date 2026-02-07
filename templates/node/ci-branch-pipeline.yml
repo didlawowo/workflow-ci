@@ -1,0 +1,114 @@
+# =============================================================================
+# CI - Branch Pipeline (Node.js)
+# =============================================================================
+# To adapt: Change RUNNER, NODE_VERSION, IMAGE_NAME, PACKAGE_MANAGER
+# Set secrets: DOCKER_USERNAME, DOCKER_PASSWORD, CODECOV_TOKEN
+# =============================================================================
+
+name: "CI - Branch Pipeline"
+
+on:
+  push:
+    branches: ["**", "!main"]
+  pull_request:
+    branches: [main]
+
+env:
+  RUNNER: "ubuntu-latest"
+  NODE_VERSION: "22"
+  PACKAGE_MANAGER: "npm"  # npm, pnpm, yarn
+  IMAGE_NAME: ${{ secrets.DOCKER_USERNAME }}/my-app  # <-- change this
+  USE_PLAYWRIGHT: "false"  # set to "true" for e2e tests
+
+jobs:
+  tests:
+    name: "Tests"
+    runs-on: ${{ vars.RUNNER || 'ubuntu-latest' }}
+    permissions:
+      contents: read
+      pull-requests: write
+    outputs:
+      tests-passed: ${{ steps.test.outputs.tests-passed }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Run tests
+        id: test
+        uses: didlawowo/workflow-ci/.github/actions/run-node-tests@main
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          package-manager: ${{ env.PACKAGE_MANAGER }}
+          playwright: ${{ env.USE_PLAYWRIGHT }}
+          codecov-token: ${{ secrets.CODECOV_TOKEN }}
+
+  quality-security:
+    name: "Quality & Security"
+    runs-on: ${{ vars.RUNNER || 'ubuntu-latest' }}
+    permissions:
+      contents: read
+    outputs:
+      quality-passed: ${{ steps.checks.outputs.quality-passed }}
+      security-issues: ${{ steps.checks.outputs.security-issues }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Run quality & security checks
+        id: checks
+        uses: didlawowo/workflow-ci/.github/actions/node-quality-security@main
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          package-manager: ${{ env.PACKAGE_MANAGER }}
+
+  docker-build:
+    name: "Docker Build & Scan"
+    needs: [tests, quality-security]
+    if: always() && needs.tests.result == 'success'
+    runs-on: ${{ vars.RUNNER || 'ubuntu-latest' }}
+    permissions:
+      contents: read
+      security-events: write
+      packages: write
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Generate tag
+        id: tag
+        run: |
+          BRANCH=$(echo "${{ github.ref_name }}" | sed 's/[^a-zA-Z0-9]/-/g' | tr '[:upper:]' '[:lower:]')
+          SHA=$(git rev-parse --short HEAD)
+          echo "branch-tag=${BRANCH}-${SHA}" >> "$GITHUB_OUTPUT"
+
+      - name: Build and push
+        uses: didlawowo/workflow-ci/.github/actions/docker-build-push@main
+        with:
+          image-name: ${{ env.IMAGE_NAME }}
+          image-tag: ${{ steps.tag.outputs.branch-tag }}
+          push: ${{ github.event_name == 'push' }}
+          registry-username: ${{ secrets.DOCKER_USERNAME }}
+          registry-password: ${{ secrets.DOCKER_PASSWORD }}
+
+  summary:
+    name: "Pipeline Summary"
+    if: always()
+    needs: [tests, quality-security, docker-build]
+    runs-on: ${{ vars.RUNNER || 'ubuntu-latest' }}
+    steps:
+      - name: Create summary
+        run: |
+          cat >> "$GITHUB_STEP_SUMMARY" << EOF
+          ## CI Branch Pipeline Summary
+
+          | Stage | Status |
+          |-------|--------|
+          | **Tests** | ${{ needs.tests.result == 'success' && '✅ Passed' || '❌ Failed' }} |
+          | **Quality** | ${{ needs.quality-security.result == 'success' && '✅ Passed' || '❌ Issues' }} |
+          | **Docker** | ${{ needs.docker-build.result == 'success' && '✅ Built' || needs.docker-build.result == 'skipped' && '⏭️ Skipped' || '❌ Failed' }} |
+
+          **Branch**: \`${{ github.ref_name }}\` | **Commit**: \`${{ github.sha }}\`
+          EOF

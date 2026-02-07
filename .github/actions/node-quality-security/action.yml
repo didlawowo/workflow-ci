@@ -1,0 +1,104 @@
+name: "Node.js Quality & Security"
+description: "ESLint linting, npm audit, formatting checks"
+
+inputs:
+  node-version:
+    description: "Node.js version"
+    required: false
+    default: "22"
+  package-manager:
+    description: "Package manager (npm, pnpm, yarn)"
+    required: false
+    default: "npm"
+  lint-script:
+    description: "npm script for linting"
+    required: false
+    default: "lint"
+  format-check-script:
+    description: "npm script for format checking (leave empty to skip)"
+    required: false
+    default: ""
+  run-audit:
+    description: "Run npm audit"
+    required: false
+    default: "true"
+  audit-level:
+    description: "npm audit level (low, moderate, high, critical)"
+    required: false
+    default: "high"
+
+outputs:
+  quality-passed:
+    description: "Whether all quality checks passed"
+    value: ${{ steps.summary.outputs.passed }}
+  security-issues:
+    description: "Number of security issues found"
+    value: ${{ steps.summary.outputs.security-issues }}
+  linting-status:
+    description: "Linting status"
+    value: ${{ steps.summary.outputs.linting-status }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Setup Node.js environment
+      uses: didlawowo/workflow-ci/.github/actions/setup-node-env@main
+      with:
+        node-version: ${{ inputs.node-version }}
+        package-manager: ${{ inputs.package-manager }}
+
+    - name: Run linting
+      id: lint
+      shell: bash
+      run: |
+        if ${{ inputs.package-manager }} run ${{ inputs.lint-script }}; then
+          echo "status=passed" >> "$GITHUB_OUTPUT"
+        else
+          echo "status=failed" >> "$GITHUB_OUTPUT"
+        fi
+      continue-on-error: true
+
+    - name: Check formatting
+      id: format
+      if: inputs.format-check-script != ''
+      shell: bash
+      run: |
+        if ${{ inputs.package-manager }} run ${{ inputs.format-check-script }}; then
+          echo "status=passed" >> "$GITHUB_OUTPUT"
+        else
+          echo "status=failed" >> "$GITHUB_OUTPUT"
+        fi
+      continue-on-error: true
+
+    - name: Run npm audit
+      id: audit
+      if: inputs.run-audit == 'true'
+      shell: bash
+      run: |
+        AUDIT_OUTPUT=$(npm audit --audit-level=${{ inputs.audit-level }} --json 2>/dev/null || true)
+        VULN_COUNT=$(echo "$AUDIT_OUTPUT" | jq '.metadata.vulnerabilities.total // 0' 2>/dev/null || echo 0)
+        echo "vuln-count=${VULN_COUNT}" >> "$GITHUB_OUTPUT"
+        npm audit --audit-level=${{ inputs.audit-level }} || true
+      continue-on-error: true
+
+    - name: Analyze results
+      id: summary
+      shell: bash
+      run: |
+        QUALITY_PASSED=true
+        LINTING_STATUS="passed"
+        SECURITY_ISSUES="${{ steps.audit.outputs.vuln-count || '0' }}"
+
+        if [ "${{ steps.lint.outputs.status }}" != "passed" ]; then
+          QUALITY_PASSED=false
+          LINTING_STATUS="failed"
+        fi
+        if [ "${{ steps.format.outputs.status }}" = "failed" ]; then
+          QUALITY_PASSED=false
+        fi
+
+        {
+          echo "passed=${QUALITY_PASSED}"
+          echo "security-issues=${SECURITY_ISSUES}"
+          echo "linting-status=${LINTING_STATUS}"
+        } >> "$GITHUB_OUTPUT"

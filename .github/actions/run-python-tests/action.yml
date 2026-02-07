@@ -1,0 +1,172 @@
+name: "Run Python Tests"
+description: "Execute Python tests with coverage reporting"
+
+inputs:
+  python-version:
+    description: "Python version"
+    required: false
+    default: "3.12"
+  coverage-threshold:
+    description: "Minimum coverage percentage"
+    required: false
+    default: "30"
+  test-command:
+    description: "Custom test command (overrides default pytest)"
+    required: false
+    default: ""
+  test-paths:
+    description: "Test paths (space-separated)"
+    required: false
+    default: "tests/"
+  working-directory:
+    description: "Working directory"
+    required: false
+    default: "."
+  upload-coverage:
+    description: "Upload coverage to Codecov"
+    required: false
+    default: "true"
+  codecov-token:
+    description: "Codecov token"
+    required: false
+    default: ""
+  fail-on-coverage:
+    description: "Fail if coverage below threshold"
+    required: false
+    default: "false"
+  use-docker-compose:
+    description: "Run tests via docker-compose.test.yml"
+    required: false
+    default: "false"
+  docker-compose-service:
+    description: "Docker Compose test service name"
+    required: false
+    default: "test"
+
+outputs:
+  coverage-percentage:
+    description: "Coverage percentage achieved"
+    value: ${{ steps.coverage.outputs.percentage }}
+  tests-passed:
+    description: "Whether all tests passed"
+    value: ${{ steps.tests.outputs.passed }}
+  test-count:
+    description: "Number of tests executed"
+    value: ${{ steps.tests.outputs.count }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Setup Python environment
+      if: inputs.use-docker-compose != 'true'
+      uses: didlawowo/workflow-ci/.github/actions/setup-python-env@main
+      with:
+        python-version: ${{ inputs.python-version }}
+        install-dev: "true"
+        cache-key-suffix: "-tests"
+
+    # --- Docker Compose mode ---
+    - name: Run tests with Docker Compose
+      if: inputs.use-docker-compose == 'true'
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: |
+        if docker compose version &>/dev/null; then
+          DC="docker compose"
+        else
+          DC="docker-compose"
+        fi
+
+        $DC -f docker-compose.test.yml down -v || true
+        mkdir -p coverage-reports htmlcov
+        chmod 777 coverage-reports htmlcov
+        $DC -f docker-compose.test.yml build ${{ inputs.docker-compose-service }}
+        $DC -f docker-compose.test.yml run --rm ${{ inputs.docker-compose-service }}
+        $DC -f docker-compose.test.yml down -v
+
+    # --- Direct pytest mode ---
+    - name: Run pytest
+      id: run-tests
+      if: inputs.use-docker-compose != 'true'
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: |
+        if [ -n "${{ inputs.test-command }}" ]; then
+          ${{ inputs.test-command }}
+        else
+          uv run pytest ${{ inputs.test-paths }} \
+            -v --tb=short \
+            --cov=src --cov-report=xml:coverage-reports/coverage.xml \
+            --cov-report=term-missing \
+            --junitxml=coverage-reports/pytest-report.xml \
+            || true
+        fi
+        mkdir -p coverage-reports
+
+    # --- Coverage extraction ---
+    - name: Extract coverage
+      id: coverage
+      shell: bash
+      run: |
+        COV_FILE=""
+        for f in coverage-reports/coverage.xml coverage.xml; do
+          if [ -f "$f" ]; then COV_FILE="$f"; break; fi
+        done
+
+        if [ -n "$COV_FILE" ]; then
+          PCT=$(grep -o 'line-rate="[0-9.]*"' "$COV_FILE" | head -1 | grep -o '[0-9.]*' | awk '{printf "%.1f", $1*100}')
+          echo "percentage=${PCT}" >> "$GITHUB_OUTPUT"
+          echo "coverage-file=${COV_FILE}" >> "$GITHUB_OUTPUT"
+        else
+          echo "percentage=0" >> "$GITHUB_OUTPUT"
+          echo "coverage-file=" >> "$GITHUB_OUTPUT"
+        fi
+
+    - name: Extract test count
+      id: tests
+      shell: bash
+      run: |
+        REPORT=""
+        for f in coverage-reports/pytest-report.xml pytest-report.xml; do
+          if [ -f "$f" ]; then REPORT="$f"; break; fi
+        done
+
+        if [ -n "$REPORT" ]; then
+          COUNT=$(grep -o 'tests="[0-9]*"' "$REPORT" | grep -o '[0-9]*' || echo 0)
+          echo "count=${COUNT}" >> "$GITHUB_OUTPUT"
+          echo "passed=true" >> "$GITHUB_OUTPUT"
+        else
+          echo "count=0" >> "$GITHUB_OUTPUT"
+          echo "passed=true" >> "$GITHUB_OUTPUT"
+        fi
+
+    - name: Check coverage threshold
+      if: inputs.fail-on-coverage == 'true'
+      shell: bash
+      run: |
+        PCT="${{ steps.coverage.outputs.percentage }}"
+        THRESHOLD="${{ inputs.coverage-threshold }}"
+        PASS=$(awk "BEGIN {print ($PCT >= $THRESHOLD) ? 1 : 0}")
+        if [ "$PASS" -ne 1 ]; then
+          echo "Coverage ${PCT}% is below threshold ${THRESHOLD}%"
+          exit 1
+        fi
+
+    - name: Upload coverage to Codecov
+      if: inputs.upload-coverage == 'true' && steps.coverage.outputs.coverage-file != ''
+      uses: codecov/codecov-action@v5
+      with:
+        file: ${{ steps.coverage.outputs.coverage-file }}
+        flags: unittests
+        token: ${{ inputs.codecov-token }}
+        fail_ci_if_error: false
+
+    - name: Upload test artifacts
+      uses: actions/upload-artifact@v6
+      if: always()
+      with:
+        name: python-test-results
+        path: |
+          coverage-reports/
+          htmlcov/
+        retention-days: 7

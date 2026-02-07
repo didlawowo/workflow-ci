@@ -1,0 +1,132 @@
+name: "Go Quality & Security"
+description: "golangci-lint, go vet, gosec, gofmt checks"
+
+inputs:
+  go-version:
+    description: "Go version"
+    required: false
+    default: "1.24"
+  working-directory:
+    description: "Working directory"
+    required: false
+    default: "."
+  golangci-lint-version:
+    description: "golangci-lint version"
+    required: false
+    default: "v1.62.2"
+  lint-timeout:
+    description: "Lint timeout"
+    required: false
+    default: "5m"
+
+outputs:
+  quality-passed:
+    description: "Whether all quality checks passed"
+    value: ${{ steps.summary.outputs.passed }}
+  security-issues:
+    description: "Number of security issues found"
+    value: ${{ steps.summary.outputs.security-issues }}
+  linting-status:
+    description: "Linting status"
+    value: ${{ steps.summary.outputs.linting-status }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Setup Go environment
+      uses: didlawowo/workflow-ci/.github/actions/setup-go-env@main
+      with:
+        go-version: ${{ inputs.go-version }}
+        working-directory: ${{ inputs.working-directory }}
+
+    - name: Install golangci-lint
+      shell: bash
+      run: |
+        GOPATH_BIN="$(go env GOPATH)/bin"
+        curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b "$GOPATH_BIN" ${{ inputs.golangci-lint-version }}
+
+    - name: Run golangci-lint
+      id: lint
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: |
+        if golangci-lint run --timeout=${{ inputs.lint-timeout }} --out-format=github-actions ./...; then
+          echo "status=passed" >> "$GITHUB_OUTPUT"
+        else
+          echo "status=failed" >> "$GITHUB_OUTPUT"
+        fi
+      continue-on-error: true
+
+    - name: Run go vet
+      id: vet
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: |
+        if go vet ./...; then
+          echo "status=passed" >> "$GITHUB_OUTPUT"
+        else
+          echo "status=failed" >> "$GITHUB_OUTPUT"
+        fi
+      continue-on-error: true
+
+    - name: Check formatting
+      id: fmt
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: |
+        UNFORMATTED=$(gofmt -l .)
+        if [ -n "$UNFORMATTED" ]; then
+          echo "Unformatted files:"
+          echo "$UNFORMATTED"
+          echo "status=failed" >> "$GITHUB_OUTPUT"
+        else
+          echo "status=passed" >> "$GITHUB_OUTPUT"
+        fi
+      continue-on-error: true
+
+    - name: Run GoSec
+      id: gosec
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: |
+        go install github.com/securego/gosec/v2/cmd/gosec@latest
+        gosec -fmt sarif -out gosec-results.sarif ./... || true
+        gosec -fmt text ./... || true
+
+    - name: Upload GoSec SARIF
+      uses: github/codeql-action/upload-sarif@v4
+      if: always()
+      with:
+        sarif_file: ${{ inputs.working-directory }}/gosec-results.sarif
+        category: "gosec"
+      continue-on-error: true
+
+    - name: Analyze results
+      id: summary
+      shell: bash
+      run: |
+        QUALITY_PASSED=true
+        LINTING_STATUS="passed"
+        SECURITY_ISSUES=0
+
+        if [ "${{ steps.lint.outputs.status }}" != "passed" ]; then
+          QUALITY_PASSED=false
+          LINTING_STATUS="failed"
+        fi
+        if [ "${{ steps.vet.outputs.status }}" != "passed" ]; then
+          QUALITY_PASSED=false
+        fi
+        if [ "${{ steps.fmt.outputs.status }}" != "passed" ]; then
+          QUALITY_PASSED=false
+        fi
+
+        SARIF="${{ inputs.working-directory }}/gosec-results.sarif"
+        if [ -f "$SARIF" ]; then
+          SECURITY_ISSUES=$(jq '.runs[0].results | length' "$SARIF" 2>/dev/null || echo 0)
+        fi
+
+        {
+          echo "passed=${QUALITY_PASSED}"
+          echo "security-issues=${SECURITY_ISSUES}"
+          echo "linting-status=${LINTING_STATUS}"
+        } >> "$GITHUB_OUTPUT"

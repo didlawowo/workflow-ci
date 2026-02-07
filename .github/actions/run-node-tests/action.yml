@@ -1,0 +1,80 @@
+name: "Run Node.js Tests"
+description: "Execute Node.js tests with optional Playwright and coverage"
+
+inputs:
+  node-version:
+    description: "Node.js version"
+    required: false
+    default: "22"
+  package-manager:
+    description: "Package manager (npm, pnpm, yarn)"
+    required: false
+    default: "npm"
+  test-script:
+    description: "npm script to run tests"
+    required: false
+    default: "test"
+  upload-coverage:
+    description: "Upload coverage to Codecov"
+    required: false
+    default: "true"
+  codecov-token:
+    description: "Codecov token"
+    required: false
+    default: ""
+  playwright:
+    description: "Install Playwright browsers"
+    required: false
+    default: "false"
+  playwright-browsers:
+    description: "Playwright browsers to install"
+    required: false
+    default: "chromium"
+
+outputs:
+  tests-passed:
+    description: "Whether all tests passed"
+    value: ${{ steps.tests.outputs.passed }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Setup Node.js environment
+      uses: didlawowo/workflow-ci/.github/actions/setup-node-env@main
+      with:
+        node-version: ${{ inputs.node-version }}
+        package-manager: ${{ inputs.package-manager }}
+
+    - name: Install Playwright browsers
+      if: inputs.playwright == 'true'
+      shell: bash
+      run: npx playwright install --with-deps ${{ inputs.playwright-browsers }}
+
+    - name: Run tests
+      id: tests
+      shell: bash
+      run: |
+        if ${{ inputs.package-manager }} run ${{ inputs.test-script }}; then
+          echo "passed=true" >> "$GITHUB_OUTPUT"
+        else
+          echo "passed=false" >> "$GITHUB_OUTPUT"
+          exit 1
+        fi
+
+    - name: Upload coverage to Codecov
+      if: inputs.upload-coverage == 'true'
+      uses: codecov/codecov-action@v5
+      with:
+        flags: unittests
+        token: ${{ inputs.codecov-token }}
+        fail_ci_if_error: false
+
+    - name: Upload test artifacts
+      uses: actions/upload-artifact@v6
+      if: always()
+      with:
+        name: node-test-results
+        path: |
+          coverage/
+          playwright-report/
+        retention-days: 7
