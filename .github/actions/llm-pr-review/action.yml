@@ -1,0 +1,370 @@
+name: "LLM PR Review"
+description: "AI-powered PR review using local LLM (llama.cpp OpenAI-compatible endpoint)"
+
+inputs:
+  llm-base-url:
+    description: "OpenAI-compatible LLM endpoint"
+    required: false
+    default: "http://llama-cpp-dual.mlops.svc:8080/v1"
+  llm-api-key:
+    description: "API key for the LLM endpoint (llama.cpp accepts any non-empty value)"
+    required: false
+    default: "not-needed"
+  llm-model:
+    description: "Model name or alias (qwen35, nemo3)"
+    required: false
+    default: "qwen35"
+  github-token:
+    description: "GitHub token with pull-requests:write permission"
+    required: true
+  max-diff-chars:
+    description: "Maximum diff size in characters before skipping review"
+    required: false
+    default: "60000"
+  exclude-patterns:
+    description: "File glob patterns to exclude from diff (one per line)"
+    required: false
+    default: |
+      *.lock
+      *.sum
+      *.min.js
+      *.min.css
+      package-lock.json
+      yarn.lock
+      go.sum
+      pnpm-lock.yaml
+      *.generated.*
+      *.pb.go
+  temperature:
+    description: "LLM temperature (lower = more deterministic)"
+    required: false
+    default: "0.3"
+  max-tokens:
+    description: "Maximum response tokens"
+    required: false
+    default: "4000"
+  timeout:
+    description: "LLM request timeout in seconds"
+    required: false
+    default: "300"
+
+outputs:
+  review-posted:
+    description: "Whether a review comment was posted"
+    value: ${{ steps.post-review.outputs.posted }}
+  review-score:
+    description: "Overall review score (1-10)"
+    value: ${{ steps.parse-review.outputs.score }}
+  issues-found:
+    description: "Number of issues found"
+    value: ${{ steps.parse-review.outputs.issues_count }}
+  review-summary:
+    description: "Brief summary of the review"
+    value: ${{ steps.parse-review.outputs.summary }}
+  skipped:
+    description: "Whether the review was skipped"
+    value: ${{ steps.check-diff.outputs.skip }}
+  skip-reason:
+    description: "Reason for skipping (if applicable)"
+    value: ${{ steps.check-diff.outputs.skip_reason }}
+
+runs:
+  using: "composite"
+  steps:
+    # ── Step 1: Health check the LLM endpoint ──
+    - name: Check LLM endpoint health
+      id: health
+      shell: bash
+      run: |
+        echo "::group::LLM Health Check"
+        BASE="${{ inputs.llm-base-url }}"
+        # Try /health (llama.cpp native)
+        HEALTH_URL="${BASE%/v1}/health"
+        HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" --max-time 10 "$HEALTH_URL" 2>/dev/null || echo "000")
+
+        if [ "$HTTP_CODE" != "200" ]; then
+          # Fallback: try /v1/models
+          HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" --max-time 10 "${BASE}/models" 2>/dev/null || echo "000")
+        fi
+
+        if [ "$HTTP_CODE" = "200" ]; then
+          echo "status=healthy" >> "$GITHUB_OUTPUT"
+          echo "LLM endpoint is healthy"
+        else
+          echo "status=unhealthy" >> "$GITHUB_OUTPUT"
+          echo "::warning::LLM endpoint returned HTTP $HTTP_CODE - review will be skipped"
+        fi
+        echo "::endgroup::"
+
+    # ── Step 2: Extract and filter PR diff ──
+    - name: Extract PR diff
+      id: check-diff
+      shell: bash
+      run: |
+        echo "::group::Extract PR Diff"
+
+        if [ "${{ steps.health.outputs.status }}" != "healthy" ]; then
+          echo "skip=true" >> "$GITHUB_OUTPUT"
+          echo "skip_reason=LLM endpoint is not reachable" >> "$GITHUB_OUTPUT"
+          echo "::endgroup::"
+          exit 0
+        fi
+
+        BASE_SHA="${{ github.event.pull_request.base.sha }}"
+        HEAD_SHA="${{ github.event.pull_request.head.sha }}"
+
+        # Build pathspec exclusions
+        PATHSPEC_ARGS=""
+        while IFS= read -r pattern; do
+          pattern=$(echo "$pattern" | xargs)
+          [ -z "$pattern" ] && continue
+          PATHSPEC_ARGS="$PATHSPEC_ARGS ':!$pattern'"
+        done <<< "${{ inputs.exclude-patterns }}"
+
+        DIFF=$(eval git diff "$BASE_SHA...$HEAD_SHA" -- . $PATHSPEC_ARGS 2>/dev/null || true)
+
+        if [ -z "$DIFF" ]; then
+          echo "skip=true" >> "$GITHUB_OUTPUT"
+          echo "skip_reason=No relevant changes found in diff" >> "$GITHUB_OUTPUT"
+          echo "::endgroup::"
+          exit 0
+        fi
+
+        DIFF_SIZE=${#DIFF}
+        echo "Diff size: $DIFF_SIZE characters"
+
+        if [ "$DIFF_SIZE" -gt "${{ inputs.max-diff-chars }}" ]; then
+          echo "skip=true" >> "$GITHUB_OUTPUT"
+          echo "skip_reason=Diff too large (${DIFF_SIZE} chars, limit: ${{ inputs.max-diff-chars }})" >> "$GITHUB_OUTPUT"
+          echo "::warning::Skipping AI review: diff too large"
+          echo "::endgroup::"
+          exit 0
+        fi
+
+        echo "skip=false" >> "$GITHUB_OUTPUT"
+        echo "$DIFF" > /tmp/pr-diff.patch
+        echo "diff_size=$DIFF_SIZE" >> "$GITHUB_OUTPUT"
+        echo "::endgroup::"
+
+    # ── Step 3: Call LLM for review ──
+    - name: Call LLM for review
+      id: llm-call
+      if: steps.check-diff.outputs.skip != 'true'
+      shell: bash
+      run: |
+        echo "::group::LLM Review"
+
+        PR_TITLE="${{ github.event.pull_request.title }}"
+        DIFF_CONTENT=$(cat /tmp/pr-diff.patch)
+
+        # Build JSON payload with jq (handles all escaping safely)
+        PAYLOAD=$(jq -n \
+          --arg model "${{ inputs.llm-model }}" \
+          --arg pr_title "$PR_TITLE" \
+          --arg pr_body "${{ github.event.pull_request.body }}" \
+          --arg diff "$DIFF_CONTENT" \
+          --argjson temp ${{ inputs.temperature }} \
+          --argjson max_tokens ${{ inputs.max-tokens }} \
+          '{
+            model: $model,
+            messages: [
+              {
+                role: "system",
+                content: "You are an expert code reviewer. Review the pull request diff and provide constructive, actionable feedback.\n\nFocus on:\n- Security vulnerabilities (injection, credential exposure, auth bypasses)\n- Bugs and logic errors\n- Error handling gaps\n- Code conventions and readability\n- Obvious performance problems\n\nRules:\n- Be concise and specific - reference file names and line context\n- Classify each issue as critical, warning, or suggestion\n- If the code is good, say so - do not invent issues\n- Ignore style preferences unless they harm readability\n- Do not review generated, vendored, or lock files\n- Score from 1 (critical issues blocking merge) to 10 (excellent, no issues)"
+              },
+              {
+                role: "user",
+                content: ("Review this pull request.\n\nTitle: " + $pr_title + "\nDescription: " + ($pr_body // "No description") + "\n\nDiff:\n```diff\n" + $diff + "\n```\n\nRespond with a JSON object matching the required schema.")
+              }
+            ],
+            temperature: $temp,
+            max_tokens: $max_tokens,
+            response_format: {
+              type: "json_schema",
+              json_schema: {
+                name: "code_review",
+                strict: true,
+                schema: {
+                  type: "object",
+                  properties: {
+                    summary: {type: "string", description: "2-3 sentence overview of the changes and their quality"},
+                    score: {type: "integer", description: "Quality score from 1 to 10"},
+                    issues: {
+                      type: "array",
+                      items: {
+                        type: "object",
+                        properties: {
+                          severity: {type: "string", enum: ["critical", "warning", "suggestion"]},
+                          file: {type: "string"},
+                          description: {type: "string"}
+                        },
+                        required: ["severity", "file", "description"],
+                        additionalProperties: false
+                      }
+                    },
+                    approved: {type: "boolean", description: "true if no critical or warning issues found"}
+                  },
+                  required: ["summary", "score", "issues", "approved"],
+                  additionalProperties: false
+                }
+              }
+            }
+          }')
+
+        # Call LLM with retry
+        RESPONSE=""
+        for attempt in 1 2 3; do
+          RESPONSE=$(curl -s --max-time "${{ inputs.timeout }}" \
+            "${{ inputs.llm-base-url }}/chat/completions" \
+            -H "Content-Type: application/json" \
+            -H "Authorization: Bearer ${{ inputs.llm-api-key }}" \
+            -d "$PAYLOAD" 2>/dev/null) && break
+          echo "Attempt $attempt failed, retrying in $((attempt * 5))s..."
+          sleep $((attempt * 5))
+        done
+
+        if [ -z "$RESPONSE" ]; then
+          echo "error=true" >> "$GITHUB_OUTPUT"
+          echo "::error::LLM call failed after 3 attempts"
+          echo "::endgroup::"
+          exit 0
+        fi
+
+        # Extract content from OpenAI response format
+        CONTENT=$(echo "$RESPONSE" | jq -r '.choices[0].message.content // empty')
+        if [ -z "$CONTENT" ]; then
+          echo "error=true" >> "$GITHUB_OUTPUT"
+          echo "::error::LLM response has no content"
+          echo "$RESPONSE" | jq . 2>/dev/null || echo "$RESPONSE"
+          echo "::endgroup::"
+          exit 0
+        fi
+
+        echo "$CONTENT" > /tmp/review-content.json
+        echo "error=false" >> "$GITHUB_OUTPUT"
+
+        # Log token usage
+        PROMPT_TOKENS=$(echo "$RESPONSE" | jq -r '.usage.prompt_tokens // "?"')
+        COMPLETION_TOKENS=$(echo "$RESPONSE" | jq -r '.usage.completion_tokens // "?"')
+        echo "Tokens: prompt=$PROMPT_TOKENS completion=$COMPLETION_TOKENS"
+        echo "::endgroup::"
+
+    # ── Step 4: Parse structured review ──
+    - name: Parse review output
+      id: parse-review
+      if: steps.check-diff.outputs.skip != 'true' && steps.llm-call.outputs.error != 'true'
+      shell: bash
+      run: |
+        REVIEW=$(cat /tmp/review-content.json)
+
+        SUMMARY=$(echo "$REVIEW" | jq -r '.summary // "Review completed"')
+        SCORE=$(echo "$REVIEW" | jq -r '.score // 0')
+        APPROVED=$(echo "$REVIEW" | jq -r '.approved // false')
+        ISSUES_COUNT=$(echo "$REVIEW" | jq -r '.issues | length')
+
+        echo "summary<<EOFSUM" >> "$GITHUB_OUTPUT"
+        echo "$SUMMARY" >> "$GITHUB_OUTPUT"
+        echo "EOFSUM" >> "$GITHUB_OUTPUT"
+        echo "score=$SCORE" >> "$GITHUB_OUTPUT"
+        echo "approved=$APPROVED" >> "$GITHUB_OUTPUT"
+        echo "issues_count=$ISSUES_COUNT" >> "$GITHUB_OUTPUT"
+
+    # ── Step 5: Format and post review comment ──
+    - name: Post review comment
+      id: post-review
+      if: steps.check-diff.outputs.skip != 'true' && steps.llm-call.outputs.error != 'true'
+      uses: actions/github-script@v7
+      with:
+        github-token: ${{ inputs.github-token }}
+        script: |
+          const fs = require('fs');
+
+          let review;
+          try {
+            review = JSON.parse(fs.readFileSync('/tmp/review-content.json', 'utf8'));
+          } catch (e) {
+            core.warning('Failed to parse review JSON: ' + e.message);
+            core.setOutput('posted', 'false');
+            return;
+          }
+
+          const score = review.score || 0;
+          const emoji = score >= 8 ? '\u2705' : score >= 5 ? '\u26a0\ufe0f' : '\ud83d\udea8';
+          const status = review.approved ? 'Approved' : 'Changes suggested';
+
+          let body = `## ${emoji} AI Code Review\n\n`;
+          body += `**Score**: ${score}/10 | **Status**: ${status}\n\n`;
+          body += `### Summary\n${review.summary}\n\n`;
+
+          if (review.issues && review.issues.length > 0) {
+            body += `### Issues Found (${review.issues.length})\n\n`;
+
+            const grouped = { critical: [], warning: [], suggestion: [] };
+            for (const issue of review.issues) {
+              const sev = issue.severity || 'suggestion';
+              if (!grouped[sev]) grouped[sev] = [];
+              grouped[sev].push(issue);
+            }
+
+            const sevEmoji = { critical: '\ud83d\udd34', warning: '\ud83d\udfe1', suggestion: '\ud83d\udd35' };
+            for (const [sev, issues] of Object.entries(grouped)) {
+              if (issues.length === 0) continue;
+              const label = sev.charAt(0).toUpperCase() + sev.slice(1);
+              body += `#### ${sevEmoji[sev]} ${label} (${issues.length})\n`;
+              for (const issue of issues) {
+                body += `- **\`${issue.file}\`**: ${issue.description}\n`;
+              }
+              body += '\n';
+            }
+          } else {
+            body += `### No Issues Found\nThe code looks good! No significant issues detected.\n\n`;
+          }
+
+          body += `---\n`;
+          body += `<sub>Reviewed by ${process.env.LLM_MODEL} via llama.cpp | `;
+          body += `Diff: ${process.env.DIFF_SIZE || '?'} chars</sub>`;
+
+          await github.rest.issues.createComment({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            issue_number: context.issue.number,
+            body: body
+          });
+
+          core.setOutput('posted', 'true');
+      env:
+        DIFF_SIZE: ${{ steps.check-diff.outputs.diff_size }}
+        LLM_MODEL: ${{ inputs.llm-model }}
+
+    # ── Step 6: Post skip notification ──
+    - name: Post skip notification
+      if: steps.check-diff.outputs.skip == 'true'
+      uses: actions/github-script@v7
+      with:
+        github-token: ${{ inputs.github-token }}
+        script: |
+          await github.rest.issues.createComment({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            issue_number: context.issue.number,
+            body: `## \u23ed\ufe0f AI Review Skipped\n\n**Reason**: ${{ steps.check-diff.outputs.skip_reason }}\n\n<sub>llama.cpp AI reviewer</sub>`
+          });
+      continue-on-error: true
+
+    # ── Step 7: Summary ──
+    - name: Create step summary
+      if: always()
+      shell: bash
+      run: |
+        cat >> "$GITHUB_STEP_SUMMARY" << 'EOF'
+        ## AI PR Review
+
+        | Metric | Value |
+        |--------|-------|
+        | **Skipped** | ${{ steps.check-diff.outputs.skip || 'false' }} |
+        | **Score** | ${{ steps.parse-review.outputs.score || 'N/A' }}/10 |
+        | **Issues** | ${{ steps.parse-review.outputs.issues_count || 'N/A' }} |
+        | **Approved** | ${{ steps.parse-review.outputs.approved || 'N/A' }} |
+        | **Diff Size** | ${{ steps.check-diff.outputs.diff_size || 'N/A' }} chars |
+        | **Model** | ${{ inputs.llm-model }} |
+        EOF

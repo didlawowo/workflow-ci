@@ -1,0 +1,54 @@
+# =============================================================================
+# AI Review - Local LLM PR Review (llama.cpp)
+# =============================================================================
+# Trigger: Add label "ai-review" to the PR
+# Requires: LLM endpoint accessible from runner (cluster-internal by default)
+#
+# Configuration:
+#   - RUNNER: Your runner label (default: ubuntu-latest)
+#   - LLM_BASE_URL: Override for external endpoint or different model port
+#   - LLM_MODEL: qwen35 (default) or nemo3 (faster, less accurate)
+#
+# For Nemotron-Nano-9B, change:
+#   LLM_BASE_URL: "http://llama-cpp-dual.mlops.svc:8081/v1"
+#   LLM_MODEL: "nemo3"
+# =============================================================================
+
+name: AI Review
+
+permissions:
+  pull-requests: write
+  contents: read
+
+on:
+  pull_request:
+    types: [labeled]
+
+# ─────────────────────────────────────────────────────────────────────────────
+# PROJECT CONFIGURATION - edit these for your project
+# ─────────────────────────────────────────────────────────────────────────────
+env:
+  RUNNER: "ubuntu-latest"
+  LLM_BASE_URL: "http://llama-cpp-dual.mlops.svc:8080/v1"
+  LLM_MODEL: "qwen35"
+
+jobs:
+  ai-review:
+    name: AI PR Review
+    if: github.event.label.name == 'ai-review'
+    runs-on: ${{ vars.RUNNER || 'ubuntu-latest' }}
+    permissions:
+      pull-requests: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+
+      - name: AI Review
+        uses: didlawowo/workflow-ci/.github/actions/llm-pr-review@main
+        with:
+          llm-base-url: ${{ env.LLM_BASE_URL }}
+          llm-model: ${{ env.LLM_MODEL }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}

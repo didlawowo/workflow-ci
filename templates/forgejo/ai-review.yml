@@ -1,0 +1,273 @@
+# =============================================================================
+# AI Review - Forgejo Actions (llama.cpp)
+# =============================================================================
+# Trigger: Add label "ai-review" to the PR
+# Endpoint: Uses external llama.cpp endpoint (DinD cannot reach cluster DNS)
+#
+# Configuration:
+#   - LLM_BASE_URL: Override via repository variable or edit below
+#   - LLM_MODEL: qwen35 (default) or nemo3 (faster, less accurate)
+#
+# No secrets required (llama.cpp does not need auth)
+# =============================================================================
+
+name: AI Review
+
+on:
+  pull_request:
+    types: [labeled]
+
+env:
+  LLM_BASE_URL: "https://qwen35.dc-tech.work/v1"
+  LLM_MODEL: "qwen35"
+  MAX_DIFF_CHARS: "60000"
+  LLM_TIMEOUT: "300"
+
+jobs:
+  ai-review:
+    if: github.event.label.name == 'ai-review'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check LLM endpoint health
+        id: health
+        run: |
+          BASE="${{ env.LLM_BASE_URL }}"
+          HEALTH_URL="${BASE%/v1}/health"
+          HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" --max-time 10 "$HEALTH_URL" 2>/dev/null || echo "000")
+
+          if [ "$HTTP_CODE" != "200" ]; then
+            HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" --max-time 10 "${BASE}/models" 2>/dev/null || echo "000")
+          fi
+
+          if [ "$HTTP_CODE" = "200" ]; then
+            echo "status=healthy" >> "$GITHUB_OUTPUT"
+          else
+            echo "status=unhealthy" >> "$GITHUB_OUTPUT"
+            echo "::warning::LLM endpoint returned HTTP $HTTP_CODE"
+          fi
+
+      - name: Get PR metadata
+        id: pr
+        run: |
+          PR_NUMBER="${{ github.event.pull_request.number }}"
+          FORGEJO_URL="${{ github.server_url }}"
+          REPO="${{ github.repository }}"
+
+          PR_DATA=$(curl -s "${FORGEJO_URL}/api/v1/repos/${REPO}/pulls/${PR_NUMBER}" \
+            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}")
+
+          echo "number=$PR_NUMBER" >> "$GITHUB_OUTPUT"
+          echo "title=$(echo "$PR_DATA" | jq -r '.title')" >> "$GITHUB_OUTPUT"
+          echo "base_sha=$(echo "$PR_DATA" | jq -r '.base.sha')" >> "$GITHUB_OUTPUT"
+          echo "head_sha=$(echo "$PR_DATA" | jq -r '.head.sha')" >> "$GITHUB_OUTPUT"
+
+          # Save body to file (may contain special chars)
+          echo "$PR_DATA" | jq -r '.body // ""' > /tmp/pr-body.txt
+
+      - name: Extract and filter diff
+        id: diff
+        run: |
+          if [ "${{ steps.health.outputs.status }}" != "healthy" ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "reason=LLM endpoint is not reachable" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          DIFF=$(git diff ${{ steps.pr.outputs.base_sha }}...${{ steps.pr.outputs.head_sha }} \
+            -- . \
+            ':!*.lock' ':!*.sum' ':!*.min.js' ':!*.min.css' \
+            ':!package-lock.json' ':!yarn.lock' ':!go.sum' ':!pnpm-lock.yaml' \
+            ':!*.generated.*' ':!*.pb.go' \
+            2>/dev/null || true)
+
+          if [ -z "$DIFF" ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "reason=No relevant changes found in diff" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          DIFF_SIZE=${#DIFF}
+          if [ "$DIFF_SIZE" -gt "${{ env.MAX_DIFF_CHARS }}" ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "reason=Diff too large (${DIFF_SIZE} chars, limit: ${{ env.MAX_DIFF_CHARS }})" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "$DIFF" > /tmp/pr-diff.patch
+          echo "skip=false" >> "$GITHUB_OUTPUT"
+          echo "size=$DIFF_SIZE" >> "$GITHUB_OUTPUT"
+
+      - name: Call LLM for review
+        id: review
+        if: steps.diff.outputs.skip != 'true'
+        run: |
+          PR_TITLE="${{ steps.pr.outputs.title }}"
+          PR_BODY=$(cat /tmp/pr-body.txt)
+          DIFF_CONTENT=$(cat /tmp/pr-diff.patch)
+
+          PAYLOAD=$(jq -n \
+            --arg model "${{ env.LLM_MODEL }}" \
+            --arg pr_title "$PR_TITLE" \
+            --arg pr_body "$PR_BODY" \
+            --arg diff "$DIFF_CONTENT" \
+            '{
+              model: $model,
+              messages: [
+                {
+                  role: "system",
+                  content: "You are an expert code reviewer. Review the pull request diff and provide constructive, actionable feedback.\n\nFocus on:\n- Security vulnerabilities (injection, credential exposure, auth bypasses)\n- Bugs and logic errors\n- Error handling gaps\n- Code conventions and readability\n- Obvious performance problems\n\nRules:\n- Be concise and specific - reference file names and line context\n- Classify each issue as critical, warning, or suggestion\n- If the code is good, say so - do not invent issues\n- Ignore style preferences unless they harm readability\n- Do not review generated, vendored, or lock files\n- Score from 1 (critical issues blocking merge) to 10 (excellent, no issues)"
+                },
+                {
+                  role: "user",
+                  content: ("Review this pull request.\n\nTitle: " + $pr_title + "\nDescription: " + ($pr_body // "No description") + "\n\nDiff:\n```diff\n" + $diff + "\n```\n\nRespond with a JSON object matching the required schema.")
+                }
+              ],
+              temperature: 0.3,
+              max_tokens: 4000,
+              response_format: {
+                type: "json_schema",
+                json_schema: {
+                  name: "code_review",
+                  strict: true,
+                  schema: {
+                    type: "object",
+                    properties: {
+                      summary: {type: "string", description: "2-3 sentence overview of the changes and their quality"},
+                      score: {type: "integer", description: "Quality score from 1 to 10"},
+                      issues: {
+                        type: "array",
+                        items: {
+                          type: "object",
+                          properties: {
+                            severity: {type: "string", enum: ["critical", "warning", "suggestion"]},
+                            file: {type: "string"},
+                            description: {type: "string"}
+                          },
+                          required: ["severity", "file", "description"],
+                          additionalProperties: false
+                        }
+                      },
+                      approved: {type: "boolean", description: "true if no critical or warning issues found"}
+                    },
+                    required: ["summary", "score", "issues", "approved"],
+                    additionalProperties: false
+                  }
+                }
+              }
+            }')
+
+          # Call LLM with retry
+          RESPONSE=""
+          for attempt in 1 2 3; do
+            RESPONSE=$(curl -s --max-time "${{ env.LLM_TIMEOUT }}" \
+              "${{ env.LLM_BASE_URL }}/chat/completions" \
+              -H "Content-Type: application/json" \
+              -H "Authorization: Bearer not-needed" \
+              -d "$PAYLOAD" 2>/dev/null) && break
+            echo "Attempt $attempt failed, retrying..."
+            sleep $((attempt * 5))
+          done
+
+          if [ -z "$RESPONSE" ]; then
+            echo "error=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          CONTENT=$(echo "$RESPONSE" | jq -r '.choices[0].message.content // empty')
+          if [ -z "$CONTENT" ]; then
+            echo "error=true" >> "$GITHUB_OUTPUT"
+            echo "LLM response error:"
+            echo "$RESPONSE" | jq . 2>/dev/null || echo "$RESPONSE"
+            exit 0
+          fi
+
+          echo "$CONTENT" > /tmp/review.json
+          echo "error=false" >> "$GITHUB_OUTPUT"
+
+      - name: Post review comment
+        if: steps.diff.outputs.skip != 'true' && steps.review.outputs.error != 'true'
+        run: |
+          REVIEW=$(cat /tmp/review.json)
+          SUMMARY=$(echo "$REVIEW" | jq -r '.summary // "Review completed"')
+          SCORE=$(echo "$REVIEW" | jq -r '.score // 0')
+          APPROVED=$(echo "$REVIEW" | jq -r '.approved // false')
+          ISSUES=$(echo "$REVIEW" | jq -r '.issues // []')
+          ISSUES_COUNT=$(echo "$ISSUES" | jq -r 'length')
+
+          # Determine status emoji
+          if [ "$SCORE" -ge 8 ]; then EMOJI="✅"; elif [ "$SCORE" -ge 5 ]; then EMOJI="⚠️"; else EMOJI="🚨"; fi
+          if [ "$APPROVED" = "true" ]; then STATUS="Approved"; else STATUS="Changes suggested"; fi
+
+          # Build markdown body
+          {
+            echo "## ${EMOJI} AI Code Review"
+            echo ""
+            echo "**Score**: ${SCORE}/10 | **Status**: ${STATUS}"
+            echo ""
+            echo "### Summary"
+            echo "${SUMMARY}"
+            echo ""
+
+            if [ "$ISSUES_COUNT" -gt 0 ]; then
+              echo "### Issues Found (${ISSUES_COUNT})"
+              echo ""
+
+              for sev in critical warning suggestion; do
+                case "$sev" in
+                  critical) sev_emoji="🔴"; sev_label="Critical" ;;
+                  warning)  sev_emoji="🟡"; sev_label="Warning" ;;
+                  *)        sev_emoji="🔵"; sev_label="Suggestion" ;;
+                esac
+
+                SEV_COUNT=$(echo "$ISSUES" | jq -r --arg s "$sev" '[.[] | select(.severity == $s)] | length')
+                if [ "$SEV_COUNT" -gt 0 ]; then
+                  echo "#### ${sev_emoji} ${sev_label} (${SEV_COUNT})"
+                  echo "$ISSUES" | jq -r --arg s "$sev" '.[] | select(.severity == $s) | "- **`\(.file)`**: \(.description)"'
+                  echo ""
+                fi
+              done
+            else
+              echo "### No Issues Found"
+              echo "The code looks good! No significant issues detected."
+              echo ""
+            fi
+
+            echo "---"
+            echo "<sub>Reviewed by ${{ env.LLM_MODEL }} via llama.cpp | Diff: ${{ steps.diff.outputs.size }} chars</sub>"
+          } > /tmp/comment-body.md
+
+          # Post to Forgejo API
+          FORGEJO_URL="${{ github.server_url }}"
+          REPO="${{ github.repository }}"
+          PR_NUMBER="${{ steps.pr.outputs.number }}"
+
+          COMMENT_BODY=$(cat /tmp/comment-body.md)
+          COMMENT_PAYLOAD=$(jq -n --arg body "$COMMENT_BODY" '{body: $body}')
+
+          curl -s -X POST \
+            "${FORGEJO_URL}/api/v1/repos/${REPO}/issues/${PR_NUMBER}/comments" \
+            -H "Content-Type: application/json" \
+            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+            -d "$COMMENT_PAYLOAD"
+
+      - name: Post skip notification
+        if: steps.diff.outputs.skip == 'true'
+        run: |
+          FORGEJO_URL="${{ github.server_url }}"
+          REPO="${{ github.repository }}"
+          PR_NUMBER="${{ steps.pr.outputs.number }}"
+
+          COMMENT_PAYLOAD=$(jq -n \
+            --arg reason "${{ steps.diff.outputs.reason }}" \
+            '{body: ("## ⏭️ AI Review Skipped\n\n**Reason**: " + $reason + "\n\n<sub>llama.cpp AI reviewer</sub>")}')
+
+          curl -s -X POST \
+            "${FORGEJO_URL}/api/v1/repos/${REPO}/issues/${PR_NUMBER}/comments" \
+            -H "Content-Type: application/json" \
+            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+            -d "$COMMENT_PAYLOAD"
+        continue-on-error: true
