@@ -59,7 +59,7 @@ inputs:
   max-tokens:
     description: "Maximum response tokens"
     required: false
-    default: "16000"
+    default: "4000"
   timeout:
     description: "LLM request timeout in seconds"
     required: false
@@ -266,7 +266,6 @@ runs:
 
         # Build user prompt parts as files (avoid shell interpolation issues)
         {
-          echo "/no_think"
           echo "Review this pull request."
           echo ""
           echo "Title: ${PR_TITLE}"
