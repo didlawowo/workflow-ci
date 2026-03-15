@@ -59,7 +59,7 @@ inputs:
   max-tokens:
     description: "Maximum response tokens"
     required: false
-    default: "4000"
+    default: "8000"
   timeout:
     description: "LLM request timeout in seconds"
     required: false
@@ -235,6 +235,26 @@ runs:
         - 1-2: Critical vulnerabilities or broken logic
 
         If the code is good, say so. A score of 9-10 with zero issues is a perfectly valid review. Do not invent issues to justify a lower score.
+
+        ## Required JSON output format
+        You MUST respond with a single JSON object (no markdown, no explanation, just JSON) with this exact structure:
+        {
+          "summary": "2-3 sentence overview of the changes and their quality",
+          "score": 7,
+          "issues": [
+            {
+              "severity": "critical|warning|suggestion",
+              "file": "path/to/file.py",
+              "description": "What the issue is and why it matters",
+              "confidence": 9
+            }
+          ],
+          "approved": true
+        }
+        - severity: "critical" (must fix), "warning" (should fix), "suggestion" (nice to fix)
+        - confidence: 1-10, only include issues with confidence >= 8
+        - approved: true if no critical or warning issues
+        - If no issues found, use an empty array: "issues": []
         SYSTEMPROMPT
 
         # Append project-specific context if available
@@ -248,7 +268,7 @@ runs:
         printf '%s' "Review this pull request." > /tmp/user-prompt.txt
         printf '\n\nTitle: %s' "$PR_TITLE" >> /tmp/user-prompt.txt
         printf '\nDescription: %s' "${{ github.event.pull_request.body }}" >> /tmp/user-prompt.txt
-        printf '\n\nRespond with a JSON object matching the required schema. Remember: only report issues with confidence >= 8.' >> /tmp/user-prompt.txt
+        printf '\n\nRespond ONLY with the JSON object. No thinking, no explanation, no markdown wrapping. Just the raw JSON.' >> /tmp/user-prompt.txt
 
         # Build JSON payload with jq using --rawfile (write to file to preserve escaping)
         jq -n \
@@ -272,76 +292,65 @@ runs:
             ],
             temperature: $temp,
             max_tokens: $max_tokens,
-            response_format: {
-              type: "json_schema",
-              json_schema: {
-                name: "code_review",
-                strict: true,
-                schema: {
-                  type: "object",
-                  properties: {
-                    summary: {type: "string", description: "2-3 sentence overview of the changes and their quality"},
-                    score: {type: "integer", description: "Quality score from 1 to 10"},
-                    issues: {
-                      type: "array",
-                      items: {
-                        type: "object",
-                        properties: {
-                          severity: {type: "string", enum: ["critical", "warning", "suggestion"]},
-                          file: {type: "string"},
-                          description: {type: "string"},
-                          confidence: {type: "integer", description: "Confidence score from 1 to 10"}
-                        },
-                        required: ["severity", "file", "description", "confidence"],
-                        additionalProperties: false
-                      }
-                    },
-                    approved: {type: "boolean", description: "true if no critical or warning issues found"}
-                  },
-                  required: ["summary", "score", "issues", "approved"],
-                  additionalProperties: false
-                }
-              }
-            }
+            response_format: { type: "json_object" }
           }' > /tmp/llm-payload.json
 
         echo "Payload size: $(wc -c < /tmp/llm-payload.json) bytes"
 
-        # Call LLM with retry (use @file to avoid bash re-interpreting JSON escapes)
-        RESPONSE=""
+        # Call LLM with retry (use @file for both request and response)
         for attempt in 1 2 3; do
-          RESPONSE=$(curl -s --max-time "${{ inputs.timeout }}" \
+          HTTP_CODE=$(curl -s -o /tmp/llm-response.json -w "%{http_code}" \
+            --max-time "${{ inputs.timeout }}" \
             "${{ inputs.llm-base-url }}/chat/completions" \
             -H "Content-Type: application/json" \
             -H "Authorization: Bearer ${{ inputs.llm-api-key }}" \
-            -d @/tmp/llm-payload.json 2>/dev/null) && break
-          echo "Attempt $attempt failed, retrying in $((attempt * 5))s..."
+            -d @/tmp/llm-payload.json 2>/dev/null)
+          [ "$HTTP_CODE" = "200" ] && break
+          echo "Attempt $attempt failed (HTTP $HTTP_CODE), retrying in $((attempt * 5))s..."
           sleep $((attempt * 5))
         done
 
-        if [ -z "$RESPONSE" ]; then
+        if [ "$HTTP_CODE" != "200" ]; then
           echo "error=true" >> "$GITHUB_OUTPUT"
-          echo "::error::LLM call failed after 3 attempts"
+          echo "::error::LLM call failed after 3 attempts (HTTP $HTTP_CODE)"
+          cat /tmp/llm-response.json 2>/dev/null || true
           echo "::endgroup::"
           exit 0
         fi
 
-        # Extract content from OpenAI response format
-        CONTENT=$(echo "$RESPONSE" | jq -r '.choices[0].message.content // empty')
+        # Extract content — handle both standard and thinking models
+        # Thinking models (Qwen3, etc.) put reasoning in reasoning_content and answer in content
+        CONTENT=$(jq -r '.choices[0].message.content // empty' /tmp/llm-response.json)
         if [ -z "$CONTENT" ]; then
           echo "error=true" >> "$GITHUB_OUTPUT"
           echo "::error::LLM response has no content"
-          echo "$RESPONSE" | jq . 2>/dev/null || echo "$RESPONSE"
+          jq . /tmp/llm-response.json 2>/dev/null || cat /tmp/llm-response.json
           echo "::endgroup::"
           exit 0
         fi
 
-        echo "$CONTENT" > /tmp/review-content.json
+        # Extract JSON from content (model may wrap in markdown ```json blocks)
+        CLEAN_JSON=$(echo "$CONTENT" | sed -n '/^```json/,/^```$/p' | sed '1d;$d')
+        if [ -z "$CLEAN_JSON" ]; then
+          # No markdown wrapping, try content directly
+          CLEAN_JSON="$CONTENT"
+        fi
+
+        # Validate JSON
+        if ! echo "$CLEAN_JSON" | jq empty 2>/dev/null; then
+          echo "error=true" >> "$GITHUB_OUTPUT"
+          echo "::error::LLM returned invalid JSON"
+          echo "$CONTENT" | head -20
+          echo "::endgroup::"
+          exit 0
+        fi
+
+        echo "$CLEAN_JSON" > /tmp/review-content.json
         echo "error=false" >> "$GITHUB_OUTPUT"
 
         # Log token usage
-        PROMPT_TOKENS=$(echo "$RESPONSE" | jq -r '.usage.prompt_tokens // "?"')
-        COMPLETION_TOKENS=$(echo "$RESPONSE" | jq -r '.usage.completion_tokens // "?"')
+        PROMPT_TOKENS=$(jq -r '.usage.prompt_tokens // "?"' /tmp/llm-response.json)
+        COMPLETION_TOKENS=$(jq -r '.usage.completion_tokens // "?"' /tmp/llm-response.json)
         echo "Tokens: prompt=$PROMPT_TOKENS completion=$COMPLETION_TOKENS"
         echo "::endgroup::"
 
