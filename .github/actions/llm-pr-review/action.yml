@@ -250,8 +250,8 @@ runs:
         printf '\nDescription: %s' "${{ github.event.pull_request.body }}" >> /tmp/user-prompt.txt
         printf '\n\nRespond with a JSON object matching the required schema. Remember: only report issues with confidence >= 8.' >> /tmp/user-prompt.txt
 
-        # Build JSON payload with jq using --rawfile to avoid escaping issues
-        PAYLOAD=$(jq -n \
+        # Build JSON payload with jq using --rawfile (write to file to preserve escaping)
+        jq -n \
           --arg model "${{ inputs.llm-model }}" \
           --rawfile system_prompt /tmp/system-prompt.txt \
           --rawfile user_prompt /tmp/user-prompt.txt \
@@ -303,16 +303,18 @@ runs:
                 }
               }
             }
-          }')
+          }' > /tmp/llm-payload.json
 
-        # Call LLM with retry
+        echo "Payload size: $(wc -c < /tmp/llm-payload.json) bytes"
+
+        # Call LLM with retry (use @file to avoid bash re-interpreting JSON escapes)
         RESPONSE=""
         for attempt in 1 2 3; do
           RESPONSE=$(curl -s --max-time "${{ inputs.timeout }}" \
             "${{ inputs.llm-base-url }}/chat/completions" \
             -H "Content-Type: application/json" \
             -H "Authorization: Bearer ${{ inputs.llm-api-key }}" \
-            -d "$PAYLOAD" 2>/dev/null) && break
+            -d @/tmp/llm-payload.json 2>/dev/null) && break
           echo "Attempt $attempt failed, retrying in $((attempt * 5))s..."
           sleep $((attempt * 5))
         done
