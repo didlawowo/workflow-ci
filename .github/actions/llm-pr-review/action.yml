@@ -63,7 +63,7 @@ inputs:
   timeout:
     description: "LLM request timeout in seconds"
     required: false
-    default: "300"
+    default: "600"
 
 outputs:
   review-posted:
