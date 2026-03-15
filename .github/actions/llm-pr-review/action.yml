@@ -59,7 +59,7 @@ inputs:
   max-tokens:
     description: "Maximum response tokens"
     required: false
-    default: "8000"
+    default: "16000"
   timeout:
     description: "LLM request timeout in seconds"
     required: false
@@ -265,10 +265,13 @@ runs:
         fi
 
         # Build user prompt parts as files (avoid shell interpolation issues)
-        printf '%s' "Review this pull request." > /tmp/user-prompt.txt
-        printf '\n\nTitle: %s' "$PR_TITLE" >> /tmp/user-prompt.txt
-        printf '\nDescription: %s' "${{ github.event.pull_request.body }}" >> /tmp/user-prompt.txt
-        printf '\n\n/no_think\nRespond ONLY with the JSON object. No thinking, no explanation, no markdown wrapping. Just the raw JSON.' >> /tmp/user-prompt.txt
+        printf '%s' "/no_think
+Review this pull request.
+
+Title: ${PR_TITLE}
+Description: ${{ github.event.pull_request.body }}
+
+Respond ONLY with the JSON object. No thinking, no explanation, no markdown wrapping. Just the raw JSON." > /tmp/user-prompt.txt
 
         # Build JSON payload with jq using --rawfile (write to file to preserve escaping)
         jq -n \
