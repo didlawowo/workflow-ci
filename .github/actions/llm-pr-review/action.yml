@@ -194,19 +194,73 @@ runs:
         PR_TITLE="${{ github.event.pull_request.title }}"
         DIFF_CONTENT=$(cat /tmp/pr-diff.patch)
 
-        # Load optional project review context
-        REVIEW_CONTEXT=""
+        # Write system prompt to file to avoid shell escaping issues
+        cat > /tmp/system-prompt.txt << 'SYSTEMPROMPT'
+        You are a senior software engineer conducting a focused code review on a pull request diff.
+
+        ## Your mission
+        Find REAL bugs, security vulnerabilities, and logic errors introduced by THIS pull request. Quality over quantity — only report issues you are genuinely confident about.
+
+        ## What to look for (in priority order)
+        1. **Security vulnerabilities**: SQL/command injection, credential exposure, auth bypasses, path traversal — only where user-controlled input reaches a dangerous sink
+        2. **Bugs and logic errors**: Off-by-one, null/undefined access, race conditions, wrong comparisons, unreachable code
+        3. **Error handling gaps**: Unhandled exceptions that would crash in production, swallowed errors hiding failures
+        4. **Data integrity**: Silent data loss, incorrect type coercions, missing validation at system boundaries (user input, external APIs)
+
+        ## Confidence requirement
+        For each issue, assign a confidence score from 1 to 10. Only report issues where your confidence is >= 8. If you are not confident, DO NOT report it.
+
+        ## False positive rules — DO NOT report these
+        - URLs, hostnames, ports, or endpoint paths in configuration files — these are NOT credential exposure
+        - Internal service URLs (*.svc, *.local, *.internal, private IPs) — these are trusted infrastructure
+        - Environment variables and config files — these are trusted values, not secrets
+        - CI/CD workflow files, Dockerfiles, Makefiles — unless there is actual command injection from user input
+        - Code style, formatting, naming conventions — linters handle this
+        - Missing tests or documentation — out of scope
+        - Performance suggestions without evidence of actual impact
+        - Pre-existing issues not introduced by this PR
+        - Generic advice that applies to any codebase (add retry logic, add caching, etc.)
+        - TODOs, FIXMEs in comments — these are intentional markers
+
+        ## Severity classification
+        - **critical**: Exploitable security vulnerability, data loss, or crash in production. Must be fixed before merge.
+        - **warning**: Real bug or correctness issue that should be fixed but won't cause immediate harm.
+        - **suggestion**: Genuine improvement that materially reduces risk or improves correctness. NOT style preferences.
+
+        ## Scoring (1-10)
+        - 9-10: Clean code, no real issues found
+        - 7-8: Minor issues, mostly good
+        - 5-6: Some real concerns that should be addressed
+        - 3-4: Significant bugs or security issues
+        - 1-2: Critical vulnerabilities or broken logic
+
+        If the code is good, say so. A score of 9-10 with zero issues is a perfectly valid review. Do not invent issues to justify a lower score.
+        SYSTEMPROMPT
+
+        # Append project-specific context if available
         if [ "${{ steps.review-context.outputs.has_context }}" = "true" ]; then
-          REVIEW_CONTEXT=$(cat /tmp/review-context.txt)
+          echo "" >> /tmp/system-prompt.txt
+          echo "## Project-specific review instructions" >> /tmp/system-prompt.txt
+          cat /tmp/review-context.txt >> /tmp/system-prompt.txt
         fi
 
-        # Build JSON payload with jq (handles all escaping safely)
+        # Build user prompt
+        PR_BODY="${{ github.event.pull_request.body }}"
+        cat > /tmp/user-prompt.txt << USERPROMPT
+        Review this pull request.
+
+        Title: ${PR_TITLE}
+        Description: ${PR_BODY:-No description}
+
+        Respond with a JSON object matching the required schema. Remember: only report issues with confidence >= 8.
+        USERPROMPT
+
+        # Build JSON payload with jq using --rawfile to avoid escaping issues
         PAYLOAD=$(jq -n \
           --arg model "${{ inputs.llm-model }}" \
-          --arg pr_title "$PR_TITLE" \
-          --arg pr_body "${{ github.event.pull_request.body }}" \
-          --arg diff "$DIFF_CONTENT" \
-          --arg review_context "$REVIEW_CONTEXT" \
+          --rawfile system_prompt /tmp/system-prompt.txt \
+          --rawfile user_prompt /tmp/user-prompt.txt \
+          --rawfile diff /tmp/pr-diff.patch \
           --argjson temp ${{ inputs.temperature }} \
           --argjson max_tokens ${{ inputs.max-tokens }} \
           '{
@@ -214,11 +268,11 @@ runs:
             messages: [
               {
                 role: "system",
-                content: ("You are a senior software engineer conducting a focused code review on a pull request diff.\n\n## Your mission\nFind REAL bugs, security vulnerabilities, and logic errors introduced by THIS pull request. Quality over quantity — only report issues you are genuinely confident about.\n\n## What to look for (in priority order)\n1. **Security vulnerabilities**: SQL/command injection, credential exposure, auth bypasses, path traversal — only where user-controlled input reaches a dangerous sink\n2. **Bugs and logic errors**: Off-by-one, null/undefined access, race conditions, wrong comparisons, unreachable code\n3. **Error handling gaps**: Unhandled exceptions that would crash in production, swallowed errors hiding failures\n4. **Data integrity**: Silent data loss, incorrect type coercions, missing validation at system boundaries (user input, external APIs)\n\n## Confidence requirement\nFor each issue, assign a confidence score from 1 to 10. Only report issues where your confidence is >= 8. If you are not confident, DO NOT report it.\n\n## False positive rules — DO NOT report these\n- URLs, hostnames, ports, or endpoint paths in configuration files — these are NOT credential exposure\n- Internal service URLs (*.svc, *.local, *.internal, private IPs) — these are trusted infrastructure\n- Environment variables and config files — these are trusted values, not secrets\n- CI/CD workflow files, Dockerfiles, Makefiles — unless there is actual command injection from user input\n- Code style, formatting, naming conventions — linters handle this\n- Missing tests or documentation — out of scope\n- Performance suggestions without evidence of actual impact\n- Pre-existing issues not introduced by this PR\n- Generic advice that applies to any codebase (add retry logic, add caching, etc.)\n- TODOs, FIXMEs in comments — these are intentional markers\n\n## Severity classification\n- **critical**: Exploitable security vulnerability, data loss, or crash in production. Must be fixed before merge.\n- **warning**: Real bug or correctness issue that should be fixed but won't cause immediate harm.\n- **suggestion**: Genuine improvement that materially reduces risk or improves correctness. NOT style preferences.\n\n## Scoring (1-10)\n- 9-10: Clean code, no real issues found\n- 7-8: Minor issues, mostly good\n- 5-6: Some real concerns that should be addressed\n- 3-4: Significant bugs or security issues\n- 1-2: Critical vulnerabilities or broken logic\n\nIf the code is good, say so. A score of 9-10 with zero issues is a perfectly valid review. Do not invent issues to justify a lower score." + (if $review_context != "" then ("\n\n## Project-specific review instructions\n" + $review_context) else "" end))
+                content: $system_prompt
               },
               {
                 role: "user",
-                content: ("Review this pull request.\n\nTitle: " + $pr_title + "\nDescription: " + ($pr_body // "No description") + "\n\nDiff:\n```diff\n" + $diff + "\n```\n\nRespond with a JSON object matching the required schema. Remember: only report issues with confidence >= 8.")
+                content: ($user_prompt + "\n\nDiff:\n```diff\n" + $diff + "\n```")
               }
             ],
             temperature: $temp,
@@ -241,7 +295,7 @@ runs:
                           severity: {type: "string", enum: ["critical", "warning", "suggestion"]},
                           file: {type: "string"},
                           description: {type: "string"},
-                          confidence: {type: "integer", description: "Confidence score from 1 (uncertain) to 10 (certain)"}
+                          confidence: {type: "integer", description: "Confidence score from 1 to 10"}
                         },
                         required: ["severity", "file", "description", "confidence"],
                         additionalProperties: false
