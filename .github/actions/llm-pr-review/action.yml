@@ -20,7 +20,7 @@ inputs:
   max-diff-chars:
     description: "Maximum diff size in characters before skipping review"
     required: false
-    default: "60000"
+    default: "120000"
   exclude-patterns:
     description: "File glob patterns to exclude from diff (one per line)"
     required: false
@@ -29,16 +29,33 @@ inputs:
       *.sum
       *.min.js
       *.min.css
+      *.pdf
+      *.png
+      *.jpg
+      *.jpeg
+      *.svg
+      *.woff*
+      *.ttf
+      *.eot
       package-lock.json
       yarn.lock
       go.sum
       pnpm-lock.yaml
       *.generated.*
       *.pb.go
+      .github/**
+  review-context:
+    description: "Optional project-specific review instructions (overrides REVIEW.md)"
+    required: false
+    default: ""
+  confidence-threshold:
+    description: "Minimum confidence (1-10) to report an issue. Issues below this are filtered out."
+    required: false
+    default: "8"
   temperature:
     description: "LLM temperature (lower = more deterministic)"
     required: false
-    default: "0.3"
+    default: "0.2"
   max-tokens:
     description: "Maximum response tokens"
     required: false
@@ -96,7 +113,27 @@ runs:
         fi
         echo "::endgroup::"
 
-    # ── Step 2: Extract and filter PR diff ──
+    # ── Step 2: Load project review context (REVIEW.md) ──
+    - name: Load review context
+      id: review-context
+      shell: bash
+      run: |
+        CONTEXT=""
+        if [ -n "${{ inputs.review-context }}" ]; then
+          CONTEXT="${{ inputs.review-context }}"
+        elif [ -f "REVIEW.md" ]; then
+          CONTEXT=$(cat REVIEW.md)
+          echo "Loaded REVIEW.md from repository"
+        fi
+
+        if [ -n "$CONTEXT" ]; then
+          echo "has_context=true" >> "$GITHUB_OUTPUT"
+          echo "$CONTEXT" > /tmp/review-context.txt
+        else
+          echo "has_context=false" >> "$GITHUB_OUTPUT"
+        fi
+
+    # ── Step 3: Extract and filter PR diff ──
     - name: Extract PR diff
       id: check-diff
       shell: bash
@@ -146,7 +183,7 @@ runs:
         echo "diff_size=$DIFF_SIZE" >> "$GITHUB_OUTPUT"
         echo "::endgroup::"
 
-    # ── Step 3: Call LLM for review ──
+    # ── Step 4: Call LLM for review ──
     - name: Call LLM for review
       id: llm-call
       if: steps.check-diff.outputs.skip != 'true'
@@ -157,12 +194,19 @@ runs:
         PR_TITLE="${{ github.event.pull_request.title }}"
         DIFF_CONTENT=$(cat /tmp/pr-diff.patch)
 
+        # Load optional project review context
+        REVIEW_CONTEXT=""
+        if [ "${{ steps.review-context.outputs.has_context }}" = "true" ]; then
+          REVIEW_CONTEXT=$(cat /tmp/review-context.txt)
+        fi
+
         # Build JSON payload with jq (handles all escaping safely)
         PAYLOAD=$(jq -n \
           --arg model "${{ inputs.llm-model }}" \
           --arg pr_title "$PR_TITLE" \
           --arg pr_body "${{ github.event.pull_request.body }}" \
           --arg diff "$DIFF_CONTENT" \
+          --arg review_context "$REVIEW_CONTEXT" \
           --argjson temp ${{ inputs.temperature }} \
           --argjson max_tokens ${{ inputs.max-tokens }} \
           '{
@@ -170,11 +214,11 @@ runs:
             messages: [
               {
                 role: "system",
-                content: "You are an expert code reviewer. Review the pull request diff and provide constructive, actionable feedback.\n\nFocus on:\n- Security vulnerabilities (injection, credential exposure, auth bypasses)\n- Bugs and logic errors\n- Error handling gaps\n- Code conventions and readability\n- Obvious performance problems\n\nRules:\n- Be concise and specific - reference file names and line context\n- Classify each issue as critical, warning, or suggestion\n- If the code is good, say so - do not invent issues\n- Ignore style preferences unless they harm readability\n- Do not review generated, vendored, or lock files\n- Score from 1 (critical issues blocking merge) to 10 (excellent, no issues)"
+                content: ("You are a senior software engineer conducting a focused code review on a pull request diff.\n\n## Your mission\nFind REAL bugs, security vulnerabilities, and logic errors introduced by THIS pull request. Quality over quantity — only report issues you are genuinely confident about.\n\n## What to look for (in priority order)\n1. **Security vulnerabilities**: SQL/command injection, credential exposure, auth bypasses, path traversal — only where user-controlled input reaches a dangerous sink\n2. **Bugs and logic errors**: Off-by-one, null/undefined access, race conditions, wrong comparisons, unreachable code\n3. **Error handling gaps**: Unhandled exceptions that would crash in production, swallowed errors hiding failures\n4. **Data integrity**: Silent data loss, incorrect type coercions, missing validation at system boundaries (user input, external APIs)\n\n## Confidence requirement\nFor each issue, assign a confidence score from 1 to 10. Only report issues where your confidence is >= 8. If you are not confident, DO NOT report it.\n\n## False positive rules — DO NOT report these\n- URLs, hostnames, ports, or endpoint paths in configuration files — these are NOT credential exposure\n- Internal service URLs (*.svc, *.local, *.internal, private IPs) — these are trusted infrastructure\n- Environment variables and config files — these are trusted values, not secrets\n- CI/CD workflow files, Dockerfiles, Makefiles — unless there is actual command injection from user input\n- Code style, formatting, naming conventions — linters handle this\n- Missing tests or documentation — out of scope\n- Performance suggestions without evidence of actual impact\n- Pre-existing issues not introduced by this PR\n- Generic advice that applies to any codebase (add retry logic, add caching, etc.)\n- TODOs, FIXMEs in comments — these are intentional markers\n\n## Severity classification\n- **critical**: Exploitable security vulnerability, data loss, or crash in production. Must be fixed before merge.\n- **warning**: Real bug or correctness issue that should be fixed but won't cause immediate harm.\n- **suggestion**: Genuine improvement that materially reduces risk or improves correctness. NOT style preferences.\n\n## Scoring (1-10)\n- 9-10: Clean code, no real issues found\n- 7-8: Minor issues, mostly good\n- 5-6: Some real concerns that should be addressed\n- 3-4: Significant bugs or security issues\n- 1-2: Critical vulnerabilities or broken logic\n\nIf the code is good, say so. A score of 9-10 with zero issues is a perfectly valid review. Do not invent issues to justify a lower score." + (if $review_context != "" then ("\n\n## Project-specific review instructions\n" + $review_context) else "" end))
               },
               {
                 role: "user",
-                content: ("Review this pull request.\n\nTitle: " + $pr_title + "\nDescription: " + ($pr_body // "No description") + "\n\nDiff:\n```diff\n" + $diff + "\n```\n\nRespond with a JSON object matching the required schema.")
+                content: ("Review this pull request.\n\nTitle: " + $pr_title + "\nDescription: " + ($pr_body // "No description") + "\n\nDiff:\n```diff\n" + $diff + "\n```\n\nRespond with a JSON object matching the required schema. Remember: only report issues with confidence >= 8.")
               }
             ],
             temperature: $temp,
@@ -196,9 +240,10 @@ runs:
                         properties: {
                           severity: {type: "string", enum: ["critical", "warning", "suggestion"]},
                           file: {type: "string"},
-                          description: {type: "string"}
+                          description: {type: "string"},
+                          confidence: {type: "integer", description: "Confidence score from 1 (uncertain) to 10 (certain)"}
                         },
-                        required: ["severity", "file", "description"],
+                        required: ["severity", "file", "description", "confidence"],
                         additionalProperties: false
                       }
                     },
@@ -249,18 +294,40 @@ runs:
         echo "Tokens: prompt=$PROMPT_TOKENS completion=$COMPLETION_TOKENS"
         echo "::endgroup::"
 
-    # ── Step 4: Parse structured review ──
-    - name: Parse review output
+    # ── Step 5: Parse and filter review ──
+    - name: Parse and filter review output
       id: parse-review
       if: steps.check-diff.outputs.skip != 'true' && steps.llm-call.outputs.error != 'true'
       shell: bash
       run: |
         REVIEW=$(cat /tmp/review-content.json)
+        THRESHOLD=${{ inputs.confidence-threshold }}
 
-        SUMMARY=$(echo "$REVIEW" | jq -r '.summary // "Review completed"')
-        SCORE=$(echo "$REVIEW" | jq -r '.score // 0')
-        APPROVED=$(echo "$REVIEW" | jq -r '.approved // false')
-        ISSUES_COUNT=$(echo "$REVIEW" | jq -r '.issues | length')
+        # Filter issues by confidence threshold
+        TOTAL_BEFORE=$(echo "$REVIEW" | jq '.issues | length')
+        FILTERED=$(echo "$REVIEW" | jq --argjson threshold "$THRESHOLD" '
+          .issues = [.issues[] | select(.confidence >= $threshold)]
+        ')
+        TOTAL_AFTER=$(echo "$FILTERED" | jq '.issues | length')
+        DROPPED=$((TOTAL_BEFORE - TOTAL_AFTER))
+
+        if [ "$DROPPED" -gt 0 ]; then
+          echo "Filtered out $DROPPED low-confidence issues (threshold: $THRESHOLD/10)"
+        fi
+
+        # Recalculate approved based on filtered issues
+        HAS_BLOCKING=$(echo "$FILTERED" | jq '[.issues[] | select(.severity == "critical" or .severity == "warning")] | length')
+        if [ "$HAS_BLOCKING" -eq 0 ]; then
+          FILTERED=$(echo "$FILTERED" | jq '.approved = true')
+        fi
+
+        # Write filtered review back
+        echo "$FILTERED" > /tmp/review-content.json
+
+        SUMMARY=$(echo "$FILTERED" | jq -r '.summary // "Review completed"')
+        SCORE=$(echo "$FILTERED" | jq -r '.score // 0')
+        APPROVED=$(echo "$FILTERED" | jq -r '.approved // false')
+        ISSUES_COUNT=$(echo "$FILTERED" | jq '.issues | length')
 
         echo "summary<<EOFSUM" >> "$GITHUB_OUTPUT"
         echo "$SUMMARY" >> "$GITHUB_OUTPUT"
@@ -268,8 +335,9 @@ runs:
         echo "score=$SCORE" >> "$GITHUB_OUTPUT"
         echo "approved=$APPROVED" >> "$GITHUB_OUTPUT"
         echo "issues_count=$ISSUES_COUNT" >> "$GITHUB_OUTPUT"
+        echo "filtered_count=$DROPPED" >> "$GITHUB_OUTPUT"
 
-    # ── Step 5: Format and post review comment ──
+    # ── Step 6: Format and post review comment ──
     - name: Post review comment
       id: post-review
       if: steps.check-diff.outputs.skip != 'true' && steps.llm-call.outputs.error != 'true'
@@ -291,6 +359,7 @@ runs:
           const score = review.score || 0;
           const emoji = score >= 8 ? '\u2705' : score >= 5 ? '\u26a0\ufe0f' : '\ud83d\udea8';
           const status = review.approved ? 'Approved' : 'Changes suggested';
+          const filtered = parseInt(process.env.FILTERED_COUNT || '0');
 
           let body = `## ${emoji} AI Code Review\n\n`;
           body += `**Score**: ${score}/10 | **Status**: ${status}\n\n`;
@@ -312,7 +381,8 @@ runs:
               const label = sev.charAt(0).toUpperCase() + sev.slice(1);
               body += `#### ${sevEmoji[sev]} ${label} (${issues.length})\n`;
               for (const issue of issues) {
-                body += `- **\`${issue.file}\`**: ${issue.description}\n`;
+                const conf = issue.confidence ? ` (confidence: ${issue.confidence}/10)` : '';
+                body += `- **\`${issue.file}\`**: ${issue.description}${conf}\n`;
               }
               body += '\n';
             }
@@ -321,8 +391,11 @@ runs:
           }
 
           body += `---\n`;
-          body += `<sub>Reviewed by ${process.env.LLM_MODEL} via llama.cpp | `;
-          body += `Diff: ${process.env.DIFF_SIZE || '?'} chars</sub>`;
+          const parts = [`Reviewed by **${process.env.LLM_MODEL}** via llama.cpp`];
+          parts.push(`Diff: ${process.env.DIFF_SIZE || '?'} chars`);
+          parts.push(`Confidence threshold: ${process.env.CONFIDENCE_THRESHOLD}/10`);
+          if (filtered > 0) parts.push(`${filtered} low-confidence issues filtered out`);
+          body += `<sub>${parts.join(' | ')}</sub>`;
 
           await github.rest.issues.createComment({
             owner: context.repo.owner,
@@ -335,8 +408,10 @@ runs:
       env:
         DIFF_SIZE: ${{ steps.check-diff.outputs.diff_size }}
         LLM_MODEL: ${{ inputs.llm-model }}
+        FILTERED_COUNT: ${{ steps.parse-review.outputs.filtered_count }}
+        CONFIDENCE_THRESHOLD: ${{ inputs.confidence-threshold }}
 
-    # ── Step 6: Post skip notification ──
+    # ── Step 7: Post skip notification ──
     - name: Post skip notification
       if: steps.check-diff.outputs.skip == 'true'
       uses: actions/github-script@v7
@@ -351,7 +426,7 @@ runs:
           });
       continue-on-error: true
 
-    # ── Step 7: Summary ──
+    # ── Step 8: Summary ──
     - name: Create step summary
       if: always()
       shell: bash
@@ -364,7 +439,9 @@ runs:
         | **Skipped** | ${{ steps.check-diff.outputs.skip || 'false' }} |
         | **Score** | ${{ steps.parse-review.outputs.score || 'N/A' }}/10 |
         | **Issues** | ${{ steps.parse-review.outputs.issues_count || 'N/A' }} |
+        | **Filtered out** | ${{ steps.parse-review.outputs.filtered_count || '0' }} |
         | **Approved** | ${{ steps.parse-review.outputs.approved || 'N/A' }} |
         | **Diff Size** | ${{ steps.check-diff.outputs.diff_size || 'N/A' }} chars |
+        | **Confidence Threshold** | ${{ inputs.confidence-threshold }}/10 |
         | **Model** | ${{ inputs.llm-model }} |
         EOF
