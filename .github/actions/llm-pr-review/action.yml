@@ -179,7 +179,8 @@ runs:
         fi
 
         echo "skip=false" >> "$GITHUB_OUTPUT"
-        echo "$DIFF" > /tmp/pr-diff.patch
+        # Sanitize diff: remove null bytes and non-printable control chars (keep tabs/newlines)
+        echo "$DIFF" | tr -d '\000-\010\013\014\016-\037' > /tmp/pr-diff.patch
         echo "diff_size=$DIFF_SIZE" >> "$GITHUB_OUTPUT"
         echo "::endgroup::"
 
@@ -192,7 +193,6 @@ runs:
         echo "::group::LLM Review"
 
         PR_TITLE="${{ github.event.pull_request.title }}"
-        DIFF_CONTENT=$(cat /tmp/pr-diff.patch)
 
         # Write system prompt to file to avoid shell escaping issues
         cat > /tmp/system-prompt.txt << 'SYSTEMPROMPT'
@@ -244,16 +244,11 @@ runs:
           cat /tmp/review-context.txt >> /tmp/system-prompt.txt
         fi
 
-        # Build user prompt
-        PR_BODY="${{ github.event.pull_request.body }}"
-        cat > /tmp/user-prompt.txt << USERPROMPT
-        Review this pull request.
-
-        Title: ${PR_TITLE}
-        Description: ${PR_BODY:-No description}
-
-        Respond with a JSON object matching the required schema. Remember: only report issues with confidence >= 8.
-        USERPROMPT
+        # Build user prompt parts as files (avoid shell interpolation issues)
+        printf '%s' "Review this pull request." > /tmp/user-prompt.txt
+        printf '\n\nTitle: %s' "$PR_TITLE" >> /tmp/user-prompt.txt
+        printf '\nDescription: %s' "${{ github.event.pull_request.body }}" >> /tmp/user-prompt.txt
+        printf '\n\nRespond with a JSON object matching the required schema. Remember: only report issues with confidence >= 8.' >> /tmp/user-prompt.txt
 
         # Build JSON payload with jq using --rawfile to avoid escaping issues
         PAYLOAD=$(jq -n \
