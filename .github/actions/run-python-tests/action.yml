@@ -91,8 +91,9 @@ runs:
       shell: bash
       working-directory: ${{ inputs.working-directory }}
       run: |
-        if [ -n "${{ inputs.test-command }}" ]; then
-          ${{ inputs.test-command }}
+        CUSTOM_CMD="${{ inputs.test-command }}"
+        if [ -n "$CUSTOM_CMD" ]; then
+          eval "$CUSTOM_CMD"
         else
           uv run pytest ${{ inputs.test-paths }} \
             -v --tb=short \
