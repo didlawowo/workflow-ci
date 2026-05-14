@@ -1,0 +1,239 @@
+name: bench-uv-cache
+on:
+  workflow_call:
+    inputs:
+      ref:
+        description: "workflow-ci ref to checkout for bench pyproject"
+        type: string
+        required: false
+        default: main
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "workflow-ci ref to checkout for bench pyproject"
+        type: string
+        required: false
+        default: main
+
+concurrency:
+  group: bench-uv-cache-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+    working-directory: extra/bench-uv-cache
+
+jobs:
+  # -----------------------------------------------------------------------
+  # Variant A: pre-fix baseline. setup-uv default + actions/cache unconditional.
+  # -----------------------------------------------------------------------
+  variant-a:
+    name: A baseline (GHA cache)
+    runs-on: ubuntu-latest
+    outputs:
+      cold_ms: ${{ steps.cold.outputs.elapsed_ms }}
+      warm_ms: ${{ steps.warm.outputs.elapsed_ms }}
+      cold_bytes: ${{ steps.cold.outputs.cache_bytes }}
+      warm_bytes: ${{ steps.warm.outputs.cache_bytes }}
+    steps:
+      - name: Checkout workflow-ci (bench pyproject)
+        uses: actions/checkout@v5
+        with:
+          repository: didlawowo/workflow-ci
+          ref: ${{ inputs.ref }}
+
+      - name: Isolate UV_CACHE_DIR (A)
+        run: |
+          dir=/home/runner/.cache/uv/bench-A
+          rm -rf "$dir"
+          mkdir -p "$dir"
+          echo "UV_CACHE_DIR=$dir" >> "$GITHUB_ENV"
+
+      - name: Setup uv (default — cache enabled)
+        uses: astral-sh/setup-uv@v3
+        with:
+          version: latest
+
+      - name: GHA cache (cold key — forces miss)
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/uv
+          key: bench-A-cold-${{ github.run_id }}
+          restore-keys: |
+            bench-A-cold-
+
+      - name: Cold sync
+        id: cold
+        run: |
+          uv python install 3.12
+          t0=$(date +%s%N)
+          uv sync --group dev
+          t1=$(date +%s%N)
+          elapsed=$(( (t1 - t0) / 1000000 ))
+          bytes=$(du -sb "$UV_CACHE_DIR" | awk '{print $1}')
+          echo "elapsed_ms=$elapsed" >> "$GITHUB_OUTPUT"
+          echo "cache_bytes=$bytes" >> "$GITHUB_OUTPUT"
+          echo "::notice::A cold = ${elapsed}ms, cache=${bytes}B"
+
+      - name: Warm sync
+        id: warm
+        run: |
+          rm -rf .venv
+          t0=$(date +%s%N)
+          uv sync --group dev
+          t1=$(date +%s%N)
+          elapsed=$(( (t1 - t0) / 1000000 ))
+          bytes=$(du -sb "$UV_CACHE_DIR" | awk '{print $1}')
+          echo "elapsed_ms=$elapsed" >> "$GITHUB_OUTPUT"
+          echo "cache_bytes=$bytes" >> "$GITHUB_OUTPUT"
+          echo "::notice::A warm = ${elapsed}ms, cache=${bytes}B"
+
+  # -----------------------------------------------------------------------
+  # Variant B: post-PR#1. actions/cache conditional on UV_CACHE_DIR == ''.
+  # -----------------------------------------------------------------------
+  variant-b:
+    name: B post-PR1 (conditional GHA cache)
+    runs-on: ubuntu-latest
+    outputs:
+      cold_ms: ${{ steps.cold.outputs.elapsed_ms }}
+      warm_ms: ${{ steps.warm.outputs.elapsed_ms }}
+      cold_bytes: ${{ steps.cold.outputs.cache_bytes }}
+      warm_bytes: ${{ steps.warm.outputs.cache_bytes }}
+    steps:
+      - name: Checkout workflow-ci (bench pyproject)
+        uses: actions/checkout@v5
+        with:
+          repository: didlawowo/workflow-ci
+          ref: ${{ inputs.ref }}
+
+      - name: Isolate UV_CACHE_DIR (B)
+        run: |
+          dir=/home/runner/.cache/uv/bench-B
+          rm -rf "$dir"
+          mkdir -p "$dir"
+          echo "UV_CACHE_DIR=$dir" >> "$GITHUB_ENV"
+
+      - name: Setup uv (default)
+        uses: astral-sh/setup-uv@v3
+        with:
+          version: latest
+
+      - name: GHA cache (skipped when UV_CACHE_DIR set)
+        if: env.UV_CACHE_DIR == ''
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/uv
+          key: bench-B-${{ github.run_id }}
+
+      - name: Cold sync
+        id: cold
+        run: |
+          uv python install 3.12
+          t0=$(date +%s%N)
+          uv sync --group dev
+          t1=$(date +%s%N)
+          elapsed=$(( (t1 - t0) / 1000000 ))
+          bytes=$(du -sb "$UV_CACHE_DIR" | awk '{print $1}')
+          echo "elapsed_ms=$elapsed" >> "$GITHUB_OUTPUT"
+          echo "cache_bytes=$bytes" >> "$GITHUB_OUTPUT"
+          echo "::notice::B cold = ${elapsed}ms, cache=${bytes}B"
+
+      - name: Warm sync
+        id: warm
+        run: |
+          rm -rf .venv
+          t0=$(date +%s%N)
+          uv sync --group dev
+          t1=$(date +%s%N)
+          elapsed=$(( (t1 - t0) / 1000000 ))
+          bytes=$(du -sb "$UV_CACHE_DIR" | awk '{print $1}')
+          echo "elapsed_ms=$elapsed" >> "$GITHUB_OUTPUT"
+          echo "cache_bytes=$bytes" >> "$GITHUB_OUTPUT"
+          echo "::notice::B warm = ${elapsed}ms, cache=${bytes}B"
+
+  # -----------------------------------------------------------------------
+  # Variant C: dc-finance gold standard. enable-cache=false + cache-local-path.
+  # No actions/cache.
+  # -----------------------------------------------------------------------
+  variant-c:
+    name: C dc-finance pattern (NFS only)
+    runs-on: ubuntu-latest
+    outputs:
+      cold_ms: ${{ steps.cold.outputs.elapsed_ms }}
+      warm_ms: ${{ steps.warm.outputs.elapsed_ms }}
+      cold_bytes: ${{ steps.cold.outputs.cache_bytes }}
+      warm_bytes: ${{ steps.warm.outputs.cache_bytes }}
+    steps:
+      - name: Checkout workflow-ci (bench pyproject)
+        uses: actions/checkout@v5
+        with:
+          repository: didlawowo/workflow-ci
+          ref: ${{ inputs.ref }}
+
+      - name: Isolate UV_CACHE_DIR (C)
+        run: |
+          dir=/home/runner/.cache/uv/bench-C
+          rm -rf "$dir"
+          mkdir -p "$dir"
+          echo "UV_CACHE_DIR=$dir" >> "$GITHUB_ENV"
+
+      - name: Setup uv (cache disabled, explicit path)
+        uses: astral-sh/setup-uv@v3
+        with:
+          version: latest
+          enable-cache: false
+          cache-local-path: /home/runner/.cache/uv/bench-C
+
+      - name: Cold sync
+        id: cold
+        run: |
+          uv python install 3.12
+          t0=$(date +%s%N)
+          uv sync --group dev
+          t1=$(date +%s%N)
+          elapsed=$(( (t1 - t0) / 1000000 ))
+          bytes=$(du -sb "$UV_CACHE_DIR" | awk '{print $1}')
+          echo "elapsed_ms=$elapsed" >> "$GITHUB_OUTPUT"
+          echo "cache_bytes=$bytes" >> "$GITHUB_OUTPUT"
+          echo "::notice::C cold = ${elapsed}ms, cache=${bytes}B"
+
+      - name: Warm sync
+        id: warm
+        run: |
+          rm -rf .venv
+          t0=$(date +%s%N)
+          uv sync --group dev
+          t1=$(date +%s%N)
+          elapsed=$(( (t1 - t0) / 1000000 ))
+          bytes=$(du -sb "$UV_CACHE_DIR" | awk '{print $1}')
+          echo "elapsed_ms=$elapsed" >> "$GITHUB_OUTPUT"
+          echo "cache_bytes=$bytes" >> "$GITHUB_OUTPUT"
+          echo "::notice::C warm = ${elapsed}ms, cache=${bytes}B"
+
+  # -----------------------------------------------------------------------
+  summary:
+    name: Summary
+    needs: [variant-a, variant-b, variant-c]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Render summary
+        working-directory: .
+        run: |
+          fmt_ms() { awk -v v="$1" 'BEGIN{if(v=="")print "n/a"; else printf "%.1fs", v/1000}'; }
+          fmt_b()  { [ -z "$1" ] && echo "n/a" || numfmt --to=iec --suffix=B "$1" 2>/dev/null || echo "${1}B"; }
+
+          {
+            echo "## uv-cache bench results"
+            echo ""
+            echo "| Variant | Cold sync | Warm sync | Cold cache size | Warm cache size |"
+            echo "| --- | ---: | ---: | ---: | ---: |"
+            echo "| A — baseline (GHA cache) | $(fmt_ms '${{ needs.variant-a.outputs.cold_ms }}') | $(fmt_ms '${{ needs.variant-a.outputs.warm_ms }}') | $(fmt_b '${{ needs.variant-a.outputs.cold_bytes }}') | $(fmt_b '${{ needs.variant-a.outputs.warm_bytes }}') |"
+            echo "| B — post-PR#1 | $(fmt_ms '${{ needs.variant-b.outputs.cold_ms }}') | $(fmt_ms '${{ needs.variant-b.outputs.warm_ms }}') | $(fmt_b '${{ needs.variant-b.outputs.cold_bytes }}') | $(fmt_b '${{ needs.variant-b.outputs.warm_bytes }}') |"
+            echo "| C — dc-finance | $(fmt_ms '${{ needs.variant-c.outputs.cold_ms }}') | $(fmt_ms '${{ needs.variant-c.outputs.warm_ms }}') | $(fmt_b '${{ needs.variant-c.outputs.cold_bytes }}') | $(fmt_b '${{ needs.variant-c.outputs.warm_bytes }}') |"
+            echo ""
+            echo "Run \`${{ github.run_id }}\` · Repo \`${{ github.repository }}\` · Ref \`${{ github.ref }}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
