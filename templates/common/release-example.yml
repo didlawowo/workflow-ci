@@ -6,13 +6,20 @@ name: release
 on:
   push:
     branches: [main]
+  workflow_dispatch:
+    inputs:
+      dry-run:
+        description: 'Dry run (no commit/tag/push)'
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: write
 
 jobs:
   release:
-    uses: didlawowo/workflow-ci/.github/workflows/release.yml@main
+    uses: didlawowo/workflow-ci/.github/workflows/release.yml@v1
     with:
       # Each line is `path:regex` with a single capture group around the version.
       # Examples — uncomment the lines that fit your project:
@@ -22,4 +29,6 @@ jobs:
         # Chart.yaml:^version: (.+)$
         # VERSION:^(.+)$
       tag-prefix: "v"
-      dry-run: false
+      # Guard for typed boolean: when triggered by `push:`, `inputs` is null
+      # and `null || false` may leak a non-boolean to the strictly-typed input.
+      dry-run: ${{ github.event_name == 'workflow_dispatch' && inputs.dry-run || false }}

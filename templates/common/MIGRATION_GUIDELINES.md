@@ -58,7 +58,9 @@ jobs:
       version-files: |
         <SPÉCIFIQUE_REPO — voir tableau plus bas>
       tag-prefix: "v"
-      dry-run: ${{ inputs.dry-run || false }}
+      # Guard for typed boolean: when triggered by `push:`, `inputs` is null
+      # and `null || false` may leak a non-boolean to the strictly-typed input.
+      dry-run: ${{ github.event_name == 'workflow_dispatch' && inputs.dry-run || false }}
 ```
 
 ### B. CD orchestrator (refactor in-place du fichier existant)
