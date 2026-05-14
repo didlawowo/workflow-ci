@@ -220,6 +220,17 @@ jobs:
     if: always()
     runs-on: ubuntu-latest
     steps:
+      - name: Cleanup bench cache dirs (avoid polluting shared NFS)
+        working-directory: .
+        run: |
+          for v in A B C; do
+            dir="/home/runner/.cache/uv/bench-$v"
+            if [ -d "$dir" ]; then
+              du -sh "$dir" 2>/dev/null || true
+              rm -rf "$dir"
+            fi
+          done
+
       - name: Render summary
         working-directory: .
         run: |
