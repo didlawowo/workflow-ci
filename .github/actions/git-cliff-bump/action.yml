@@ -19,7 +19,7 @@ outputs:
     description: Bumped version including the prefix (e.g. v1.4.0). Empty if nothing to release.
     value: ${{ steps.decide.outputs.version }}
   released:
-    description: "true" if a release should be cut, "false" otherwise.
+    description: '"true" if a release should be cut, "false" otherwise.'
     value: ${{ steps.decide.outputs.released }}
 
 runs:
