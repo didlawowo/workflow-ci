@@ -74,14 +74,14 @@ inputs:
     description: "Docker build arguments (multiline KEY=VALUE)"
     required: false
     default: ""
-  dockerhub-username:
-    description: "Docker Hub username for authenticated pulls (avoids anonymous rate limit on base images like tonistiigi/binfmt)"
+  qemu-image:
+    description: |
+      Image used by docker/setup-qemu-action to install binfmt handlers.
+      Default points to the didlawowo oci-storage mirror to avoid Docker Hub
+      anonymous rate limit on the cluster's egress IP (the upstream is
+      tonistiigi/binfmt:latest on Docker Hub). Override to skip the mirror.
     required: false
-    default: ""
-  dockerhub-token:
-    description: "Docker Hub PAT (read scope is enough)"
-    required: false
-    default: ""
+    default: "oci-storage.dc-tech.work/mirror/tonistiigi/binfmt:latest"
 
 outputs:
   digest:
@@ -97,20 +97,15 @@ outputs:
 runs:
   using: "composite"
   steps:
-    # Authenticate against Docker Hub BEFORE setup-qemu-action.
-    # setup-qemu-action internally runs `docker run tonistiigi/binfmt` which
-    # would otherwise pull anonymously and hit the 100 pulls / 6h / IP limit.
-    # Cluster runners share an egress IP, so this limit is reached fast.
-    - name: Login to Docker Hub (avoid anonymous rate limit)
-      if: inputs.dockerhub-username != '' && inputs.dockerhub-token != ''
-      uses: docker/login-action@v3
-      with:
-        registry: docker.io
-        username: ${{ inputs.dockerhub-username }}
-        password: ${{ inputs.dockerhub-token }}
-
+    # setup-qemu-action runs `docker run <image> --install all` to install
+    # binfmt handlers. By default that image is tonistiigi/binfmt:latest on
+    # Docker Hub, where anonymous pulls are rate-limited per IP. Cluster
+    # runners share an egress IP, so the limit is reached fast and the action
+    # fails with 429. We point it at the oci-storage mirror instead.
     - name: Set up QEMU
       uses: docker/setup-qemu-action@v3
+      with:
+        image: ${{ inputs.qemu-image }}
 
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v3
