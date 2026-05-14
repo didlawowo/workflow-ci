@@ -140,7 +140,7 @@ de sortie NAT → le quota est consommé rapidement → 429 → multi-arch impos
 `docker-build-push@v1` (depuis v1.3.0) accepte un input `qemu-image` avec
 **default = miroir oci-storage** :
 ```
-oci-storage.dc-tech.work/mirror/tonistiigi/binfmt:latest
+oci-storage.dc-tech.work/mirror-binfmt:latest
 ```
 Le pull se fait depuis oci-storage (cluster-local, pas de rate limit), pas de
 secret nécessaire, transparent pour les appelants.
@@ -148,10 +148,12 @@ secret nécessaire, transparent pour les appelants.
 ### Pré-requis côté infra (à faire une fois par Chris)
 
 ```bash
-skopeo copy --multi-arch all \
-  docker://docker.io/tonistiigi/binfmt:latest \
-  docker://oci-storage.dc-tech.work/mirror/tonistiigi/binfmt:latest
+skopeo copy --multi-arch all docker://docker.io/tonistiigi/binfmt:latest docker://oci-storage.dc-tech.work/mirror-binfmt:latest
 ```
+
+Note: oci-storage n'accepte que des paths à 2 segments max (`<ns>/<repo>` ou
+`<repo>`), d'où le nom plat `mirror-binfmt` plutôt qu'une arborescence
+`mirror/tonistiigi/binfmt`.
 
 Si oci-storage est inaccessible / l'image absente lors du build, le composite
 échoue : passer un override explicite via l'input `qemu-image` (ex:

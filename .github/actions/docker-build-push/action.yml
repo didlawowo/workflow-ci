@@ -81,7 +81,7 @@ inputs:
       anonymous rate limit on the cluster's egress IP (the upstream is
       tonistiigi/binfmt:latest on Docker Hub). Override to skip the mirror.
     required: false
-    default: "oci-storage.dc-tech.work/mirror/tonistiigi/binfmt:latest"
+    default: "oci-storage.dc-tech.work/mirror-binfmt:latest"
 
 outputs:
   digest:
