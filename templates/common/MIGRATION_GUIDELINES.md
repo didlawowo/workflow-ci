@@ -61,6 +61,11 @@ jobs:
       # Guard for typed boolean: when triggered by `push:`, `inputs` is null
       # and `null || false` may leak a non-boolean to the strictly-typed input.
       dry-run: ${{ github.event_name == 'workflow_dispatch' && inputs.dry-run || false }}
+      # GitHub anti-loop: tags pushed by GITHUB_TOKEN do not trigger the CD
+      # orchestrator's `push: tags: v*`. The reusable workflow dispatches it
+      # explicitly after pushing the tag. The CD orchestrator MUST declare
+      # `workflow_dispatch:` with `inputs.tag` (see section B).
+      trigger-cd-workflow: cd-production-orchestrator.yml
 ```
 
 ### B. CD orchestrator (refactor in-place du fichier existant)
@@ -70,13 +75,22 @@ même fichier (généralement `cd-production-orchestrator.yml`).
 
 Changements :
 
-1. Trigger **uniquement sur tag** :
+1. Trigger sur tag **et** `workflow_dispatch` (le second est requis — c'est
+   ce trigger qui sera fired par `release.yml` après le push de tag, et
+   permet aussi la recovery manuelle si un release échoue mi-parcours) :
    ```yaml
    on:
      push:
        tags: ['v*']
+     workflow_dispatch:
+       inputs:
+         tag:
+           description: 'Tag to deploy (e.g. v1.2.0). Required for manual recovery.'
+           required: true
+           type: string
    ```
-2. Remplacer le job `release-please` par un job `extract-version` :
+2. Remplacer le job `release-please` par un job `extract-version` qui gère
+   les deux events :
    ```yaml
    extract-version:
      runs-on: ${{ vars.RUNNER || 'arc-runner-<repo>' }}
@@ -86,11 +100,23 @@ Changements :
      steps:
        - id: info
          run: |
-           TAG_NAME="${{ github.ref_name }}"
+           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+             TAG_NAME="${{ inputs.tag }}"
+           else
+             TAG_NAME="${{ github.ref_name }}"
+           fi
            VERSION="${TAG_NAME#v}"
            echo "tag_name=${TAG_NAME}" >> "$GITHUB_OUTPUT"
            echo "version=${VERSION}"  >> "$GITHUB_OUTPUT"
    ```
+   ⚠️ Les `actions/checkout` suivants doivent pinner explicitement le tag :
+   ```yaml
+   - uses: actions/checkout@v4
+     with:
+       ref: ${{ needs.extract-version.outputs.tag_name }}
+   ```
+   Sinon le checkout part de la branche default et tu builds le code du
+   prochain commit, pas du tag.
 3. Tous les `needs: release-please` → `needs: extract-version`, idem pour les
    références aux outputs (`needs.release-please.outputs.X` →
    `needs.extract-version.outputs.X`).
