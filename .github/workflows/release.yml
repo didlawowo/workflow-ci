@@ -45,6 +45,16 @@ on:
         required: false
         type: string
         default: "main"
+      trigger-cd-workflow:
+        description: |
+          Optional. When set to a workflow filename (e.g. `cd-production-orchestrator.yml`),
+          this reusable workflow will fire `gh workflow run <file> -f tag=<new-tag>` after
+          the tag is pushed. Required because GITHUB_TOKEN-pushed tags do not trigger
+          downstream workflows (GitHub anti-loop). The target workflow MUST declare a
+          `workflow_dispatch:` trigger with an `inputs.tag` (string, required=true).
+        required: false
+        type: string
+        default: ""
     outputs:
       released:
         description: '"true" when a release was actually cut.'
@@ -151,6 +161,28 @@ jobs:
             --title "${NEW_VERSION}" \
             --notes-file /tmp/release-notes.md \
             --verify-tag
+
+      # GitHub anti-loop: a tag/commit pushed by GITHUB_TOKEN does not trigger
+      # downstream workflows (no `push: tags: v*` event fires). To make the CD
+      # orchestrator run on release, we dispatch it explicitly. The caller
+      # must opt-in by passing `trigger-cd-workflow`, and the target workflow
+      # must declare `workflow_dispatch:` with `inputs.tag` (string).
+      - name: Trigger CD workflow on the new tag
+        if: |
+          steps.bump.outputs.released == 'true'
+          && inputs.dry-run != true
+          && inputs.trigger-cd-workflow != ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NEW_VERSION: ${{ steps.bump.outputs.version }}
+          CD_WORKFLOW: ${{ inputs.trigger-cd-workflow }}
+        run: |
+          set -euo pipefail
+          echo "::notice::Triggering CD workflow '${CD_WORKFLOW}' with tag=${NEW_VERSION}"
+          gh workflow run "${CD_WORKFLOW}" \
+            -R "${GITHUB_REPOSITORY}" \
+            --ref main \
+            -f "tag=${NEW_VERSION}"
 
       - name: Dry-run summary
         if: steps.bump.outputs.released == 'true' && inputs.dry-run == true
