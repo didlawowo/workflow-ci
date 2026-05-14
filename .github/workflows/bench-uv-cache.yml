@@ -30,7 +30,7 @@ jobs:
   # -----------------------------------------------------------------------
   variant-a:
     name: A baseline (GHA cache)
-    runs-on: ubuntu-latest
+    runs-on: arc-runner-workflow-ci
     outputs:
       cold_ms: ${{ steps.cold.outputs.elapsed_ms }}
       warm_ms: ${{ steps.warm.outputs.elapsed_ms }}
@@ -95,7 +95,7 @@ jobs:
   # -----------------------------------------------------------------------
   variant-b:
     name: B post-PR1 (conditional GHA cache)
-    runs-on: ubuntu-latest
+    runs-on: arc-runner-workflow-ci
     outputs:
       cold_ms: ${{ steps.cold.outputs.elapsed_ms }}
       warm_ms: ${{ steps.warm.outputs.elapsed_ms }}
@@ -160,7 +160,7 @@ jobs:
   # -----------------------------------------------------------------------
   variant-c:
     name: C dc-finance pattern (NFS only)
-    runs-on: ubuntu-latest
+    runs-on: arc-runner-workflow-ci
     outputs:
       cold_ms: ${{ steps.cold.outputs.elapsed_ms }}
       warm_ms: ${{ steps.warm.outputs.elapsed_ms }}
@@ -218,7 +218,7 @@ jobs:
     name: Summary
     needs: [variant-a, variant-b, variant-c]
     if: always()
-    runs-on: ubuntu-latest
+    runs-on: arc-runner-workflow-ci
     steps:
       - name: Render summary
         working-directory: .
