@@ -22,11 +22,32 @@ explicitement dans la description de la PR.
    (cf. section Architecture multi-arch plus bas).
 5. **Pas de bump manuel** des fichiers de version dans la PR de migration —
    git-cliff doit calculer depuis le prochain commit conventional.
-6. **Pas de PAT Docker Hub** ni autre PAT à provisionner. La stack tourne
-   uniquement avec `GITHUB_TOKEN` (perms de repo) + secrets oci-storage déjà
-   en place.
-7. **Pas de décision unilatérale** sur un drift release-please / tag git :
+6. **Pas de décision unilatérale** sur un drift release-please / tag git :
    signaler à Chris, attendre.
+
+---
+
+## 🔴 Obligatoires sur tous les appels `docker-build-push`
+
+Tout appel à `didlawowo/workflow-ci/.github/actions/docker-build-push@v1`
+**DOIT** passer ces 4 secrets, sinon les builds échoueront aléatoirement avec
+`429 Too Many Requests` sur les pulls Docker Hub (rate limit 100/6h partagé
+sur l'IP egress cluster — observé sur code-search v1.1.0 CD).
+
+```yaml
+- uses: didlawowo/workflow-ci/.github/actions/docker-build-push@v1
+  with:
+    # ... autres inputs ...
+    registry-username: ${{ secrets.OCI_USERNAME }}      # push vers oci-storage
+    registry-password: ${{ secrets.OCI_PASSWORD }}
+    dockerhub-username: ${{ secrets.DOCKERHUB_USERNAME }}  # pull base images FROM
+    dockerhub-token:    ${{ secrets.DOCKERHUB_TOKEN }}
+```
+
+Les 4 secrets sont **déjà provisionnés** sur les 7 repos (vérifié 2026-05-14).
+Si un repo est ajouté à la stack, ces secrets doivent être provisionnés
+**avant** la première PR de migration. Cf. section "Convention de naming
+des secrets" pour les détails.
 
 ---
 
