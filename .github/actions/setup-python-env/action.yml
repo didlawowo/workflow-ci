@@ -10,26 +10,29 @@ inputs:
     description: "Install dev dependencies"
     required: false
     default: "true"
-  cache-key-suffix:
-    description: "Additional cache key suffix"
-    required: false
-    default: ""
 
 outputs:
   python-version:
     description: "Python version installed"
     value: ${{ steps.setup.outputs.python-version }}
-  cache-hit:
-    description: "Whether the cache was hit"
-    value: ${{ steps.cache.outputs.cache-hit }}
 
 runs:
   using: "composite"
   steps:
+    # Self-hosted ARC runners mount /home/runner/.cache/uv from a persistent
+    # PVC (see arc-runners-project.yaml in infra repo). We explicitly disable
+    # setup-uv's own caching and pin the cache path so the action does not
+    # silently override UV_CACHE_DIR — that way `uv sync` writes to the PVC
+    # and survives across jobs without any actions/cache WAN round-trip.
+    #
+    # On GitHub-hosted runners the path simply lives in the ephemeral home;
+    # no behaviour change there beyond not paying for a GHA cache upload.
     - name: Install uv
       uses: astral-sh/setup-uv@v3
       with:
         version: "latest"
+        enable-cache: false
+        cache-local-path: /home/runner/.cache/uv
 
     - name: Set up Python
       id: setup
@@ -37,22 +40,6 @@ runs:
       run: |
         uv python install ${{ inputs.python-version }}
         echo "python-version=${{ inputs.python-version }}" >> "$GITHUB_OUTPUT"
-
-    # Cache GitHub Actions hébergé : à éviter sur runner self-hosted qui
-    # fournit déjà un cache persistant (ex: ARC + PVC NFS via UV_CACHE_DIR).
-    # Sinon actions/cache écrase le NFS local avec un download WAN à chaque
-    # run et ré-upload à la fin → annule le bénéfice du cache persistant.
-    - name: Cache dependencies
-      id: cache
-      if: env.UV_CACHE_DIR == ''
-      uses: actions/cache@v4
-      with:
-        path: |
-          ~/.cache/uv
-          .venv
-        key: python-${{ inputs.python-version }}-uv-${{ hashFiles('**/pyproject.toml', '**/uv.lock') }}${{ inputs.cache-key-suffix }}
-        restore-keys: |
-          python-${{ inputs.python-version }}-uv-
 
     - name: Install dependencies
       shell: bash
