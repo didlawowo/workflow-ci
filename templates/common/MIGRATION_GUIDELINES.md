@@ -49,6 +49,31 @@ Si un repo est ajouté à la stack, ces secrets doivent être provisionnés
 **avant** la première PR de migration. Cf. section "Convention de naming
 des secrets" pour les détails.
 
+### Permissions du job appelant
+
+Le job qui appelle `docker-build-push@v1` avec `sign: "true"` **DOIT**
+déclarer ces permissions, sinon Cosign keyless échoue avec
+`expired_token` lors de l'obtention du certificat Fulcio (le token OIDC
+n'est jamais émis par GitHub si la permission n'est pas accordée) :
+
+```yaml
+publish-image:           # ou le nom de votre job de build
+  permissions:
+    contents: read       # checkout
+    packages: write      # push registry (selon le registry)
+    id-token: write      # ← OBLIGATOIRE pour Cosign keyless (Fulcio OIDC)
+  steps:
+    - uses: didlawowo/workflow-ci/.github/actions/docker-build-push@v1
+      with:
+        sign: "true"
+        sbom: "true"
+        ...
+```
+
+Symptôme observé sur genai-benchmark-tool v0.6.4 :
+`signing [...]: getting signer: getting key from Fulcio: retrieving cert: error obtaining token: expired_token`
+→ image buildée et pushée OK, mais l'étape sign keyless casse.
+
 ---
 
 ## ✅ Structure canonique
