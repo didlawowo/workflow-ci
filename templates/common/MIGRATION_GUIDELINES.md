@@ -71,6 +71,7 @@ on:
 
 permissions:
   contents: write
+  actions: write   # required for trigger-cd-workflow → gh workflow run
 
 jobs:
   release:
