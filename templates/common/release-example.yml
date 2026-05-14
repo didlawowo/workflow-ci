@@ -16,6 +16,7 @@ on:
 
 permissions:
   contents: write
+  actions: write   # required for trigger-cd-workflow → gh workflow run
 
 jobs:
   release:
@@ -32,3 +33,7 @@ jobs:
       # Guard for typed boolean: when triggered by `push:`, `inputs` is null
       # and `null || false` may leak a non-boolean to the strictly-typed input.
       dry-run: ${{ github.event_name == 'workflow_dispatch' && inputs.dry-run || false }}
+      # GitHub anti-loop: tags pushed by GITHUB_TOKEN do not trigger downstream
+      # workflows. The reusable workflow dispatches the CD orchestrator after
+      # pushing the tag. The CD must declare `workflow_dispatch:` + `inputs.tag`.
+      trigger-cd-workflow: cd-production-orchestrator.yml
