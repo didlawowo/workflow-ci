@@ -82,6 +82,20 @@ inputs:
       tonistiigi/binfmt:latest on Docker Hub). Override to skip the mirror.
     required: false
     default: "oci-storage.dc-tech.work/mirror-binfmt:latest"
+  dockerhub-username:
+    description: |
+      Docker Hub username. When passed together with dockerhub-token, the
+      composite logs in to docker.io BEFORE buildx so that base images
+      referenced by Dockerfile FROM directives (e.g. python:3.12, oven/bun:1)
+      are pulled authenticated. Required to bypass the 100/6h-per-IP
+      anonymous rate limit, which is reached fast when many repos share the
+      cluster's egress IP.
+    required: false
+    default: ""
+  dockerhub-token:
+    description: "Docker Hub PAT (public_repo read scope is enough)."
+    required: false
+    default: ""
 
 outputs:
   digest:
@@ -97,11 +111,24 @@ outputs:
 runs:
   using: "composite"
   steps:
+    # Authenticate to Docker Hub BEFORE buildx so that base images pulled by
+    # Dockerfile FROM directives (python:*, oven/bun:*, node:*, etc.) use the
+    # account quota instead of the anonymous 100/6h-per-IP limit. The cluster
+    # runners share an egress IP, so anonymous quota is exhausted quickly.
+    - name: Login to Docker Hub (authenticated base image pulls)
+      if: inputs.dockerhub-username != '' && inputs.dockerhub-token != ''
+      uses: docker/login-action@v3
+      with:
+        registry: docker.io
+        username: ${{ inputs.dockerhub-username }}
+        password: ${{ inputs.dockerhub-token }}
+
     # setup-qemu-action runs `docker run <image> --install all` to install
     # binfmt handlers. By default that image is tonistiigi/binfmt:latest on
-    # Docker Hub, where anonymous pulls are rate-limited per IP. Cluster
-    # runners share an egress IP, so the limit is reached fast and the action
-    # fails with 429. We point it at the oci-storage mirror instead.
+    # Docker Hub, where anonymous pulls are rate-limited per IP. We point it
+    # at the oci-storage mirror to avoid even depending on Docker Hub for
+    # QEMU setup. Authenticated Docker Hub login (above) is a separate
+    # defense covering FROM directives in user Dockerfiles.
     - name: Set up QEMU
       uses: docker/setup-qemu-action@v3
       with:
