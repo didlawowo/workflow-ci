@@ -194,7 +194,11 @@ Changements :
    - uses: didlawowo/workflow-ci/.github/actions/docker-build-push@v1
      with:
        image-name: oci-storage.dc-tech.work/<repo>/<image>
-       image-tag:  ${{ needs.extract-version.outputs.tag_name }}
+       # SemVer pur (1.1.3) sans le préfixe `v`. Cohérent avec Chart.yaml
+       # `appVersion` et `values.yaml` `image.tag`. Utiliser `tag_name` ici
+       # (v1.1.3) produit un mismatch → ImagePullBackOff. Cf. section
+       # "Convention de tag : `version` sans `v`" plus haut.
+       image-tag:  ${{ needs.extract-version.outputs.version }}
        registry:   oci-storage.dc-tech.work
        registry-username: ${{ secrets.OCI_USERNAME }}
        registry-password: ${{ secrets.OCI_PASSWORD }}
