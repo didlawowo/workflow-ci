@@ -37,12 +37,32 @@ sur l'IP egress cluster — observé sur code-search v1.1.0 CD).
 ```yaml
 - uses: didlawowo/workflow-ci/.github/actions/docker-build-push@v1
   with:
+    # image-tag DOIT utiliser `version` (sans `v`), PAS `tag_name` (avec `v`).
+    # Convention SemVer Docker/Helm. Cohérent avec `appVersion` dans Chart.yaml.
+    # Sinon mismatch avec values.yaml.image.tag → ImagePullBackOff.
+    image-tag: ${{ needs.extract-version.outputs.version }}
     # ... autres inputs ...
     registry-username: ${{ secrets.OCI_USERNAME }}      # push vers oci-storage
     registry-password: ${{ secrets.OCI_PASSWORD }}
     dockerhub-username: ${{ secrets.DOCKERHUB_USERNAME }}  # pull base images FROM
     dockerhub-token:    ${{ secrets.DOCKERHUB_TOKEN }}
 ```
+
+### Convention de tag : `version` sans `v`
+
+| Source | Format | Exemple |
+|---|---|---|
+| Tag git (créé par git-cliff) | `v` + SemVer | `v1.1.3` |
+| `extract-version.outputs.tag_name` | identique au tag git | `v1.1.3` |
+| `extract-version.outputs.version` | SemVer pur (sans `v`) | `1.1.3` |
+| **Tag image Docker** | **`version` (sans `v`)** | `oci-storage.dc-tech.work/foo:1.1.3` |
+| **`appVersion` dans Chart.yaml** | SemVer pur | `1.1.3` |
+| **`image.tag` dans values.yaml** | SemVer pur | `1.1.3` |
+
+→ Toujours utiliser `version` pour `image-tag` et pour bumper `values.yaml`.
+Réserver `tag_name` (avec `v`) au git tag, GH Release, et nom de fichier
+chart `<name>-${VERSION}.tgz`. Symptôme typique du mismatch : `ImagePullBackOff
+... not found` sur le pod, observé sur code-search v1.1.2/v1.1.3.
 
 Les 4 secrets sont **déjà provisionnés** sur les 7 repos (vérifié 2026-05-14).
 Si un repo est ajouté à la stack, ces secrets doivent être provisionnés
