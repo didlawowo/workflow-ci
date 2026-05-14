@@ -370,6 +370,32 @@ pyproject.toml:^version = "(.+)"$
 
 ---
 
+## 🚧 Dérogations légitimes
+
+Le brief impose un pattern unique pour éviter la divergence. Mais quelques
+cas ont une cause technique solide qui justifie une dérogation. **Toute
+dérogation doit être explicitement justifiée dans la description de la PR**,
+avec la cause technique réelle (pas "ça me semble plus simple").
+
+### Cas connus
+
+| Repo | Dérogation | Raison technique |
+|---|---|---|
+| **oci-storage** | image **reste sur Docker Hub** (`didlawowo/oci-storage`), pas migrée vers `oci-storage.dc-tech.work`. CD push uniquement vers Docker Hub. `values.yaml` non modifié. | Paradoxe bootstrap : si le registry est down, on ne peut plus pull sa propre image pour le redéployer. Circular dependency rejetée. |
+
+### Ce qui n'est PAS une dérogation acceptable
+
+- ❌ "Le repo a déjà un workflow différent, je le garde" — non, refactor.
+- ❌ "Builder dans `ci.yml` au lieu d'un CD orchestrator dédié" — non, sépare.
+- ❌ "Pinner `@main` parce que `@v1` n'a pas X" — non, demande un bump de tag.
+- ❌ "Garder les `DOCKER_*` parce qu'ils sont là" — non, switch vers `OCI_*`.
+- ❌ "Pas besoin de signer / SBOM, c'est un petit repo" — non, pattern unique.
+
+Si tu hésites : **demande à Chris** avant d'ouvrir la PR. Pas d'interprétation
+créative du brief.
+
+---
+
 ## Workflow attendu par agent
 
 1. **Lire ce brief intégralement** et confirmer la compréhension à Chris.
