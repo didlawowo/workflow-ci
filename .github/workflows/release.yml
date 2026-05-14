@@ -47,7 +47,7 @@ on:
         default: "main"
     outputs:
       released:
-        description: "true" when a release was actually cut.
+        description: '"true" when a release was actually cut.'
         value: ${{ jobs.release.outputs.released }}
       version:
         description: Released version tag (e.g. v1.4.0). Empty when released=false.
