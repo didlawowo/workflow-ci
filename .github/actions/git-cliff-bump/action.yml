@@ -1,0 +1,101 @@
+name: git-cliff-bump
+description: >
+  Compute the next semantic version from conventional commits and write the
+  CHANGELOG. Exposes the bumped version and a "released" flag (false when
+  no releasable commits since the last tag).
+
+inputs:
+  config:
+    description: Path to cliff.toml. Falls back to bundled defaults if empty.
+    required: false
+    default: ""
+  tag-prefix:
+    description: Tag prefix (e.g. "v", "", "chart-v").
+    required: false
+    default: "v"
+
+outputs:
+  version:
+    description: Bumped version including the prefix (e.g. v1.4.0). Empty if nothing to release.
+    value: ${{ steps.decide.outputs.version }}
+  released:
+    description: "true" if a release should be cut, "false" otherwise.
+    value: ${{ steps.decide.outputs.released }}
+
+runs:
+  using: composite
+  steps:
+    - name: Resolve cliff config
+      id: cfg
+      shell: bash
+      run: |
+        set -euo pipefail
+        if [ -n "${{ inputs.config }}" ] && [ -f "${{ inputs.config }}" ]; then
+          echo "path=${{ inputs.config }}" >> "$GITHUB_OUTPUT"
+        else
+          # Pull the bundled default from the workflow-ci repo where this action lives.
+          # GITHUB_ACTION_PATH points to the checked-out action directory.
+          echo "path=${GITHUB_ACTION_PATH}/../../../templates/common/cliff.toml" >> "$GITHUB_OUTPUT"
+        fi
+
+    - name: Compute next version
+      uses: orhun/git-cliff-action@v4
+      with:
+        config: ${{ steps.cfg.outputs.path }}
+        args: --bumped-version
+      env:
+        OUTPUT: /tmp/next-version.txt
+
+    - name: Decide if release is needed
+      id: decide
+      shell: bash
+      run: |
+        set -euo pipefail
+        NEXT="$(cat /tmp/next-version.txt | tr -d '[:space:]')"
+        LAST="$(git describe --tags --abbrev=0 2>/dev/null || echo '')"
+        echo "next=$NEXT last=$LAST"
+        if [ -z "$NEXT" ] || [ "$NEXT" = "$LAST" ]; then
+          echo "released=false" >> "$GITHUB_OUTPUT"
+          echo "version=" >> "$GITHUB_OUTPUT"
+        else
+          # Normalise tag prefix
+          PREFIX="${{ inputs.tag-prefix }}"
+          VERSION="${NEXT#v}"
+          [ -n "$PREFIX" ] && VERSION="${PREFIX}${VERSION}"
+          echo "released=true" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+        fi
+
+    - name: Detect existing CHANGELOG
+      if: steps.decide.outputs.released == 'true'
+      id: changelog
+      shell: bash
+      run: |
+        if [ -f CHANGELOG.md ]; then
+          echo "mode=prepend" >> "$GITHUB_OUTPUT"
+        else
+          echo "mode=create" >> "$GITHUB_OUTPUT"
+        fi
+
+    - name: Prepend new section to existing CHANGELOG
+      if: steps.decide.outputs.released == 'true' && steps.changelog.outputs.mode == 'prepend'
+      uses: orhun/git-cliff-action@v4
+      with:
+        config: ${{ steps.cfg.outputs.path }}
+        args: --tag ${{ steps.decide.outputs.version }} --unreleased --prepend CHANGELOG.md
+
+    - name: Create CHANGELOG from full history (first run)
+      if: steps.decide.outputs.released == 'true' && steps.changelog.outputs.mode == 'create'
+      uses: orhun/git-cliff-action@v4
+      with:
+        config: ${{ steps.cfg.outputs.path }}
+        args: --tag ${{ steps.decide.outputs.version }} --output CHANGELOG.md
+
+    - name: Extract release notes
+      if: steps.decide.outputs.released == 'true'
+      uses: orhun/git-cliff-action@v4
+      with:
+        config: ${{ steps.cfg.outputs.path }}
+        args: --tag ${{ steps.decide.outputs.version }} --unreleased --strip header
+      env:
+        OUTPUT: /tmp/release-notes.md

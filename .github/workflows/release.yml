@@ -1,0 +1,164 @@
+name: release
+
+# Reusable release workflow.
+# Drop-in replacement for release-please:
+#   - reads conventional commits since the last tag
+#   - bumps the version (feat → minor, fix → patch, BREAKING → major)
+#   - rewrites CHANGELOG.md
+#   - optionally patches a list of version files in place
+#   - commits, tags, pushes, and creates the GitHub Release
+#
+# Single-step flow: merge to main → release. No intermediate PR.
+#
+# Calling repo must grant `permissions: contents: write` on the job.
+
+on:
+  workflow_call:
+    inputs:
+      version-files:
+        description: |
+          Multiline list of files to bump, format `path:regex`.
+          The regex MUST contain one capture group around the current version string.
+          Example:
+            pyproject.toml:^version = "(.+)"$
+            Chart.yaml:^version: (.+)$
+        required: false
+        type: string
+        default: ""
+      tag-prefix:
+        description: Tag prefix. Default "v". Use "" for unprefixed tags or "chart-v" for Helm.
+        required: false
+        type: string
+        default: "v"
+      cliff-config:
+        description: Path to a cliff.toml inside the calling repo. Falls back to workflow-ci defaults.
+        required: false
+        type: string
+        default: ""
+      dry-run:
+        description: If true, compute everything but skip commit/tag/push/release.
+        required: false
+        type: boolean
+        default: false
+      workflow-ci-ref:
+        description: Ref of workflow-ci to use for the composite action and defaults.
+        required: false
+        type: string
+        default: "main"
+    outputs:
+      released:
+        description: "true" when a release was actually cut.
+        value: ${{ jobs.release.outputs.released }}
+      version:
+        description: Released version tag (e.g. v1.4.0). Empty when released=false.
+        value: ${{ jobs.release.outputs.version }}
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    outputs:
+      released: ${{ steps.bump.outputs.released }}
+      version: ${{ steps.bump.outputs.version }}
+    steps:
+      - name: Checkout calling repo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Checkout workflow-ci (for composite action + default cliff.toml)
+        uses: actions/checkout@v4
+        with:
+          repository: didlawowo/workflow-ci
+          ref: ${{ inputs.workflow-ci-ref }}
+          path: .workflow-ci
+
+      - name: Configure git identity
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Compute bump + write CHANGELOG
+        id: bump
+        uses: ./.workflow-ci/.github/actions/git-cliff-bump
+        with:
+          config: ${{ inputs.cliff-config }}
+          tag-prefix: ${{ inputs.tag-prefix }}
+
+      - name: Nothing to release
+        if: steps.bump.outputs.released != 'true'
+        run: |
+          echo "No conventional commits since last tag → no release. This is normal."
+
+      - name: Patch version files
+        if: steps.bump.outputs.released == 'true' && inputs.version-files != ''
+        env:
+          VERSION_FILES: ${{ inputs.version-files }}
+          NEW_VERSION: ${{ steps.bump.outputs.version }}
+          TAG_PREFIX: ${{ inputs.tag-prefix }}
+        run: |
+          set -euo pipefail
+          # Strip prefix for in-file version strings (files usually want 1.4.0, not v1.4.0)
+          BARE="${NEW_VERSION#${TAG_PREFIX}}"
+          while IFS= read -r line; do
+            [ -z "$line" ] && continue
+            path="${line%%:*}"
+            regex="${line#*:}"
+            if [ ! -f "$path" ]; then
+              echo "::warning::version-file '$path' not found, skipping"
+              continue
+            fi
+            echo "Patching $path with regex $regex → $BARE"
+            python3 - "$path" "$regex" "$BARE" <<'PY'
+          import re, sys, pathlib
+          path, regex, new = sys.argv[1], sys.argv[2], sys.argv[3]
+          p = pathlib.Path(path)
+          src = p.read_text()
+          pat = re.compile(regex, re.MULTILINE)
+          m = pat.search(src)
+          if not m:
+              sys.exit(f"regex did not match in {path}")
+          start, end = m.span(1)
+          out = src[:start] + new + src[end:]
+          p.write_text(out)
+          PY
+          done <<< "$VERSION_FILES"
+
+      - name: Commit, tag and push
+        if: steps.bump.outputs.released == 'true' && inputs.dry-run != true
+        env:
+          NEW_VERSION: ${{ steps.bump.outputs.version }}
+        run: |
+          set -euo pipefail
+          git add -A
+          if git diff --cached --quiet; then
+            echo "::warning::no changes staged (CHANGELOG/version-files unchanged) — tagging anyway"
+          else
+            git commit -m "chore(release): ${NEW_VERSION} [skip ci]"
+          fi
+          git tag -a "${NEW_VERSION}" -m "Release ${NEW_VERSION}"
+          git push origin HEAD
+          git push origin "${NEW_VERSION}"
+
+      - name: Create GitHub Release
+        if: steps.bump.outputs.released == 'true' && inputs.dry-run != true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NEW_VERSION: ${{ steps.bump.outputs.version }}
+        run: |
+          set -euo pipefail
+          gh release create "${NEW_VERSION}" \
+            --title "${NEW_VERSION}" \
+            --notes-file /tmp/release-notes.md \
+            --verify-tag
+
+      - name: Dry-run summary
+        if: steps.bump.outputs.released == 'true' && inputs.dry-run == true
+        env:
+          NEW_VERSION: ${{ steps.bump.outputs.version }}
+        run: |
+          echo "::notice::DRY RUN — would have released ${NEW_VERSION}"
+          echo "----- CHANGELOG.md (first 80 lines) -----"
+          head -n 80 CHANGELOG.md || true
+          echo "----- release notes -----"
+          cat /tmp/release-notes.md || true
