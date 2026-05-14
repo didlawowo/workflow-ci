@@ -131,6 +131,13 @@ Changements :
        registry:   oci-storage.dc-tech.work
        registry-username: ${{ secrets.OCI_USERNAME }}
        registry-password: ${{ secrets.OCI_PASSWORD }}
+       # Docker Hub auth: avoids 100/6h-per-IP rate limit on the FROM
+       # directives of the Dockerfile (python:*, oven/bun:*, etc.). The
+       # secrets are provisioned on every repo (DOCKERHUB_USERNAME +
+       # DOCKERHUB_TOKEN). Without these, multi-arch builds randomly fail
+       # with 429 Too Many Requests once the cluster's IP quota is reached.
+       dockerhub-username: ${{ secrets.DOCKERHUB_USERNAME }}
+       dockerhub-token:    ${{ secrets.DOCKERHUB_TOKEN }}
        platforms: linux/amd64,linux/arm64
        push: "true"
        sign: "true"
@@ -155,8 +162,9 @@ release-please, **escalader à Chris** — ne pas créer le tag depuis l'agent.
 
 | Préfixe | Cible | Provisionné sur les 5 repos ? |
 |---|---|---|
-| `OCI_USERNAME` / `OCI_PASSWORD` | `oci-storage.dc-tech.work` (registry interne) | ✅ oui (dc-finance, solar-monitoring, code-search, genai-benchmark-tool, oci-storage) |
-| `DOCKER_USERNAME` / `DOCKER_PASSWORD` | **Réservé à Docker Hub** (`docker.io`) — pas utilisé actuellement | legacy sur certains repos, à supprimer post-migration |
+| `OCI_USERNAME` / `OCI_PASSWORD` | `oci-storage.dc-tech.work` (registry interne, push & pull) | ✅ oui (8 repos) |
+| `DOCKERHUB_USERNAME` / `DOCKERHUB_TOKEN` | Docker Hub (`docker.io`) — auth pour pull des FROM dans les Dockerfiles, évite le rate limit 100/6h anonyme partagé par IP cluster | ✅ oui (7 repos: les 8 sauf invoice-automation 404) |
+| `DOCKER_USERNAME` / `DOCKER_PASSWORD` | **Legacy** — historiquement utilisés pour oci-storage avec un nom trompeur. À supprimer post-migration. | legacy sur certains repos |
 
 **Règle :** dans les workflows, toujours utiliser `secrets.OCI_*` pour les
 pushes/pulls oci-storage. Ne pas créer ni consommer `DOCKER_*` sauf si
