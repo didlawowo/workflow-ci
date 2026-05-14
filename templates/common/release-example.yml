@@ -1,0 +1,25 @@
+# Drop this file at .github/workflows/release.yml in your app repo.
+# Adjust `version-files` to match your project (or remove it to only tag).
+
+name: release
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    uses: didlawowo/workflow-ci/.github/workflows/release.yml@main
+    with:
+      # Each line is `path:regex` with a single capture group around the version.
+      # Examples — uncomment the lines that fit your project:
+      version-files: |
+        # pyproject.toml:^version = "(.+)"$
+        # package.json:"version": "(.+)"
+        # Chart.yaml:^version: (.+)$
+        # VERSION:^(.+)$
+      tag-prefix: "v"
+      dry-run: false
