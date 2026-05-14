@@ -101,8 +101,8 @@ Changements :
        image-name: oci-storage.dc-tech.work/<repo>/<image>
        image-tag:  ${{ needs.extract-version.outputs.tag_name }}
        registry:   oci-storage.dc-tech.work
-       registry-username: ${{ secrets.REGISTRY_USERNAME }}
-       registry-password: ${{ secrets.REGISTRY_PASSWORD }}
+       registry-username: ${{ secrets.OCI_USERNAME }}
+       registry-password: ${{ secrets.OCI_PASSWORD }}
        platforms: linux/amd64,linux/arm64
        push: "true"
        sign: "true"
@@ -120,6 +120,132 @@ Changements :
 Avant de merger, vérifier que `git describe --tags --abbrev=0` retourne un
 tag valide (ex: `v1.2.0`). Si absent ou désaligné avec le manifest
 release-please, **escalader à Chris** — ne pas créer le tag depuis l'agent.
+
+---
+
+## 🔐 Convention de naming des secrets
+
+| Préfixe | Cible | Provisionné sur les 5 repos ? |
+|---|---|---|
+| `OCI_USERNAME` / `OCI_PASSWORD` | `oci-storage.dc-tech.work` (registry interne) | ✅ oui (dc-finance, solar-monitoring, code-search, genai-benchmark-tool, oci-storage) |
+| `DOCKER_USERNAME` / `DOCKER_PASSWORD` | **Réservé à Docker Hub** (`docker.io`) — pas utilisé actuellement | legacy sur certains repos, à supprimer post-migration |
+
+**Règle :** dans les workflows, toujours utiliser `secrets.OCI_*` pour les
+pushes/pulls oci-storage. Ne pas créer ni consommer `DOCKER_*` sauf si
+authentification Docker Hub réellement nécessaire (cas futur).
+
+Post-migration, supprimer les anciens secrets `DOCKER_*` sur les repos qui en
+ont (dc-finance, solar-monitoring, code-search, oci-storage) une fois que
+plus aucun workflow ne les référence.
+
+---
+
+## 📦 Push des charts Helm dans oci-storage
+
+Les charts Helm vivent dans le même registry que les images Docker, sous
+le namespace `charts/` :
+
+```
+oci://oci-storage.dc-tech.work/charts/<chart-name>
+```
+
+### Commandes Helm
+
+```bash
+# Login (une fois par session)
+helm registry login oci-storage.dc-tech.work -u "$OCI_USERNAME" -p "$OCI_PASSWORD"
+
+# Package + push
+helm package helm/<chart-name>
+helm push <chart-name>-<version>.tgz oci://oci-storage.dc-tech.work/charts
+```
+
+### Convention dans le CD orchestrator
+
+Le push du chart est typiquement une étape **après** le build/push de
+l'image, dans le même job ou un job suivant. Pattern attendu :
+
+```yaml
+package-and-push-chart:
+  needs: [extract-version, update-deployments]
+  runs-on: ${{ vars.RUNNER || 'arc-runner-<repo>' }}
+  steps:
+    - uses: actions/checkout@v4
+      with:
+        ref: main  # pour récupérer le commit qui bump values.yaml/Chart.yaml
+        fetch-depth: 0
+
+    - name: Helm registry login
+      run: |
+        helm registry login oci-storage.dc-tech.work \
+          -u "${{ secrets.OCI_USERNAME }}" \
+          -p "${{ secrets.OCI_PASSWORD }}"
+
+    - name: Package + push chart
+      env:
+        VERSION: ${{ needs.extract-version.outputs.version }}
+      run: |
+        helm package helm/<chart-name> --version "$VERSION" --app-version "$VERSION"
+        helm push <chart-name>-${VERSION}.tgz oci://oci-storage.dc-tech.work/charts
+```
+
+### Règles
+
+1. **Toujours en CI**, jamais en local depuis le Mac.
+2. **Tag chart = tag image** (même version sémantique).
+3. **Pas de chart en `0.0.0-dev`** poussé en prod — uniquement les versions
+   issues d'un tag git.
+4. Vérification post-push :
+   ```bash
+   curl -s -u "$OCI_USERNAME:$OCI_PASSWORD" \
+     https://oci-storage.dc-tech.work/v2/charts/<chart-name>/tags/list
+   ```
+
+### Hygiène du chart pour les repos publics
+
+Si le repo est public (ou peut le devenir), **le `helm package` doit être
+propre** — pas de fuite d'infos perso/infra. Référence : portal-checker #61.
+
+Checklist avant le premier push d'un chart depuis un repo public :
+
+1. **`helm/values.yaml`** :
+   - ❌ Pas de domaines réels (`*.dc-tech.work`, `infisical.dc-tech.work`,
+     `grafana.dc-tech.work`, etc.) en valeur par défaut.
+   - ✅ Liste vide ou exemples génériques (`example.com`) commentés.
+   - ❌ Pas de credentials, tokens, ou IPs internes.
+2. **`helm/README.md` / chart `README.md`** :
+   - ❌ Pas de référence à des hostnames internes spécifiques.
+   - ✅ Utiliser `example.com` ou `<your-domain>` dans la doc.
+3. **`helm/.helmignore`** (à créer si absent) :
+   ```
+   # Project-specific: exclude development-only values overrides
+   values/
+
+   # Never package local TLS material (real certs are mounted at runtime)
+   certs/
+   *.crt
+   *.pem
+   *.key
+   ```
+4. **Avant push, render le chart en local** et grep les leak potentiels :
+   ```bash
+   helm template helm/<chart-name> | grep -iE "dc-tech\.work|192\.168|10\.0\.|api[_-]?key|password.*=.*[a-zA-Z0-9]{12,}"
+   ```
+   Doit retourner vide. Sinon → fix avant push.
+
+### Repos concernés
+
+| Repo | Public ? | Chart hygiene requise ? |
+|---|---|---|
+| **dc-finance** | privé | non (bonne pratique tout de même) |
+| **solar-monitoring** | privé | non |
+| **code-search** | privé | non |
+| **genai-benchmark-tool** | privé | non |
+
+Les 4 repos sont actuellement privés (vérifié le 2026-05-14). Si un repo
+passe public plus tard, **appliquer la checklist au moment du passage** —
+avant de re-push le chart. Vérifier avec
+`gh repo view didlawowo/<repo> --json visibility`.
 
 ---
 
