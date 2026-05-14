@@ -38,8 +38,13 @@ runs:
         uv python install ${{ inputs.python-version }}
         echo "python-version=${{ inputs.python-version }}" >> "$GITHUB_OUTPUT"
 
+    # Cache GitHub Actions hébergé : à éviter sur runner self-hosted qui
+    # fournit déjà un cache persistant (ex: ARC + PVC NFS via UV_CACHE_DIR).
+    # Sinon actions/cache écrase le NFS local avec un download WAN à chaque
+    # run et ré-upload à la fin → annule le bénéfice du cache persistant.
     - name: Cache dependencies
       id: cache
+      if: env.UV_CACHE_DIR == ''
       uses: actions/cache@v4
       with:
         path: |
