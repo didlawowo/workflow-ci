@@ -32,12 +32,32 @@ explicitement dans la description de la PR.
 
 ---
 
-## 🔴 Obligatoires sur tous les appels `docker-build-push`
+## 🔴 Inputs requis / recommandés sur `docker-build-push`
 
-Tout appel à `didlawowo/workflow-ci/.github/actions/docker-build-push@v1`
-**DOIT** passer ces 4 secrets, sinon les builds échoueront aléatoirement avec
-`429 Too Many Requests` sur les pulls Docker Hub (rate limit 100/6h partagé
-sur l'IP egress cluster — observé sur code-search v1.1.0 CD).
+### Toujours requis : auth registry de push
+
+```yaml
+registry-username: ${{ secrets.OCI_USERNAME }}      # push vers oci-storage
+registry-password: ${{ secrets.OCI_PASSWORD }}
+```
+
+### Conditionnellement requis : auth Docker Hub
+
+Les inputs `dockerhub-username` / `dockerhub-token` sont **`required: false`**
+côté composite (cf. `action.yml` l.85-98). Ils servent **uniquement** à
+authentifier le pull des `FROM` du Dockerfile depuis docker.io.
+
+| Cas | `dockerhub-*` requis ? |
+|---|---|
+| `FROM docker.io/*` ou implicite (`FROM python:3.12`, `FROM node:20`, `FROM alpine:…`, `FROM oven/bun:…`) | ✅ **oui** — sinon 429 random sur l'IP egress cluster |
+| `FROM oci-storage.dc-tech.work/…` ou `FROM ghcr.io/…` uniquement | ❌ non, optionnels |
+| `FROM scratch` ou pas de `FROM` externe | ❌ non |
+
+**Côté QEMU binfmt** (setup multi-arch) : le composite default `qemu-image`
+sur le mirror oci-storage (`oci-storage.dc-tech.work/mirror-binfmt:latest`).
+**Aucune auth Docker Hub n'est jamais nécessaire pour QEMU.**
+
+### Exemple complet (Dockerfile qui pull docker.io)
 
 ```yaml
 - uses: didlawowo/workflow-ci/.github/actions/docker-build-push@v1
@@ -69,10 +89,16 @@ Réserver `tag_name` (avec `v`) au git tag, GH Release, et nom de fichier
 chart `<name>-${VERSION}.tgz`. Symptôme typique du mismatch : `ImagePullBackOff
 ... not found` sur le pod, observé sur code-search v1.1.2/v1.1.3.
 
-Les 4 secrets sont **déjà provisionnés** sur les 7 repos (vérifié 2026-05-14).
-Si un repo est ajouté à la stack, ces secrets doivent être provisionnés
-**avant** la première PR de migration. Cf. section "Convention de naming
-des secrets" pour les détails.
+Les secrets `OCI_*` sont provisionnés sur les repos consommateurs de
+`workflow-ci`. Les secrets `DOCKERHUB_*` sont provisionnés là où le
+Dockerfile en a besoin. Pour vérifier sur un repo donné :
+
+```bash
+gh secret list -R didlawowo/<repo>
+```
+
+Si manquant et le Dockerfile pull docker.io → escalader à Chris pour
+provisionnement avant la PR de migration.
 
 ### Permissions du job appelant
 
@@ -165,7 +191,7 @@ Changements :
    les deux events :
    ```yaml
    extract-version:
-     runs-on: ${{ vars.RUNNER || 'arc-runner-<repo>' }}
+     runs-on: ${{ vars.RUNNER || 'ubuntu-latest' }}
      outputs:
        tag_name: ${{ steps.info.outputs.tag_name }}
        version:  ${{ steps.info.outputs.version }}
@@ -193,8 +219,10 @@ Changements :
    références aux outputs (`needs.release-please.outputs.X` →
    `needs.extract-version.outputs.X`).
 4. Tous les appels à `docker-build-push` doivent pinner sur **`@v1`** (ou
-   tag exact compatible). **Pas besoin de secret Docker Hub** — le composite
-   utilise par défaut le miroir oci-storage pour l'image QEMU binfmt :
+   tag exact compatible). Pour les secrets Docker Hub, cf. section
+   « Inputs requis / recommandés sur `docker-build-push` » — requis dès que
+   le Dockerfile a un `FROM docker.io/*`. La partie QEMU passe par le
+   mirror oci-storage par défaut (jamais besoin d'auth Docker Hub pour ça) :
    ```yaml
    - uses: didlawowo/workflow-ci/.github/actions/docker-build-push@v1
      with:
@@ -220,6 +248,20 @@ Changements :
        sbom: "true"
    ```
 
+### B.bis Recovery d'un release partiellement cassé
+
+Si le tag git est créé mais le build/push ou le helm push échoue :
+
+- Rejouer **uniquement** la séquence post-tag via le `workflow_dispatch` du
+  CD orchestrator (avec `inputs.tag: vX.Y.Z`). Pas besoin de re-cut un
+  release ni de toucher au tag.
+- **Ne pas supprimer le tag git** pour « re-trigger » — ça repart à zéro
+  et git-cliff recalcule depuis le tag d'avant, ce qui peut dupliquer ou
+  sauter des entrées CHANGELOG.
+
+Si le tag lui-même est faux (mauvaise version, mauvais commit) :
+**escalader à Chris**, ne pas force-push.
+
 ### C. Fichiers à supprimer
 
 - `release-please-config.json`
@@ -232,14 +274,76 @@ Avant de merger, vérifier que `git describe --tags --abbrev=0` retourne un
 tag valide (ex: `v1.2.0`). Si absent ou désaligné avec le manifest
 release-please, **escalader à Chris** — ne pas créer le tag depuis l'agent.
 
+Cas repo neuf (aucun tag git) : cf. section « Bootstrap d'un repo from
+scratch » ci-dessous.
+
+---
+
+## 🆕 Bootstrap d'un repo from scratch (pas de release-please préexistant)
+
+Cas typique : repo neuf qui n'a jamais utilisé release-please. Pas de tag
+git, pas de `release-please-manifest.json`, pas de CHANGELOG. Suivre :
+
+1. **Pré-requis sur le repo GitHub** :
+   - Variable `vars.RUNNER` settée si tu veux build sur ARC (sinon le
+     workflow tombe sur `ubuntu-latest`, GH-hosted, qui fait le job).
+   - Secrets `OCI_USERNAME`, `OCI_PASSWORD` provisionnés.
+   - Secrets `DOCKERHUB_USERNAME`, `DOCKERHUB_TOKEN` si le Dockerfile pull
+     depuis docker.io (cf. section secrets).
+
+2. **Fichier de version canonique** : `pyproject.toml` (Python),
+   `package.json` (Node), `Chart.yaml` (Helm-only), ou `VERSION`
+   (générique). Pré-remplir avec `0.1.0` si neuf.
+
+3. **Premier tag baseline** (à faire par Chris, pas l'agent) :
+   ```bash
+   git tag v0.1.0 && git push origin v0.1.0
+   ```
+   git-cliff a besoin d'un tag de référence pour calculer le bump.
+
+4. **Conventional commits obligatoires à partir de là**. Cf. section
+   « Conventional commits » ci-dessous.
+
+5. **`cliff.toml`** : pas besoin d'en créer un dans le repo, le reusable
+   workflow utilise par défaut `templates/common/cliff.toml` de
+   workflow-ci (cf. input `cliff-config` du reusable, default `""`).
+   N'override que si besoin réel (sections de changelog custom, etc.).
+
+6. **`CHANGELOG.md`** : le reusable le crée / met à jour à la racine du
+   repo à chaque release. Pas besoin de l'initialiser à la main.
+
+7. **Pas de section « Spécifiques par repo » à compléter** — ces sections
+   sont des **exemples historiques** des premiers repos migrés, pas un
+   template obligatoire.
+
+---
+
+## 📝 Conventional commits (requis pour git-cliff)
+
+git-cliff calcule le bump depuis les messages de commit. Sans conventional
+commits, **aucun release n'est cut** (`released=false` dans l'output du
+reusable).
+
+| Type de commit | Bump |
+|---|---|
+| `feat: …` | minor (1.2.0 → 1.3.0) |
+| `fix: …` / `perf: …` / `refactor: …` | patch (1.2.0 → 1.2.1) |
+| `chore: …` / `docs: …` / `test: …` / `ci: …` | aucun (pas de release) |
+| Footer `BREAKING CHANGE: …` ou type avec `!` (`feat!: …`) | major (1.2.0 → 2.0.0) |
+
+La grammaire exacte des sections du CHANGELOG est définie dans
+`templates/common/cliff.toml` de workflow-ci. Pour modifier la
+classification (ex: faire bump `perf:` en minor), override `cliff-config`
+dans `release.yml` avec un cliff.toml local.
+
 ---
 
 ## 🔐 Convention de naming des secrets
 
-| Préfixe | Cible | Provisionné sur les 5 repos ? |
+| Préfixe | Cible | Provisionnement |
 |---|---|---|
-| `OCI_USERNAME` / `OCI_PASSWORD` | `oci-storage.dc-tech.work` (registry interne, push & pull) | ✅ oui (8 repos) |
-| `DOCKERHUB_USERNAME` / `DOCKERHUB_TOKEN` | Docker Hub (`docker.io`) — auth pour pull des FROM dans les Dockerfiles, évite le rate limit 100/6h anonyme partagé par IP cluster | ✅ oui (7 repos: les 8 sauf invoice-automation 404) |
+| `OCI_USERNAME` / `OCI_PASSWORD` | `oci-storage.dc-tech.work` (registry interne, push & pull) | Vérifier par repo : `gh secret list -R didlawowo/<repo>` |
+| `DOCKERHUB_USERNAME` / `DOCKERHUB_TOKEN` | Docker Hub (`docker.io`) — auth pour pull des FROM dans les Dockerfiles, évite le rate limit 100/6h anonyme partagé par IP cluster | Vérifier par repo : `gh secret list -R didlawowo/<repo>` (requis dès que le Dockerfile pull docker.io) |
 | `DOCKER_USERNAME` / `DOCKER_PASSWORD` | **Legacy** — historiquement utilisés pour oci-storage avec un nom trompeur. À supprimer post-migration. | legacy sur certains repos |
 
 **Règle :** dans les workflows, toujours utiliser `secrets.OCI_*` pour les
@@ -280,7 +384,7 @@ l'image, dans le même job ou un job suivant. Pattern attendu :
 ```yaml
 package-and-push-chart:
   needs: [extract-version, update-deployments]
-  runs-on: ${{ vars.RUNNER || 'arc-runner-<repo>' }}
+  runs-on: ${{ vars.RUNNER || 'ubuntu-latest' }}
   steps:
     - uses: actions/checkout@v4
       with:
