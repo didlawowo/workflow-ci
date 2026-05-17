@@ -1,12 +1,17 @@
 # Migration Guidelines — release-please → git-cliff
 
-Brief unifié pour aligner les 4 repos didlawowo qui migrent vers la stack
-release centralisée (`workflow-ci`) : `dc-finance`, `solar-monitoring`,
-`code-search`, `genai-benchmark-tool`.
+Brief unifié pour **tous les repos didlawowo** qui consomment la stack
+release centralisée (`workflow-ci`). Les sections « Repository-Specific
+Guidance » plus bas listent les premiers repos migrés à titre de référence,
+mais les règles **s'appliquent à tout nouveau repo** qui adopte
+`workflow-ci` (ex. `llama-cpp-manager`, `infra/*`, etc.).
 
 **Objectif :** pipelines structurellement **identiques** post-migration. Une
 seule façon de faire, pas de divergence. Tout écart doit être justifié
 explicitement dans la description de la PR.
+
+> Vous arrivez sur un repo neuf ? Suivez la **Canonical Workflow Structure**
+> (A + B + C). Les blocs repo-spécifiques sont indicatifs, pas exhaustifs.
 
 ---
 
@@ -527,12 +532,13 @@ créative du brief.
 
 ## Critères de succès
 
-Après les 4 PRs mergées :
+Pour **chaque repo** qui adopte `workflow-ci` (initiale ou future) :
 
-- ✅ 4 repos avec **exactement** la même structure `release.yml`
-- ✅ 4 CDs avec le pattern `extract-version` job
+- ✅ `release.yml` strictement identique à la structure canon (A)
+- ✅ CD avec le pattern `extract-version` job (B)
 - ✅ 0 workflow `docker-release.yml`
 - ✅ Tous les `docker-build-push` pinés sur `@v1` (ou tag exact ≥ v1.3.0)
+- ✅ Les 4 secrets registry + DockerHub fournis à chaque appel
 - ✅ Plus de rate limit Docker Hub (miroir oci-storage)
 - ✅ Plus d'image arm64-only en prod
 - ✅ Plus de drift entre `Chart.yaml`, `VERSION`, manifest, tag git
