@@ -42,8 +42,19 @@ runs:
     - name: Install golangci-lint
       shell: bash
       run: |
-        GOPATH_BIN="$(go env GOPATH)/bin"
-        curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b "$GOPATH_BIN" ${{ inputs.golangci-lint-version }}
+        # Build from source with the runner's Go toolchain. A prebuilt binary is compiled
+        # against a fixed Go version and refuses to lint modules whose go.mod `go` directive
+        # is newer (e.g. v1.64.8 is built with go1.24 and errors on `go 1.25.0`: "the Go
+        # language version used to build golangci-lint is lower than the targeted version").
+        # Building here uses the toolchain from setup-go, so it always matches the project.
+        # golangci-lint v2 moved to a `/v2` module path, so pick the path by major version
+        # ("latest" and v1.x resolve to the v1 module; only v2.x needs the /v2 path).
+        VERSION="${{ inputs.golangci-lint-version }}"
+        case "$VERSION" in
+          v2*) MODULE="github.com/golangci/golangci-lint/v2/cmd/golangci-lint" ;;
+          *)   MODULE="github.com/golangci/golangci-lint/cmd/golangci-lint" ;;
+        esac
+        go install "${MODULE}@${VERSION}"
 
     - name: Run golangci-lint
       id: lint
@@ -89,9 +100,15 @@ runs:
       shell: bash
       working-directory: ${{ inputs.working-directory }}
       run: |
-        go install github.com/securego/gosec/v2/cmd/gosec@latest
-        gosec -fmt sarif -out gosec-results.sarif ./... || true
-        gosec -fmt text ./... || true
+        # Don't let a gosec install/build hiccup fail the whole quality job (this step has
+        # no continue-on-error). `@latest` is a moving target and can break against a new Go.
+        go install github.com/securego/gosec/v2/cmd/gosec@latest || true
+        if command -v gosec >/dev/null 2>&1; then
+          gosec -fmt sarif -out gosec-results.sarif ./... || true
+          gosec -fmt text ./... || true
+        else
+          echo "gosec not available, skipping security scan"
+        fi
 
     - name: Upload GoSec SARIF
       uses: github/codeql-action/upload-sarif@v4
