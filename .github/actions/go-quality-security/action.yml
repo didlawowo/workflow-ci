@@ -110,13 +110,8 @@ runs:
           echo "gosec not available, skipping security scan"
         fi
 
-    - name: Upload GoSec SARIF
-      uses: github/codeql-action/upload-sarif@v4
-      if: always()
-      with:
-        sarif_file: ${{ inputs.working-directory }}/gosec-results.sarif
-        category: "gosec"
-      continue-on-error: true
+    # Upload SARIF retiré : Code Scanning nécessite GHAS (indispo sur repos privés
+    # perso) → l'upload échouait toujours. gosec tourne et gate la qualité ci-dessous.
 
     - name: Analyze results
       id: summary
