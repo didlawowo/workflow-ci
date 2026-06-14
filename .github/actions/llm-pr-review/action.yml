@@ -11,7 +11,9 @@ inputs:
     required: false
     default: "not-needed"
   llm-model:
-    description: "Model name or alias (qwen35, nemo3)"
+    # NB: les valeurs sont des ALIAS resolus par le gateway LLM, pas des noms de
+    # modeles bruts. Ex: "qwen35" route vers Qwen3.6 27B cote gateway.
+    description: "Model alias resolved by the LLM gateway (e.g. qwen35 -> Qwen3.6 27B, nemo3)"
     required: false
     default: "qwen35"
   github-token:
@@ -405,7 +407,7 @@ runs:
     - name: Post review comment
       id: post-review
       if: steps.check-diff.outputs.skip != 'true' && steps.llm-call.outputs.error != 'true'
-      uses: actions/github-script@v7
+      uses: actions/github-script@v9
       with:
         github-token: ${{ inputs.github-token }}
         script: |
@@ -478,7 +480,7 @@ runs:
     # ── Step 7: Post skip notification ──
     - name: Post skip notification
       if: steps.check-diff.outputs.skip == 'true'
-      uses: actions/github-script@v7
+      uses: actions/github-script@v9
       with:
         github-token: ${{ inputs.github-token }}
         script: |
