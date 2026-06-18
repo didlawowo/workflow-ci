@@ -1,0 +1,24 @@
+{
+  "workbench.colorTheme": "Monokai",
+  "peacock.color": "#204ee6",
+  "workbench.colorCustomizations": {
+    "activityBar.activeBackground": "#4d72eb",
+    "activityBar.background": "#4d72eb",
+    "activityBar.foreground": "#e7e7e7",
+    "activityBar.inactiveForeground": "#e7e7e799",
+    "activityBarBadge.background": "#153cbd",
+    "activityBarBadge.foreground": "#e7e7e7",
+    "commandCenter.border": "#e7e7e799",
+    "sash.hoverBorder": "#4d72eb",
+    "statusBar.background": "#204ee6",
+    "statusBar.foreground": "#e7e7e7",
+    "statusBarItem.hoverBackground": "#153cbd",
+    "statusBarItem.remoteBackground": "#204ee6",
+    "statusBarItem.remoteForeground": "#e7e7e7",
+    "titleBar.activeBackground": "#204ee6",
+    "titleBar.activeForeground": "#e7e7e7",
+    "titleBar.inactiveBackground": "#204ee699",
+    "titleBar.inactiveForeground": "#e7e7e799"
+  },
+  "window.title": "🔵 infra · workflow-ci ${separator}${activeEditorShort}"
+}
