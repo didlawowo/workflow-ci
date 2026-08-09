@@ -168,6 +168,12 @@ runs:
         echo "target-name=${TARGET}" >> "$GITHUB_OUTPUT"
         echo "sarif-file=trivy-${TARGET}-results.sarif" >> "$GITHUB_OUTPUT"
 
+        # Unique artifact name per image: allows using this action several
+        # times in the same run (e.g. main + MCP images) without a 409
+        # "artifact with this name already exists" conflict.
+        SLUG="$(echo "${{ inputs.image-name }}" | tr '/:' '--')"
+        echo "artifact-name=docker-scan-${SLUG}-${TARGET}" >> "$GITHUB_OUTPUT"
+
     - name: Install Cosign
       if: inputs.sign == 'true'
       uses: sigstore/cosign-installer@v3
@@ -240,6 +246,6 @@ runs:
       if: inputs.scan == 'true'
       uses: actions/upload-artifact@v6
       with:
-        name: docker-scan-${{ steps.meta.outputs.target-name }}
+        name: ${{ steps.meta.outputs.artifact-name }}
         path: ${{ steps.meta.outputs.sarif-file }}
         retention-days: 7
