@@ -20,6 +20,10 @@ on:
       - "!main"
   pull_request:
     branches: [main]
+    # 'labeled' : nécessaire si un job est conditionné à un label (ex: build
+    # d'image preview gardé par `contains(pull_request.labels.*.name, 'preview')`).
+    # Sans ça, poser le label après le run initial ne relance rien.
+    types: [opened, synchronize, reopened, labeled]
 
 # ─────────────────────────────────────────────────────────────────────────────
 # PROJECT CONFIGURATION - Edit these values for your project
