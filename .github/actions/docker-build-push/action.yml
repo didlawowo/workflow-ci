@@ -139,8 +139,12 @@ runs:
       with:
         driver-opts: image=moby/buildkit:buildx-stable-1
 
+    # Log in whenever creds are provided (not only when pushing) so the registry
+    # build cache (cache-from/cache-to type=registry) can authenticate on CI
+    # builds too. Logging in never pushes anything — push is gated by the build
+    # step's `push:` input below.
     - name: Login to Docker Registry
-      if: inputs.push == 'true' && inputs.registry-username != '' && inputs.registry-password != ''
+      if: inputs.registry-username != '' && inputs.registry-password != ''
       uses: docker/login-action@v3
       with:
         registry: ${{ inputs.registry }}
@@ -193,8 +197,18 @@ runs:
         tags: ${{ steps.meta.outputs.tags }}
         labels: ${{ inputs.labels }}
         build-args: ${{ inputs.build-args }}
-        cache-from: type=gha,scope=${{ inputs.cache-scope }}
-        cache-to: type=gha,mode=max,scope=${{ inputs.cache-scope }}
+        # Registry cache on the in-cluster OCI registry instead of type=gha,
+        # which round-trips through GitHub's cache API from self-hosted runners.
+        # Stored as a dedicated `buildcache-<scope>` tag on the image repo.
+        # cache-to only on push (release builds): that's when write creds are
+        # present and when the expensive multi-arch layers are produced; CI
+        # builds read from that cache (cache-from is non-fatal on a miss).
+        # image-manifest+oci-mediatypes = compatibility with plain OCI registries.
+        # ignore-error=true = a cache EXPORT failure must NOT fail the build
+        # (otherwise a registry that rejects the cache manifest would break every
+        # release). Worst case = no cache, never a red build.
+        cache-from: type=registry,ref=${{ inputs.image-name }}:buildcache-${{ inputs.cache-scope }}
+        cache-to: ${{ inputs.push == 'true' && format('type=registry,mode=max,image-manifest=true,oci-mediatypes=true,ignore-error=true,ref={0}:buildcache-{1}', inputs.image-name, inputs.cache-scope) || '' }}
         sbom: ${{ inputs.sbom }}
         provenance: ${{ inputs.provenance == 'true' && 'mode=max' || 'false' }}
 
@@ -212,9 +226,29 @@ runs:
           --certificate-oidc-issuer="https://token.actions.githubusercontent.com" \
           "${{ inputs.image-name }}@${{ steps.build.outputs.digest }}"
 
+    # Cache Trivy's vuln DB across runs. Without this every scan re-pulls the DB
+    # from ghcr.io/aquasecurity/trivy-db — slow and rate-limited on the cluster's
+    # shared egress IP. Keyed by day; Trivy only refreshes the DB when it's stale.
+    - name: Trivy DB cache key (date)
+      id: trivy-cache-key
+      if: inputs.scan == 'true'
+      shell: bash
+      run: echo "date=$(date +%Y-%m-%d)" >> "$GITHUB_OUTPUT"
+
+    - name: Cache Trivy vulnerability DB
+      if: inputs.scan == 'true'
+      uses: actions/cache@v4
+      with:
+        path: ${{ github.workspace }}/.trivy-cache
+        key: trivy-db-${{ steps.trivy-cache-key.outputs.date }}
+        restore-keys: |
+          trivy-db-
+
     - name: Run Trivy vulnerability scanner
       if: inputs.scan == 'true'
       uses: aquasecurity/trivy-action@master
+      env:
+        TRIVY_CACHE_DIR: ${{ github.workspace }}/.trivy-cache
       with:
         image-ref: ${{ steps.meta.outputs.full-name }}
         format: "sarif"
