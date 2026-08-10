@@ -96,6 +96,24 @@ inputs:
     description: "Docker Hub PAT (public_repo read scope is enough)."
     required: false
     default: ""
+  native-multiarch:
+    description: |
+      Build each platform on NATIVE hardware via remote BuildKit nodes instead of
+      QEMU emulation. When 'true', skips setup-qemu/setup-buildx and creates a buildx
+      builder with two remote nodes (amd64 + arm64) — arm64 builds run on native arm64
+      hardware (no QEMU). Requires the buildkitd-amd64/buildkitd-arm64 services to be
+      reachable (see continuous-delivery: infrastructure-crds/rke2-infra/buildkitd-remote.yaml).
+      Default 'false' keeps the QEMU path (rollback-safe).
+    required: false
+    default: "false"
+  buildkit-amd64-endpoint:
+    description: "Remote BuildKit endpoint for linux/amd64 (native-multiarch=true)."
+    required: false
+    default: "tcp://buildkitd-amd64.arc-system.svc.cluster.local:1234"
+  buildkit-arm64-endpoint:
+    description: "Remote BuildKit endpoint for linux/arm64 (native-multiarch=true)."
+    required: false
+    default: "tcp://buildkitd-arm64.arc-system.svc.cluster.local:1234"
 
 outputs:
   digest:
@@ -129,15 +147,32 @@ runs:
     # at the oci-storage mirror to avoid even depending on Docker Hub for
     # QEMU setup. Authenticated Docker Hub login (above) is a separate
     # defense covering FROM directives in user Dockerfiles.
+    # QEMU + docker-container Buildx: the emulated multi-arch path. Skipped when
+    # native-multiarch=true (remote BuildKit nodes handle each arch natively).
     - name: Set up QEMU
+      if: inputs.native-multiarch != 'true'
       uses: docker/setup-qemu-action@v3
       with:
         image: ${{ inputs.qemu-image }}
 
     - name: Set up Docker Buildx
+      if: inputs.native-multiarch != 'true'
       uses: docker/setup-buildx-action@v3
       with:
         driver-opts: image=moby/buildkit:buildx-stable-1
+
+    # Native multi-arch: one remote BuildKit node per arch (no QEMU). buildx routes
+    # linux/amd64 -> amd64 node, linux/arm64 -> arm64 node (native hardware).
+    - name: Set up native multi-arch Buildx (remote BuildKit)
+      if: inputs.native-multiarch == 'true'
+      shell: bash
+      run: |
+        docker buildx create --name native --driver remote \
+          --node native-amd64 --platform linux/amd64 "${{ inputs.buildkit-amd64-endpoint }}"
+        docker buildx create --append --name native \
+          --node native-arm64 --platform linux/arm64 "${{ inputs.buildkit-arm64-endpoint }}"
+        docker buildx use native
+        docker buildx inspect --bootstrap native
 
     # Log in whenever creds are provided (not only when pushing) so the registry
     # build cache (cache-from/cache-to type=registry) can authenticate on CI
@@ -188,6 +223,9 @@ runs:
       id: build
       uses: docker/build-push-action@v6
       with:
+        # Use the native remote builder when enabled; otherwise the default
+        # (docker-container) builder from setup-buildx-action above.
+        builder: ${{ inputs.native-multiarch == 'true' && 'native' || '' }}
         context: ${{ inputs.context }}
         file: ${{ inputs.dockerfile }}
         target: ${{ inputs.dockerfile-target || '' }}
