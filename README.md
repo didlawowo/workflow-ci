@@ -66,6 +66,23 @@ templates/
 
 Each template has a `PROJECT CONFIGURATION` section at the top — edit `RUNNER`, `IMAGE_NAME`, version, etc.
 
+### Environnements preview (label-gated)
+
+Si un repo build une image preview via un job conditionné au label `preview`
+(`if: contains(github.event.pull_request.labels.*.name, 'preview')`), le trigger
+`pull_request` **doit** inclure le type `labeled` :
+
+```yaml
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened, labeled]
+```
+
+Sinon, poser le label après le run initial ne déclenche aucun build → l'image
+`pr-<n>` n'existe pas → `ImagePullBackOff` sur le pod preview. Les templates
+`ci-branch-pipeline.yml` incluent déjà ce type par défaut.
+
 ## Secrets Required
 
 | Secret                 | Used by           |
