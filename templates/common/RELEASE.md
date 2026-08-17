@@ -62,10 +62,73 @@ permissions:
   contents: write
 ```
 
-`GITHUB_TOKEN` suffit pour tag + push + release. Si tu veux qu'un autre
-workflow se déclenche **sur** le tag créé (limitation GitHub bien connue :
-les events poussés par `GITHUB_TOKEN` ne re-déclenchent rien), il faut un
-PAT ou une GitHub App. Documenté mais hors scope par défaut.
+`GITHUB_TOKEN` suffit pour tag + push + release.
+
+### Déclencher un workflow CD sur le tag créé
+
+Limitation GitHub bien connue : un tag poussé par `GITHUB_TOKEN` **ne
+déclenche aucun workflow en aval**. Un `on: push: tags: ['v*']` ne partira
+donc jamais tout seul après une release automatique.
+
+Pas besoin de PAT ni de GitHub App pour autant : passer `trigger-cd-workflow`
+au workflow réutilisable, qui dispatchera explicitement la cible.
+
+```yaml
+jobs:
+  release:
+    uses: didlawowo/workflow-ci/.github/workflows/release.yml@v1
+    permissions:
+      contents: write
+      actions: write          # requis pour le dispatch
+    with:
+      trigger-cd-workflow: cd-production-orchestrator.yml
+```
+
+La cible **doit** déclarer `workflow_dispatch` avec un `inputs.tag` :
+
+```yaml
+on:
+  push:
+    tags: ['v*']              # tags poussés à la main
+  workflow_dispatch:
+    inputs:
+      tag:
+        required: true
+        type: string
+```
+
+…et lire la version depuis `inputs.tag` en dispatch, car `GITHUB_REF_NAME`
+vaut alors `main` et non le tag :
+
+```yaml
+- id: version
+  run: |
+    if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+      VERSION="${{ inputs.tag }}"
+    else
+      VERSION="${GITHUB_REF_NAME}"
+    fi
+    echo "version=${VERSION#v}" >> "$GITHUB_OUTPUT"
+```
+
+`trigger-cd-workflow` n'accepte **qu'un** nom de workflow. Si la release doit
+en lancer plusieurs (image *et* chart, par exemple), viser un orchestrateur qui
+les dispatche à son tour.
+
+### `version-files` : ne pas oublier le values.yaml
+
+Quand ArgoCD déploie le chart **depuis git** (et non depuis un registre OCI
+épinglé), il lit `image.tag` dans `values.yaml`. Ce fichier doit donc figurer
+dans `version-files`, sinon le merge fait déployer une image qui n'existe pas
+encore — `ImagePullBackOff` en production le temps que le build sorte. Cas réel.
+
+```yaml
+version-files: |
+  pyproject.toml:^version = "(.+)"$
+  helm/<app>/Chart.yaml:^version: (.+)$
+  helm/<app>/Chart.yaml:^appVersion: "(.+)"$
+  helm/<app>/values.yaml:^  tag: "(.+)"$
+```
 
 ## Outputs
 
