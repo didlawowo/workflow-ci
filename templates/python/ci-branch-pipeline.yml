@@ -1,7 +1,7 @@
 # =============================================================================
 # CI - Branch Pipeline (Python)
 # =============================================================================
-# Runs on: push to branches (except main), pull requests to main
+# Runs on: pull requests to main (+ manual dispatch)
 # Uses composite actions from: didlawowo/workflow-ci
 #
 # To adapt for your project:
@@ -9,21 +9,47 @@
 # 2. Adjust PYTHON_VERSION, COVERAGE_THRESHOLD
 # 3. Adjust IMAGE_NAME to your Docker Hub image
 # 4. Set secrets: DOCKER_USERNAME, DOCKER_PASSWORD, CODECOV_TOKEN
+#
+# ─────────────────────────────────────────────────────────────────────────────
+# POURQUOI PAS DE TRIGGER `push` (leçon apprise en prod)
+# ─────────────────────────────────────────────────────────────────────────────
+# Ce template déclenchait sur `push` (toutes branches sauf main) ET sur
+# `pull_request`. Résultat : DEUX pipelines complets en parallèle pour le même
+# commit, dès qu'une PR est ouverte — temps et coût runner doublés.
+#
+# Pire, sans bloc `concurrency` rien n'annulait les runs précédents : chaque
+# push empilait de nouveaux runs. Et quand une annulation finissait par
+# survenir, les jobs coupés remontaient en `failure` — un scan Trivy tué à
+# 1m24 alors qu'il passe en 6m50, faisant croire à une CVE inexistante et
+# bloquant une PR pour rien. Cas réel, diagnostiqué sur photo-analyser.
+#
+# Le run de PR couvre déjà chaque commit poussé sur la branche. Pour tester une
+# branche AVANT d'ouvrir la PR : `workflow_dispatch`, ou ouvrir la PR en draft.
 # =============================================================================
 
 name: "CI - Branch Pipeline"
 
 on:
-  push:
-    branches:
-      - "**"
-      - "!main"
   pull_request:
     branches: [main]
     # 'labeled' : nécessaire si un job est conditionné à un label (ex: build
     # d'image preview gardé par `contains(pull_request.labels.*.name, 'preview')`).
     # Sans ça, poser le label après le run initial ne relance rien.
     types: [opened, synchronize, reopened, labeled]
+  workflow_dispatch:
+
+# ─────────────────────────────────────────────────────────────────────────────
+# CONCURRENCE — n'exécuter que le run le plus récent
+# ─────────────────────────────────────────────────────────────────────────────
+# `ref_name` et NON `ref` : sur un push `head_ref` est vide et `github.ref`
+# vaut `refs/heads/<branche>`, alors que sur une pull_request `head_ref` vaut
+# `<branche>`. Utiliser `github.ref` produit donc deux clés différentes selon
+# l'événement, et les runs ne s'annulent jamais entre eux — c'est ce qui
+# laissait deux pipelines vivre en parallèle. `ref_name` vaut `<branche>` dans
+# les deux cas, donc le run le plus récent annule bien le précédent.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
 
 # ─────────────────────────────────────────────────────────────────────────────
 # PROJECT CONFIGURATION - Edit these values for your project
@@ -118,7 +144,12 @@ jobs:
         with:
           image-name: ${{ env.IMAGE_NAME }}
           image-tag: ${{ steps.tag.outputs.branch-tag }}
-          push: ${{ github.event_name == 'push' }}
+          # Testait `event_name == 'push'`, trigger désormais supprimé : la
+          # valeur serait restée définitivement fausse, donc trompeuse. Sur PR
+          # on build sans publier — ce qui valide le Dockerfile et alimente le
+          # scan — et on publie une image de branche seulement sur demande.
+          # Les images de release sont produites par le workflow CD sur le tag.
+          push: ${{ github.event_name == 'workflow_dispatch' }}
           registry-username: ${{ secrets.DOCKER_USERNAME }}
           registry-password: ${{ secrets.DOCKER_PASSWORD }}
 
