@@ -527,6 +527,70 @@ Le cluster RKE2 tourne sur **amd64** (node Ryzen). Risque : image arm64-only
 
 ---
 
+## 🔁 Preview / CD ArgoCD — éviter le pod « stale » (tag mutable)
+
+**Symptôme.** Une preview (ou une prod GitOps) déployée avec un tag d'image
+**mutable** (`pr-<n>`, `latest`, `<branch>`) ne se met **pas** à jour quand on
+repush : le pod continue de servir l'ancienne image. On croit tester le dernier
+code, mais non.
+
+**Cause.** ArgoCD/Kubernetes ne redéploient un pod que si le **manifeste** change.
+Avec un tag mutable, le `Deployment` rendu est identique à chaque commit (même
+chaîne `image: repo:pr-37`) → aucun diff → **pas de rollout**, même si une image
+plus récente existe sous ce tag. `imagePullPolicy: Always` **ne suffit pas** : il
+n'agit qu'au (re)démarrage d'un pod, pas comme déclencheur de rollout. Un
+`kubectl rollout restart` dépanne à la main, mais ce n'est pas GitOps.
+
+> Cas réel : `photo-analyser` preview `pr-37` — pod vieux de 9 h servant l'image
+> d'avant, alors que 3 images `pr-37` avaient été repoussées depuis. Le job
+> d'indexation, lui, était à jour car recréé à chaque sync (hook PostSync).
+
+### Fix — deux options
+
+**A. (préféré) Déployer un tag immuable par commit `<branch>-<sha>`.**
+Le `ci-branch-pipeline` produit déjà ce tag (`git rev-parse --short HEAD`). Si la
+valeur de deploy pointe dessus, le manifeste change à chaque commit → ArgoCD
+**roule tout seul**, aucun restart. À privilégier partout où c'est possible.
+
+```yaml
+# values de preview / CD — au lieu de image.tag: "pr-37"
+image:
+  tag: "feat-ma-branche-1a2b3c4"   # <branch>-<sha>, immuable
+  pullPolicy: IfNotPresent          # inutile de forcer Always si le tag est unique
+```
+
+**B. (fallback) Tag mutable conservé → annoter le pod avec le SHA.**
+Si le tag doit rester mutable (`pr-<n>`), injecter le SHA dans une **annotation
+du pod-template** : la spec du `Deployment` change à chaque commit → rollout.
+Le chart doit exposer `podAnnotations` (déjà standard) :
+
+```yaml
+# templates/deployment.yaml (déjà en place dans le chart type)
+spec:
+  template:
+    metadata:
+      annotations:
+        {{- toYaml .Values.podAnnotations | nindent 8 }}
+```
+
+```yaml
+# values injectées au deploy (preview controller / CD) — SHA du commit
+podAnnotations:
+  app.dc-tech.work/git-sha: "1a2b3c4"
+image:
+  tag: "pr-37"
+  pullPolicy: Always   # requis ici : le tag ne change pas, il faut re-pull
+```
+
+### Règle
+
+- Preview/CD sur tag **mutable** → **obligatoire** : soit passer au tag immuable
+  `<branch>-<sha>` (option A), soit annoter le pod-template avec le SHA (option B).
+- Ne jamais compter sur `imagePullPolicy: Always` seul pour rafraîchir un
+  Deployment — il ne déclenche pas de rollout.
+
+---
+
 ## 📋 Spécifiques par repo
 
 ### dc-finance — PR de cleanup (#145 déjà mergée, dettes à reprendre)
