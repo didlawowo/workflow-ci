@@ -133,13 +133,32 @@ runs:
     # Dockerfile FROM directives (python:*, oven/bun:*, node:*, etc.) use the
     # account quota instead of the anonymous 100/6h-per-IP limit. The cluster
     # runners share an egress IP, so anonymous quota is exhausted quickly.
+    #
+    # Best-effort on purpose. This login raises a pull quota, it is not a
+    # requirement for the build: everything after it — buildx, the login to the
+    # real target registry, build/push, sign, scan — is independent of it.
+    # Without continue-on-error a Docker Hub hiccup (throttled auth from the
+    # shared egress IP, expired PAT) fails the step, skips every later step by
+    # cascade, and takes down image publishing for every repo consuming this
+    # action. Degrading to anonymous pulls may hit the rate limit; hard-failing
+    # guarantees no image at all. The warning keeps it visible in the summary.
     - name: Login to Docker Hub (authenticated base image pulls)
       if: inputs.dockerhub-username != '' && inputs.dockerhub-token != ''
       uses: docker/login-action@v3
+      continue-on-error: true
+      id: dockerhub-login
       with:
         registry: docker.io
         username: ${{ inputs.dockerhub-username }}
         password: ${{ inputs.dockerhub-token }}
+
+    - name: Warn when Docker Hub login failed
+      if: steps.dockerhub-login.outcome == 'failure'
+      shell: bash
+      run: |
+        echo "::warning title=Docker Hub login failed::Falling back to anonymous pulls for base images. \
+        Builds continue but may hit the 100/6h-per-IP anonymous rate limit shared by the cluster runners. \
+        Check DOCKERHUB_USERNAME/DOCKERHUB_TOKEN if this persists."
 
     # setup-qemu-action runs `docker run <image> --install all` to install
     # binfmt handlers. By default that image is tonistiigi/binfmt:latest on
