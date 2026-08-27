@@ -55,6 +55,24 @@ on:
         required: false
         type: string
         default: ""
+      post-bump-command:
+        description: |
+          Commande shell exécutée APRÈS le patch des version-files et AVANT le commit
+          de release. Sert aux fichiers dérivés qu'un `path:regex` ne sait pas cibler.
+
+          Cas d'usage principal : `uv.lock`. uv y enregistre la version du projet dans
+          une strophe `[[package]]`, identifiée par la ligne `name = "..."` qui précède
+          la ligne `version = "..."`. Une regex ligne à ligne ne peut donc pas viser la
+          bonne occurrence — le lock repartait périmé à chaque release, et le moindre
+          `uv run` local le réécrivait en salissant l'arbre de travail.
+
+          La commande doit être auto-suffisante (le runner n'a ni uv ni outil de build
+          préinstallé). Ce qu'elle modifie est repris par le `git add -A` du commit de
+          release. Un échec fait échouer le job : mieux vaut pas de release qu'une
+          release incohérente.
+        required: false
+        type: string
+        default: ""
     outputs:
       released:
         description: '"true" when a release was actually cut.'
@@ -133,6 +151,25 @@ jobs:
           p.write_text(out)
           PY
           done <<< "$VERSION_FILES"
+
+      # Volontairement APRÈS le patch des version-files : la commande a besoin de
+      # lire la nouvelle version dans les fichiers déjà patchés (ex. `uv lock` lit
+      # `pyproject.toml`). Et volontairement AVANT le commit, pour que `git add -A`
+      # embarque ce qu'elle produit dans le commit de release plutôt que de laisser
+      # une dérive derrière.
+      - name: Post-bump command
+        if: steps.bump.outputs.released == 'true' && inputs.post-bump-command != ''
+        env:
+          # Passage par l'environnement et non par interpolation directe dans `run:` :
+          # une expression ${{ }} injectée dans le corps du script serait exécutée par
+          # le shell avant même d'être une commande.
+          POST_BUMP_COMMAND: ${{ inputs.post-bump-command }}
+          NEW_VERSION: ${{ steps.bump.outputs.version }}
+        run: |
+          set -euo pipefail
+          echo "Running post-bump command:"
+          echo "$POST_BUMP_COMMAND"
+          bash -euo pipefail -c "$POST_BUMP_COMMAND"
 
       - name: Commit, tag and push
         if: steps.bump.outputs.released == 'true' && inputs.dry-run != true
