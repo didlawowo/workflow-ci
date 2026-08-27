@@ -465,6 +465,63 @@ avant de re-push le chart. Vérifier avec
 
 ---
 
+## 🏠 Push in-cluster direct — viser le Service, sans proxy (opt-in)
+
+Les runners ARC tournent **dans le cluster**. Pousser vers `oci-storage.dc-tech.work`
+les fait sortir par un nom public (résolu en IP privée), un LoadBalancer et un ingress
+pour joindre un Service à deux sauts d'eux. En visant le Service directement, **aucun
+proxy sur le chemin de push** : plus de limite de body, de buffering ni de timeout —
+par construction. Et le push ne dépend plus de Cloudflare, d'external-dns, du LB-IPAM
+ni de l'ingress (l'incident du 2026-08-24 a cassé le CD exactement sur cette chaîne,
+cf. oci-storage#99).
+
+```
+oci-storage.oci-storage.svc.cluster.local   # HTTP simple, port 80 → 3030
+```
+
+### Opt-in sur `docker-build-push` (défaut inchangé)
+
+```yaml
+- uses: didlawowo/workflow-ci/.github/actions/docker-build-push@v1
+  with:
+    image-name: oci-storage.oci-storage.svc.cluster.local/<image>
+    image-tag:  ${{ needs.extract-version.outputs.version }}
+    registry:   oci-storage.oci-storage.svc.cluster.local
+    registry-plain-http: "true"   # ← credentials sans `docker login`, buildx http=true, Trivy/Cosign en HTTP
+    registry-username: ${{ secrets.OCI_USERNAME }}
+    registry-password: ${{ secrets.OCI_PASSWORD }}
+```
+
+Le nom stocké dans le registry est le **chemin** (`<image>`), pas l'hôte : le chart
+continue de référencer `oci-storage.dc-tech.work/<image>` côté `image.repository`,
+seul le chemin de push change. Le cache BuildKit `buildcache-*` suit le même chemin.
+
+### Push du chart Helm en direct
+
+```yaml
+- name: Helm registry login (in-cluster, HTTP)
+  run: helm registry login oci-storage.oci-storage.svc.cluster.local --plain-http -u "${{ secrets.OCI_USERNAME }}" -p "${{ secrets.OCI_PASSWORD }}"
+- name: Package + push chart
+  run: helm package helm/<chart-name> --version "$VERSION" --app-version "$VERSION" && helm push <chart-name>-${VERSION}.tgz oci://oci-storage.oci-storage.svc.cluster.local/charts --plain-http
+```
+
+### Prérequis / règles
+
+1. **Uniquement depuis un runner in-cluster** (`arc-runner-*`). Un job en
+   `ubuntu-latest` ne résout pas `*.svc.cluster.local` — garder `oci-storage.dc-tech.work`
+   dans ce cas (`vars.RUNNER` permet de basculer).
+2. **Redis actif côté registry** (`REDIS_ENABLED=true`) : le multi-replica est couvert
+   par `forwardToOwner` (UploadTracker Redis). Sans Redis, un `PATCH` sur le mauvais pod
+   est rejeté (`400 DIGEST_INVALID` au `PUT`), pas de corruption stockée, mais le push échoue.
+3. `native-multiarch: "true"` : les nœuds `buildkitd-amd64/arm64` portent déjà
+   `[registry."oci-storage.oci-storage.svc.cluster.local"] http = true`
+   (`continuous-delivery/infrastructure-crds/rke2-infra/buildkitd-remote.yaml`). Le chemin
+   QEMU reçoit la même entrée via `buildkitd-config` de `setup-buildx-action`.
+4. `qemu-image` reste sur `oci-storage.dc-tech.work/mirror-binfmt` : il est tiré par le
+   **daemon** Docker du runner, qui exige TLS. Sans QEMU (`native-multiarch`), ce pull
+   n'a pas lieu.
+5. Vérification (read-only) : `kubectl run -n oci-storage probe --rm -i --restart=Never --image=curlimages/curl:latest -- curl -s -o /dev/null -w "%{http_code}\n" http://oci-storage.oci-storage.svc.cluster.local/v2/` → `401` (auth requise = le Service répond).
+
 ## 🔧 Docker Hub rate limit — résolution (déjà appliquée)
 
 ### Problème historique
