@@ -30,6 +30,26 @@ inputs:
   registry-password:
     description: "Docker registry password"
     required: false
+  registry-plain-http:
+    description: |
+      Set to 'true' when `registry` is reachable over plain HTTP only — typically
+      the in-cluster Service of the OCI registry, e.g.
+      registry: oci-storage.oci-storage.svc.cluster.local together with
+      image-name: oci-storage.oci-storage.svc.cluster.local/<image>. Pushing to
+      the Service directly removes every proxy from the push path (no body
+      limit, no buffering, no proxy timeout) and no longer depends on
+      Cloudflare, external-dns, LB-IPAM or the ingress (oci-storage#99).
+      Effects: credentials are written to ~/.docker/config.json without going
+      through the Docker daemon (a `docker login` against an HTTP registry
+      fails unless the daemon lists it as insecure), the QEMU/docker-container
+      builder gets `[registry."<registry>"] http = true`, Trivy runs with
+      TRIVY_INSECURE=true and Cosign with --allow-http-registry.
+      With native-multiarch=true the remote buildkitd nodes must carry the same
+      `http = true` entry in their buildkitd.toml (already the case for
+      buildkitd-amd64/arm64, see continuous-delivery buildkitd-remote.yaml).
+      Default 'false' keeps the current behaviour (TLS registry, docker login).
+    required: false
+    default: "false"
   platforms:
     description: "Target platforms for build"
     required: false
@@ -174,11 +194,26 @@ runs:
       with:
         image: ${{ inputs.qemu-image }}
 
+    # Plain-HTTP registry: BuildKit refuses to push/pull over HTTP unless the
+    # host is declared with `http = true`. Written to a file so it can be fed to
+    # setup-buildx-action (docker-container driver). The remote nodes used by
+    # native-multiarch=true carry the same entry server-side.
+    - name: Prepare BuildKit config for plain-HTTP registry
+      id: plain-http
+      if: inputs.registry-plain-http == 'true'
+      shell: bash
+      run: |
+        CONFIG="${RUNNER_TEMP}/buildkitd-plain-http.toml"
+        printf '[registry."%s"]\n  http = true\n' "${{ inputs.registry }}" > "$CONFIG"
+        echo "config-file=${CONFIG}" >> "$GITHUB_OUTPUT"
+        cat "$CONFIG"
+
     - name: Set up Docker Buildx
       if: inputs.native-multiarch != 'true'
       uses: docker/setup-buildx-action@v3
       with:
         driver-opts: image=moby/buildkit:buildx-stable-1
+        buildkitd-config: ${{ inputs.registry-plain-http == 'true' && steps.plain-http.outputs.config-file || '' }}
 
     # Native multi-arch: one remote BuildKit node per arch (no QEMU). buildx routes
     # linux/amd64 -> amd64 node, linux/arm64 -> arm64 node (native hardware).
@@ -198,12 +233,37 @@ runs:
     # builds too. Logging in never pushes anything — push is gated by the build
     # step's `push:` input below.
     - name: Login to Docker Registry
-      if: inputs.registry-username != '' && inputs.registry-password != ''
+      if: inputs.registry-username != '' && inputs.registry-password != '' && inputs.registry-plain-http != 'true'
       uses: docker/login-action@v3
       with:
         registry: ${{ inputs.registry }}
         username: ${{ inputs.registry-username }}
         password: ${{ inputs.registry-password }}
+
+    # Plain-HTTP registry: `docker login` validates credentials through the
+    # Docker daemon, which insists on TLS unless the host is in its
+    # insecure-registries list. Buildx (both drivers), Trivy and Cosign only
+    # need the auth entry in ~/.docker/config.json, so write it directly and
+    # merge with whatever docker/login-action (Docker Hub) already stored.
+    - name: Store registry credentials (plain HTTP, no daemon login)
+      if: inputs.registry-username != '' && inputs.registry-password != '' && inputs.registry-plain-http == 'true'
+      shell: bash
+      env:
+        PLAIN_HTTP_REGISTRY: ${{ inputs.registry }}
+        PLAIN_HTTP_USERNAME: ${{ inputs.registry-username }}
+        PLAIN_HTTP_PASSWORD: ${{ inputs.registry-password }}
+      run: |
+        set -euo pipefail
+        CONFIG_DIR="${DOCKER_CONFIG:-$HOME/.docker}"
+        CONFIG="${CONFIG_DIR}/config.json"
+        mkdir -p "$CONFIG_DIR"
+        [ -s "$CONFIG" ] || echo '{}' > "$CONFIG"
+        AUTH="$(printf '%s:%s' "$PLAIN_HTTP_USERNAME" "$PLAIN_HTTP_PASSWORD" | base64 | tr -d '\n')"
+        TMP="$(mktemp)"
+        jq --arg reg "$PLAIN_HTTP_REGISTRY" --arg auth "$AUTH" '.auths[$reg] = {auth: $auth}' "$CONFIG" > "$TMP"
+        mv "$TMP" "$CONFIG"
+        chmod 600 "$CONFIG"
+        echo "Stored credentials for ${PLAIN_HTTP_REGISTRY} in ${CONFIG} (plain HTTP, daemon login skipped)"
 
     - name: Prepare image metadata
       id: meta
@@ -272,13 +332,13 @@ runs:
     - name: Sign image with Cosign
       if: inputs.sign == 'true' && inputs.push == 'true'
       shell: bash
-      run: cosign sign --yes "${{ inputs.image-name }}@${{ steps.build.outputs.digest }}"
+      run: cosign sign --yes ${{ inputs.registry-plain-http == 'true' && '--allow-http-registry' || '' }} "${{ inputs.image-name }}@${{ steps.build.outputs.digest }}"
 
     - name: Verify signature
       if: inputs.sign == 'true' && inputs.push == 'true'
       shell: bash
       run: |
-        cosign verify \
+        cosign verify ${{ inputs.registry-plain-http == 'true' && '--allow-http-registry' || '' }} \
           --certificate-identity-regexp="https://github.com/${{ github.repository_owner }}/" \
           --certificate-oidc-issuer="https://token.actions.githubusercontent.com" \
           "${{ inputs.image-name }}@${{ steps.build.outputs.digest }}"
@@ -306,6 +366,8 @@ runs:
       uses: aquasecurity/trivy-action@master
       env:
         TRIVY_CACHE_DIR: ${{ github.workspace }}/.trivy-cache
+        # Plain-HTTP registry (registry-plain-http=true): allow non-TLS pulls.
+        TRIVY_INSECURE: ${{ inputs.registry-plain-http == 'true' && 'true' || 'false' }}
       with:
         image-ref: ${{ steps.meta.outputs.full-name }}
         format: "sarif"
