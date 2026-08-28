@@ -311,6 +311,16 @@ runs:
         platforms: ${{ inputs.push == 'true' && inputs.platforms || '' }}
         push: ${{ inputs.push }}
         load: ${{ inputs.push != 'true' }}
+        # Plain-HTTP registry + push: `registry.insecure=true` on the image export.
+        # (1) the BuildKit nodes push over HTTP/insecure, and (2) buildx marks the
+        # registry domain PlainHTTP on the CLIENT side (build.go, `insecurePush`),
+        # which is what performs the manifest-list merge for multi-node builders
+        # (native-multiarch). The remote driver rejects any buildkitd config file,
+        # and the client ignores the daemon's insecure-registries list, so this
+        # attribute is the only way to make that merge step use HTTP. Without it:
+        # "merging manifest list … dial tcp <svc-ip>:443: no route to host".
+        # buildx folds `push: true` into this image output, so both can coexist.
+        outputs: ${{ inputs.push == 'true' && inputs.registry-plain-http == 'true' && 'type=image,push=true,registry.insecure=true' || '' }}
         tags: ${{ steps.meta.outputs.tags }}
         labels: ${{ inputs.labels }}
         build-args: ${{ inputs.build-args }}
