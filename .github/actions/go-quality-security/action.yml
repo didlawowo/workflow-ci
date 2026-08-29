@@ -38,8 +38,21 @@ runs:
       with:
         go-version: ${{ inputs.go-version }}
         working-directory: ${{ inputs.working-directory }}
+        cache-dependency-path: ${{ inputs.working-directory }}/go.sum
+
+    # Cache le binaire golangci-lint compilé : sans lui, chaque run le rebuild
+    # depuis les sources (~2-3 min, l'étape la plus lente). Clé = (os, arch,
+    # go-version, golangci-version) : un changement de l'un des deux invalide le
+    # cache et force un rebuild propre (évite le « built with older Go »).
+    - name: Cache golangci-lint binary
+      id: cache-golangci
+      uses: actions/cache@v4
+      with:
+        path: ~/go/bin/golangci-lint
+        key: golangci-${{ runner.os }}-${{ runner.arch }}-go${{ inputs.go-version }}-${{ inputs.golangci-lint-version }}
 
     - name: Install golangci-lint
+      if: steps.cache-golangci.outputs.cache-hit != 'true'
       shell: bash
       run: |
         # Build from source with the runner's Go toolchain. A prebuilt binary is compiled
