@@ -311,16 +311,23 @@ runs:
         platforms: ${{ inputs.push == 'true' && inputs.platforms || '' }}
         push: ${{ inputs.push }}
         load: ${{ inputs.push != 'true' }}
-        # Plain-HTTP registry + push: `registry.insecure=true` on the image export.
-        # (1) the BuildKit nodes push over HTTP/insecure, and (2) buildx marks the
-        # registry domain PlainHTTP on the CLIENT side (build.go, `insecurePush`),
-        # which is what performs the manifest-list merge for multi-node builders
-        # (native-multiarch). The remote driver rejects any buildkitd config file,
-        # and the client ignores the daemon's insecure-registries list, so this
-        # attribute is the only way to make that merge step use HTTP. Without it:
-        # "merging manifest list … dial tcp <svc-ip>:443: no route to host".
-        # buildx folds `push: true` into this image output, so both can coexist.
-        outputs: ${{ inputs.push == 'true' && inputs.registry-plain-http == 'true' && 'type=image,push=true,registry.insecure=true' || '' }}
+        # Plain-HTTP registry + push + native-multiarch ONLY: `registry.insecure=true`
+        # on the image export. With a multi-node (remote) builder the manifest-list
+        # merge runs on the CLIENT side (buildx build.go, `insecurePush`), which
+        # ignores the daemon's insecure-registries list, and the remote driver
+        # rejects any buildkitd config file — so this attribute is the only way to
+        # make that merge step use HTTP. Without it: "merging manifest list … dial
+        # tcp <svc-ip>:443: no route to host".
+        # NOT applied to the docker-container driver: there the buildkitd.toml
+        # `http = true` entry (steps.plain-http) already makes the push plain-HTTP.
+        # Adding `registry.insecure=true` on top REPLACES that host config inside
+        # BuildKit (util/push/push.go → Insecure+PlainHTTP → util/resolver
+        # `httpFallback`): https is tried first and only falls back to http on a
+        # TLS error, ECONNREFUSED or timeout — never on EHOSTUNREACH, which is what
+        # a ClusterIP Service without a 443 port returns. Result: "Head https://
+        # <svc>/v2/…: dial tcp <svc-ip>:443: no route to host" (solar-monitoring
+        # v0.34.2, 2026-09-02). buildx folds `push: true` into this image output.
+        outputs: ${{ inputs.push == 'true' && inputs.registry-plain-http == 'true' && inputs.native-multiarch == 'true' && 'type=image,push=true,registry.insecure=true' || '' }}
         tags: ${{ steps.meta.outputs.tags }}
         labels: ${{ inputs.labels }}
         build-args: ${{ inputs.build-args }}
