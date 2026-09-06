@@ -84,6 +84,31 @@ on:
 jobs:
   release:
     runs-on: ubuntu-latest
+
+    # Deux merges rapprochés sur main lançaient deux releases en parallèle. La
+    # première perdait la course au push :
+    #
+    #     error: failed to push some refs to '...'
+    #
+    # …et le run finissait rouge, alors que la seconde publiait bien une
+    # version contenant les deux merges. Un `release` rouge sur main envoie
+    # alors chercher une régression dans la PR qu'on vient de merger, là où il
+    # n'y a rien. Observé 3 fois sur 3 le 2026-09-06 sur code-search, et déjà
+    # le 2026-08-24.
+    #
+    # Le groupe porte le dépôt appelant : deux dépôts différents ne se bloquent
+    # pas l'un l'autre.
+    #
+    # cancel-in-progress reste FAUX : annuler une release en cours la
+    # laisserait à moitié faite — commit local, tag posé, rien de poussé. Les
+    # runs s'attendent. Si plusieurs s'empilent, GitHub ne garde que le plus
+    # récent en attente et annule les intermédiaires ; c'est le comportement
+    # voulu, ce dernier run couvre de toute façon tous les commits depuis le
+    # dernier tag.
+    concurrency:
+      group: release-${{ github.repository }}
+      cancel-in-progress: false
+
     outputs:
       released: ${{ steps.bump.outputs.released }}
       version: ${{ steps.bump.outputs.version }}
@@ -91,6 +116,17 @@ jobs:
       - name: Checkout calling repo
         uses: actions/checkout@v4
         with:
+          # La BRANCHE, pas le SHA de l'événement. Par défaut actions/checkout
+          # sort le commit qui a déclenché le run ; sérialiser les runs ne
+          # suffirait alors pas, car le second sortirait quand même un état
+          # antérieur au commit de release du premier et son `git push` serait
+          # toujours en non-fast-forward. En sortant la pointe de la branche —
+          # résolue à l'instant du checkout, donc après l'attente imposée par
+          # `concurrency` — le run travaille sur ce que main contient vraiment.
+          #
+          # github.ref reste correct pour un workflow_dispatch lancé depuis une
+          # autre branche : c'est celle-là qui est sortie, pas main.
+          ref: ${{ github.ref }}
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -184,7 +220,18 @@ jobs:
             git commit -m "chore(release): ${NEW_VERSION} [skip ci]"
           fi
           git tag -a "${NEW_VERSION}" -m "Release ${NEW_VERSION}"
-          git push origin HEAD
+
+          # Filet de sécurité : `concurrency` sérialise les runs déclenchés par
+          # un push, mais rien n'empêche un commit poussé à la main d'atterrir
+          # entre le checkout et ici. Le message par défaut de git ne dit alors
+          # pas ce qui s'est passé, et le run rouge se lit comme une régression
+          # de la PR.
+          if ! git push origin "HEAD:${GITHUB_REF_NAME}"; then
+            echo "::error::push refusé — ${GITHUB_REF_NAME} a bougé depuis le checkout." \
+                 "Le tag ${NEW_VERSION} n'a PAS été poussé et aucune release n'a été créée." \
+                 "Relancer ce workflow : il repartira de la pointe courante."
+            exit 1
+          fi
           git push origin "${NEW_VERSION}"
 
       - name: Create GitHub Release
