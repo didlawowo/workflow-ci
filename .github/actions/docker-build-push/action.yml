@@ -360,32 +360,19 @@ runs:
           --certificate-oidc-issuer="https://token.actions.githubusercontent.com" \
           "${{ inputs.image-name }}@${{ steps.build.outputs.digest }}"
 
-    # Cache Trivy's vuln DB across runs. Without this every scan re-pulls the DB
-    # from ghcr.io/aquasecurity/trivy-db — slow and rate-limited on the cluster's
-    # shared egress IP. Keyed by day; Trivy only refreshes the DB when it's stale.
-    - name: Trivy DB cache key (date)
-      id: trivy-cache-key
-      if: inputs.scan == 'true'
-      shell: bash
-      run: echo "date=$(date +%Y-%m-%d)" >> "$GITHUB_OUTPUT"
-
-    - name: Cache Trivy vulnerability DB
-      if: inputs.scan == 'true'
-      uses: actions/cache@v4
-      with:
-        path: ${{ github.workspace }}/.trivy-cache
-        key: trivy-db-${{ steps.trivy-cache-key.outputs.date }}
-        restore-keys: |
-          trivy-db-
-
+    # trivy-action restaure/sauvegarde déjà sa DB avec une clé quotidienne.
+    # Son entrée cache-dir pilote à la fois ce cache et TRIVY_CACHE_DIR : une
+    # variable env externe est écrasée. L'ancien second cache .trivy-cache
+    # pointait donc vers un répertoire absent et ne sauvegardait jamais rien.
     - name: Run Trivy vulnerability scanner
       if: inputs.scan == 'true'
       uses: aquasecurity/trivy-action@master
       env:
-        TRIVY_CACHE_DIR: ${{ github.workspace }}/.trivy-cache
         # Plain-HTTP registry (registry-plain-http=true): allow non-TLS pulls.
         TRIVY_INSECURE: ${{ inputs.registry-plain-http == 'true' && 'true' || 'false' }}
       with:
+        cache: "true"
+        cache-dir: ${{ github.workspace }}/.cache/trivy
         image-ref: ${{ steps.meta.outputs.full-name }}
         format: "sarif"
         output: ${{ steps.meta.outputs.sarif-file }}
