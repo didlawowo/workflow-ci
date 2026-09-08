@@ -76,12 +76,12 @@ jobs:
           fetch-depth: 0
 
       - name: Run tests
-        uses: didlawowo/workflow-ci/.github/actions/run-python-tests@main
+        uses: didlawowo/workflow-ci/.github/actions/run-python-tests@v1.5.0
         with:
           python-version: ${{ env.PYTHON_VERSION }}
 
       - name: Run quality checks
-        uses: didlawowo/workflow-ci/.github/actions/python-quality-security@main
+        uses: didlawowo/workflow-ci/.github/actions/python-quality-security@v1.5.0
         with:
           python-version: ${{ env.PYTHON_VERSION }}
 
@@ -103,7 +103,7 @@ jobs:
 
       - name: Build, push, sign
         id: build
-        uses: didlawowo/workflow-ci/.github/actions/docker-build-push@main
+        uses: didlawowo/workflow-ci/.github/actions/docker-build-push@v1.5.0
         with:
           image-name: ${{ env.IMAGE_NAME }}
           image-tag: ${{ needs.release-please.outputs.tag_name }}

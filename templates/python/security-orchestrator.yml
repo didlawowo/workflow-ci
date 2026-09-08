@@ -70,7 +70,7 @@ jobs:
 
       - name: Trivy filesystem scan
         id: scan
-        uses: didlawowo/workflow-ci/.github/actions/trivy-filesystem-scan@main
+        uses: didlawowo/workflow-ci/.github/actions/trivy-filesystem-scan@v1.5.0
         with:
           severity: ${{ steps.severity.outputs.level }}
           fail-on-critical: ${{ inputs.fail-on-issues || 'false' }}
@@ -94,7 +94,7 @@ jobs:
 
       - name: Security checks
         id: checks
-        uses: didlawowo/workflow-ci/.github/actions/python-quality-security@main
+        uses: didlawowo/workflow-ci/.github/actions/python-quality-security@v1.5.0
         with:
           python-version: ${{ env.PYTHON_VERSION }}
           bandit-skip-rules: ${{ env.BANDIT_SKIP_RULES }}

@@ -83,7 +83,7 @@ jobs:
 
       - name: Run tests
         id: test
-        uses: didlawowo/workflow-ci/.github/actions/run-python-tests@main
+        uses: didlawowo/workflow-ci/.github/actions/run-python-tests@v1.5.0
         with:
           python-version: ${{ env.PYTHON_VERSION }}
           coverage-threshold: ${{ env.COVERAGE_THRESHOLD }}
@@ -109,7 +109,7 @@ jobs:
 
       - name: Run quality & security checks
         id: checks
-        uses: didlawowo/workflow-ci/.github/actions/python-quality-security@main
+        uses: didlawowo/workflow-ci/.github/actions/python-quality-security@v1.5.0
         with:
           python-version: ${{ env.PYTHON_VERSION }}
           bandit-skip-rules: ${{ env.BANDIT_SKIP_RULES }}
@@ -140,7 +140,7 @@ jobs:
           echo "branch-tag=${BRANCH}-${SHA}" >> "$GITHUB_OUTPUT"
 
       - name: Build and push
-        uses: didlawowo/workflow-ci/.github/actions/docker-build-push@main
+        uses: didlawowo/workflow-ci/.github/actions/docker-build-push@v1.5.0
         with:
           image-name: ${{ env.IMAGE_NAME }}
           image-tag: ${{ steps.tag.outputs.branch-tag }}

@@ -34,7 +34,7 @@ runs:
   using: "composite"
   steps:
     - name: Setup Go environment
-      uses: didlawowo/workflow-ci/.github/actions/setup-go-env@main
+      uses: didlawowo/workflow-ci/.github/actions/setup-go-env@v1.5.0
       with:
         go-version: ${{ inputs.go-version }}
         working-directory: ${{ inputs.working-directory }}
