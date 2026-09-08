@@ -19,20 +19,17 @@ outputs:
 runs:
   using: "composite"
   steps:
-    # Self-hosted ARC runners mount /home/runner/.cache/uv from a persistent
-    # PVC (see arc-runners-project.yaml in infra repo). We explicitly disable
-    # setup-uv's own caching and pin the cache path so the action does not
-    # silently override UV_CACHE_DIR — that way `uv sync` writes to the PVC
-    # and survives across jobs without any actions/cache WAN round-trip.
-    #
-    # On GitHub-hosted runners the path simply lives in the ephemeral home;
-    # no behaviour change there beyond not paying for a GHA cache upload.
+    # ARC fournit UV_CACHE_DIR sur son volume persistant : conserver ce chemin
+    # sans restauration/sauvegarde GitHub ni purge du cache partagé.
+    # Sans chemin fourni, setup-uv choisit un répertoire adapté au runner et
+    # utilise le cache GitHub. Ne pas imposer /home/runner sur un runner hébergé.
     - name: Install uv
       uses: astral-sh/setup-uv@v3
       with:
         version: "latest"
-        enable-cache: false
-        cache-local-path: /home/runner/.cache/uv
+        enable-cache: ${{ env.UV_CACHE_DIR == '' }}
+        cache-local-path: ${{ env.UV_CACHE_DIR }}
+        prune-cache: ${{ env.UV_CACHE_DIR == '' }}
 
     - name: Set up Python
       id: setup
