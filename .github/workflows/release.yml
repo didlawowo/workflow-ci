@@ -73,6 +73,16 @@ on:
         required: false
         type: string
         default: ""
+      runner:
+        description: |
+          Label du runner qui exécute le job de release. Vide = le scale set ARC du
+          dépôt appelant, `arc-runner-<nom-du-dépôt>`. Aucun repli sur les runners
+          hébergés par GitHub : ils sont facturés, et un blocage de facturation
+          empêchait toute release (2026-09-10, jobs refusés avant démarrage).
+          Le runner doit fournir git, curl, jq, python3 et gh.
+        required: false
+        type: string
+        default: ""
     outputs:
       released:
         description: '"true" when a release was actually cut.'
@@ -83,7 +93,9 @@ on:
 
 jobs:
   release:
-    runs-on: ubuntu-latest
+    # Runner local par défaut, voir l'input `runner`. Dans un workflow
+    # réutilisable, le contexte `github` est celui du dépôt appelant.
+    runs-on: ${{ inputs.runner || format('arc-runner-{0}', github.event.repository.name) }}
 
     # Deux merges rapprochés sur main lançaient deux releases en parallèle. La
     # première perdait la course au push :

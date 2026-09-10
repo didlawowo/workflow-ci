@@ -130,6 +130,20 @@ version-files: |
   helm/<app>/values.yaml:^  tag: "(.+)"$
 ```
 
+## Runner
+
+Le job de release tourne sur les runners ARC du homelab, jamais sur les
+runners hébergés par GitHub. Par défaut, il vise le scale set du dépôt
+appelant, `arc-runner-<nom-du-dépôt>`. Pour un autre label, passer `runner` :
+
+```yaml
+with:
+  runner: arc-runner-mon-depot
+```
+
+Le runner doit fournir `git`, `curl`, `jq`, `python3` et `gh`, ce que fait
+l'image `arc-runner` du dépôt docker-build.
+
 ## Outputs
 
 Pour chaîner un downstream (Docker build, ArgoCD bump, …) :
@@ -143,7 +157,7 @@ jobs:
   deploy:
     needs: release
     if: needs.release.outputs.released == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.RUNNER }}
     steps:
       - run: echo "Deploying ${{ needs.release.outputs.version }}"
 ```
