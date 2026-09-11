@@ -45,6 +45,18 @@ on:
         required: false
         type: string
         default: "main"
+      runs-on:
+        description: |
+          Runner label for the release job. Defaults to a GitHub-hosted runner.
+          Set a self-hosted label (e.g. an ARC scale set) so the release of a private
+          repository does not depend on GitHub-hosted minutes: when the account's
+          billing fails, GitHub refuses a hosted job before its first step and no
+          release is cut, while CI on self-hosted runners stays green.
+          The runner needs git, python3 and gh, and must run the actions used here
+          (actions/checkout, orhun/git-cliff-action).
+        required: false
+        type: string
+        default: "ubuntu-latest"
       trigger-cd-workflow:
         description: |
           Optional. When set to a workflow filename (e.g. `cd-production-orchestrator.yml`),
@@ -83,7 +95,7 @@ on:
 
 jobs:
   release:
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runs-on }}
 
     # Deux merges rapprochés sur main lançaient deux releases en parallèle. La
     # première perdait la course au push :
