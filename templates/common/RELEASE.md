@@ -115,6 +115,35 @@ vaut alors `main` et non le tag :
 en lancer plusieurs (image *et* chart, par exemple), viser un orchestrateur qui
 les dispatche à son tour.
 
+### Choisir le runner du job de release
+
+Par défaut, le job tourne sur `ubuntu-latest`, un runner hébergé par GitHub. Pour un
+dépôt **privé**, ces minutes sont facturées. Si le paiement du compte échoue ou si le
+plafond de dépenses est atteint, GitHub refuse le job avant sa première étape : aucune
+release ne sort, alors que la CI sur runners self-hosted reste verte. Cas réel sur
+oci-storage, sans release entre le 28/08 et le 11/09.
+
+L'entrée `runs-on` fait tourner la release sur le même runner que le reste de la CI :
+
+```yaml
+jobs:
+  release:
+    uses: didlawowo/workflow-ci/.github/workflows/release.yml@v1.6.0
+    with:
+      workflow-ci-ref: v1.6.0
+      runs-on: ${{ vars.RUNNER || 'arc-runner-<repo>' }}
+```
+
+Le runner doit fournir `git`, `python3` et `gh`.
+
+Pour reconnaître un refus de facturation : le job échoue en quelques secondes sans
+aucune étape, et `gh run view --log-failed` ne trouve aucun log. La cause n'apparaît
+que dans les annotations du check :
+
+```bash
+gh api repos/<owner>/<repo>/check-runs/<job-id>/annotations
+```
+
 ### `version-files` : ne pas oublier le values.yaml
 
 Quand ArgoCD déploie le chart **depuis git** (et non depuis un registre OCI
