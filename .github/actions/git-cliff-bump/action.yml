@@ -25,6 +25,27 @@ outputs:
 runs:
   using: composite
   steps:
+    - name: Keep workflow-ci checkout out of caller release commits
+      shell: bash
+      run: |
+        set -euo pipefail
+        # release.yml checks this repository out inside the caller workspace as
+        # .workflow-ci so the composite action can be referenced locally. Without
+        # an ignore rule, the later `git add -A` can stage that nested checkout as
+        # a gitlink (mode 160000), leaving a broken pseudo-submodule behind.
+        #
+        # Scope the rule to that exact release-workflow layout so invoking this
+        # action directly from workflow-ci itself does not hide unrelated paths.
+        case "$GITHUB_ACTION_PATH" in
+          "$GITHUB_WORKSPACE/.workflow-ci/"*)
+            GIT_DIR="$(git rev-parse --git-dir)"
+            mkdir -p "$GIT_DIR/info"
+            touch "$GIT_DIR/info/exclude"
+            grep -qxF '/.workflow-ci/' "$GIT_DIR/info/exclude" || \
+              printf '%s\n' '/.workflow-ci/' >> "$GIT_DIR/info/exclude"
+            ;;
+        esac
+
     - name: Resolve cliff config
       id: cfg
       shell: bash
