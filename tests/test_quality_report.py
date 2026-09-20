@@ -1,21 +1,10 @@
-import importlib.util
 import json
 import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-MODULE_PATH = (
-    Path(__file__).resolve().parents[1]
-    / ".github"
-    / "actions"
-    / "quality-report"
-    / "quality_report.py"
-)
-SPEC = importlib.util.spec_from_file_location("quality_report", MODULE_PATH)
-quality_report = importlib.util.module_from_spec(SPEC)
-assert SPEC.loader is not None
-SPEC.loader.exec_module(quality_report)
+import quality_report
 
 
 class QualityReportTests(unittest.TestCase):
