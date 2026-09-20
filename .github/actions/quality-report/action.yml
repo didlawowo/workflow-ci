@@ -14,6 +14,22 @@ inputs:
     description: "Machine-generated mutation JSON (for example mutmut-cicd-stats.json)"
     required: false
     default: ""
+  tests-total:
+    description: "Trusted test count fallback when JUnit is unavailable"
+    required: false
+    default: ""
+  tests-failed:
+    description: "Trusted failed-test count fallback"
+    required: false
+    default: ""
+  tests-skipped:
+    description: "Trusted skipped-test count fallback"
+    required: false
+    default: ""
+  test-status:
+    description: "Trusted test command outcome fallback (success/failure)"
+    required: false
+    default: ""
   base-sha:
     description: "Base commit SHA"
     required: false
@@ -51,6 +67,18 @@ runs:
         )
         if [[ -n "${{ inputs.mutation-report }}" ]]; then
           ARGS+=(--mutation "${{ inputs.mutation-report }}")
+        fi
+        if [[ -n "${{ inputs.tests-total }}" ]]; then
+          ARGS+=(--tests-total "${{ inputs.tests-total }}")
+        fi
+        if [[ -n "${{ inputs.tests-failed }}" ]]; then
+          ARGS+=(--tests-failed "${{ inputs.tests-failed }}")
+        fi
+        if [[ -n "${{ inputs.tests-skipped }}" ]]; then
+          ARGS+=(--tests-skipped "${{ inputs.tests-skipped }}")
+        fi
+        if [[ -n "${{ inputs.test-status }}" ]]; then
+          ARGS+=(--test-status "${{ inputs.test-status }}")
         fi
         if [[ "${{ inputs.comment }}" == "true" ]]; then
           ARGS+=(--comment)
