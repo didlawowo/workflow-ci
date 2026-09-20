@@ -85,6 +85,53 @@ jobs:
             exit 1
           fi
 
+      - name: Verify mutation configuration is unchanged
+        if: steps.policy.outputs.required == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - "$GITHUB_WORKSPACE/.policy" "$GITHUB_WORKSPACE/pr" <<'PY'
+          import configparser
+          import json
+          import sys
+          import tomllib
+          from pathlib import Path
+
+          def mutation_config(root: Path):
+              result = {}
+
+              pyproject = root / "pyproject.toml"
+              if pyproject.is_file():
+                  data = tomllib.loads(pyproject.read_text(encoding="utf-8"))
+                  mutmut = data.get("tool", {}).get("mutmut")
+                  if isinstance(mutmut, dict):
+                      result["pyproject.toml"] = mutmut
+
+              setup_cfg = root / "setup.cfg"
+              if setup_cfg.is_file():
+                  parser = configparser.ConfigParser()
+                  parser.read(setup_cfg, encoding="utf-8")
+                  if parser.has_section("mutmut"):
+                      result["setup.cfg"] = dict(parser.items("mutmut"))
+
+              return result
+
+          trusted = mutation_config(Path(sys.argv[1]))
+          proposed = mutation_config(Path(sys.argv[2]))
+
+          if trusted != proposed:
+              print("::error::Mutation-engine configuration differs from the protected base.")
+              print("Trusted:", json.dumps(trusted, sort_keys=True))
+              print("Proposed:", json.dumps(proposed, sort_keys=True))
+              print(
+                  "::error::Change mutation policy/configuration in a dedicated PR "
+                  "before relying on it for a high-risk PR."
+              )
+              raise SystemExit(1)
+
+          print("Mutation configuration matches the protected base.")
+          PY
+
       - name: Prepare isolated Python mutation environment
         id: mutation-python
         if: steps.policy.outputs.required == 'true'
@@ -242,7 +289,7 @@ jobs:
             exit 1
           fi
 
-          python - "$REPORT" "$RESULTS" "$GITHUB_WORKSPACE/pr" "$BASE_SHA" "$HEAD_SHA" "$GITHUB_OUTPUT" <<'PY'
+          python - "$REPORT" "$RESULTS" "$GITHUB_WORKSPACE/pr" "$GITHUB_WORKSPACE/.policy" "$BASE_SHA" "$HEAD_SHA" "$GITHUB_OUTPUT" <<'PY'
           import ast
           import json
           import re
@@ -253,9 +300,10 @@ jobs:
           report_path = Path(sys.argv[1])
           results_path = Path(sys.argv[2]) if sys.argv[2] else None
           repo = Path(sys.argv[3])
-          base = sys.argv[4]
-          head = sys.argv[5]
-          output_path = Path(sys.argv[6])
+          policy_root = Path(sys.argv[4])
+          base = sys.argv[5]
+          head = sys.argv[6]
+          output_path = Path(sys.argv[7])
 
           data = json.loads(report_path.read_text(encoding="utf-8"))
           if not isinstance(data, dict):
@@ -333,10 +381,61 @@ jobs:
                   count = int(match.group(2) or "1")
                   changed_lines[current_path].update(range(start, start + count))
 
+              # Reject source-level mutation suppressions in changed code.
+              for raw in diff.splitlines():
+                  if (
+                      raw.startswith("+")
+                      and not raw.startswith("+++")
+                      and "pragma: no mutate" in raw
+                  ):
+                      raise SystemExit(
+                          "mutation gate failed: changed mutation-target code adds "
+                          "a '# pragma: no mutate' suppression"
+                      )
+
+              # source_paths is part of the protected policy. The PR cannot shrink
+              # this scope because the mutation config is compared before execution.
+              source_paths = []
+              trusted_pyproject = policy_root / "pyproject.toml"
+              if trusted_pyproject.is_file():
+                  import tomllib
+                  trusted_config = tomllib.loads(
+                      trusted_pyproject.read_text(encoding="utf-8")
+                  )
+                  configured = (
+                      trusted_config.get("tool", {})
+                      .get("mutmut", {})
+                      .get("source_paths", [])
+                  )
+                  if isinstance(configured, str):
+                      source_paths = [configured]
+                  elif isinstance(configured, list):
+                      source_paths = [str(value) for value in configured]
+
+              def in_trusted_source_path(relative):
+                  if not source_paths:
+                      return True
+                  candidate = Path(relative)
+                  for raw in source_paths:
+                      configured = Path(raw)
+                      if candidate == configured:
+                          return True
+                      if (
+                          configured.suffix == ""
+                          and candidate.is_relative_to(configured)
+                      ):
+                          return True
+                  return False
+
               changed_functions = {}
               for relative, lines in changed_lines.items():
                   path = repo / relative
-                  if not lines or not path.is_file() or path.suffix != ".py":
+                  if (
+                      not lines
+                      or not path.is_file()
+                      or path.suffix != ".py"
+                      or not in_trusted_source_path(relative)
+                  ):
                       continue
                   try:
                       tree = ast.parse(path.read_text(encoding="utf-8"))
@@ -374,6 +473,35 @@ jobs:
                       for name in names
                   ):
                       scoped[mutant_id] = status
+
+              observed_functions = {}
+              for mutant_id in statuses:
+                  module, generated_name = mutant_function(mutant_id)
+                  if not module or not generated_name:
+                      continue
+                  observed_functions.setdefault(module, set()).add(generated_name)
+
+              missing_functions = []
+              for module, names in changed_functions.items():
+                  generated = observed_functions.get(module, set())
+                  for name in names:
+                      # main() is orchestration/CLI glue and may be intentionally
+                      # outside unit-level mutation scope. All other changed
+                      # functions in trusted source_paths must produce mutants.
+                      if name == "main":
+                          continue
+                      if not any(
+                          item == name or item.endswith("__" + name)
+                          for item in generated
+                      ):
+                          missing_functions.append(f"{module}.{name}")
+
+              if missing_functions:
+                  raise SystemExit(
+                      "mutation gate failed: changed functions produced no mutation "
+                      "evidence (not exercised or excluded): "
+                      + ", ".join(sorted(missing_functions))
+                  )
 
               scoped_killed = sum(status == "killed" for status in scoped.values())
               scoped_survived = sum(status == "survived" for status in scoped.values())
