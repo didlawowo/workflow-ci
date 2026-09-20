@@ -80,6 +80,51 @@ class QualityReportTests(unittest.TestCase):
             [".github/workflows/ci.yml", ".ci/mutation.sh"],
         )
 
+
+    def test_gremlins_report_is_parsed_from_engine_schema(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            report = Path(tmp) / "gremlins.json"
+            report.write_text(
+                json.dumps(
+                    {
+                        "mutants_total": 25,
+                        "mutants_killed": 20,
+                        "mutants_lived": 5,
+                        "mutants_not_covered": 0,
+                    }
+                )
+            )
+            result = quality_report.parse_mutation(str(report))
+
+        self.assertEqual(result["total"], 25)
+        self.assertEqual(result["killed"], 20)
+        self.assertEqual(result["survived"], 5)
+        self.assertEqual(result["score"], 80.0)
+
+    def test_merge_reports_keeps_existing_sections_and_replaces_new_evidence(self):
+        existing = {
+            "schema_version": 1,
+            "tests": {"available": True, "total": 10},
+            "coverage": {"available": True, "percentage": 80.0},
+            "mutation": {"available": False},
+            "diff": {"available": True, "files": 2},
+            "history": {"available": True, "commits": 2},
+        }
+        current = {
+            "schema_version": 1,
+            "tests": {"available": False},
+            "coverage": {"available": False},
+            "mutation": {"available": True, "score": 95.0},
+            "diff": {"available": False},
+            "history": {"available": False},
+        }
+
+        merged = quality_report.merge_reports(existing, current)
+
+        self.assertEqual(merged["tests"]["total"], 10)
+        self.assertEqual(merged["coverage"]["percentage"], 80.0)
+        self.assertEqual(merged["mutation"]["score"], 95.0)
+
     def test_markdown_exposes_failures_and_policy_files(self):
         report = {
             "tests": {
