@@ -41,6 +41,12 @@ outputs:
   test-count:
     description: "Number of tests executed"
     value: ${{ steps.tests.outputs.count }}
+  tests-failed:
+    description: "Number of failed tests"
+    value: ${{ steps.tests.outputs.failed }}
+  tests-skipped:
+    description: "Number of skipped tests"
+    value: ${{ steps.tests.outputs.skipped }}
 
 runs:
   using: "composite"
@@ -57,16 +63,24 @@ runs:
       shell: bash
       working-directory: ${{ inputs.working-directory }}
       run: |
+        set +e
         go test -v -race -coverprofile=coverage.out -covermode=atomic ${{ inputs.test-args }} ./... 2>&1 | tee test-output.txt
+        STATUS=${PIPESTATUS[0]}
+        set -e
 
-        TEST_COUNT=$(grep -c "^=== RUN" test-output.txt || echo 0)
-        echo "count=${TEST_COUNT}" >> "$GITHUB_OUTPUT"
-
-        if grep -q "^FAIL" test-output.txt; then
-          echo "passed=false" >> "$GITHUB_OUTPUT"
-        else
+        TOTAL=$(grep -Ec '^[[:space:]]*--- (PASS|FAIL|SKIP):' test-output.txt || true)
+        FAILED=$(grep -Ec '^[[:space:]]*--- FAIL:' test-output.txt || true)
+        SKIPPED=$(grep -Ec '^[[:space:]]*--- SKIP:' test-output.txt || true)
+        echo "count=${TOTAL:-0}" >> "$GITHUB_OUTPUT"
+        echo "failed=${FAILED:-0}" >> "$GITHUB_OUTPUT"
+        echo "skipped=${SKIPPED:-0}" >> "$GITHUB_OUTPUT"
+        echo "exit-code=$STATUS" >> "$GITHUB_OUTPUT"
+        if [ "$STATUS" -eq 0 ] && [ "${FAILED:-0}" -eq 0 ]; then
           echo "passed=true" >> "$GITHUB_OUTPUT"
+        else
+          echo "passed=false" >> "$GITHUB_OUTPUT"
         fi
+        printf '%s\n' "$STATUS" > test-exit-code
 
     - name: Extract coverage
       id: coverage
@@ -110,3 +124,13 @@ runs:
           ${{ inputs.working-directory }}/coverage.out
           ${{ inputs.working-directory }}/test-output.txt
         retention-days: 7
+
+    - name: Fail on test failure
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: |
+        STATUS=$(cat test-exit-code 2>/dev/null || echo 1)
+        if [ "$STATUS" -ne 0 ] || [ "${{ steps.tests.outputs.passed }}" != "true" ]; then
+          echo "::error::Go tests failed (exit=$STATUS, failed=${{ steps.tests.outputs.failed }})."
+          exit 1
+        fi

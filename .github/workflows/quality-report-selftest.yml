@@ -1,0 +1,69 @@
+name: Quality reporter self-test
+
+on:
+  pull_request:
+    paths:
+      - ".github/actions/quality-report/**"
+      - ".github/actions/run-python-tests/**"
+      - ".github/workflows/mutation-policy.yml"
+      - "tests/**"
+      - "pyproject.toml"
+      - ".ci/mutation.sh"
+  push:
+    branches: [main]
+    paths:
+      - ".github/actions/quality-report/**"
+      - ".github/actions/run-python-tests/**"
+      - ".github/workflows/mutation-policy.yml"
+      - "tests/**"
+      - "pyproject.toml"
+      - ".ci/mutation.sh"
+
+jobs:
+  test:
+    runs-on: ${{ vars.RUNNER || 'ubuntu-latest' }}
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: read
+      actions: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Unit tests with evidence
+        run: |
+          python -m pip install pytest pytest-cov
+          mkdir -p coverage-reports
+          PYTHONPATH="$GITHUB_WORKSPACE" pytest tests -q \
+            --junitxml=coverage-reports/pytest-report.xml \
+            --cov=quality_report \
+            --cov-report=xml:coverage-reports/coverage.xml
+      - name: Build PR quality report
+        if: always()
+        uses: ./.github/actions/quality-report
+        with:
+          junit-glob: coverage-reports/pytest-report.xml
+          coverage-glob: coverage-reports/coverage.xml
+          base-sha: ${{ github.event.pull_request.base.sha || github.event.before }}
+          head-sha: ${{ github.event.pull_request.head.sha || github.sha }}
+          github-token: ${{ github.token }}
+          comment: ${{ github.event_name == 'pull_request' }}
+
+  mutation:
+    if: github.event_name == 'pull_request'
+    runs-on: ${{ vars.RUNNER || 'ubuntu-latest' }}
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Mutation testing
+        run: bash .ci/mutation.sh

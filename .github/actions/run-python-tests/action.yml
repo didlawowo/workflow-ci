@@ -53,6 +53,12 @@ outputs:
   test-count:
     description: "Number of tests executed"
     value: ${{ steps.tests.outputs.count }}
+  tests-failed:
+    description: "Number of failed/error tests"
+    value: ${{ steps.tests.outputs.failed }}
+  tests-skipped:
+    description: "Number of skipped tests"
+    value: ${{ steps.tests.outputs.skipped }}
 
 runs:
   using: "composite"
@@ -91,7 +97,9 @@ runs:
       shell: bash
       working-directory: ${{ inputs.working-directory }}
       run: |
+        mkdir -p coverage-reports
         CUSTOM_CMD="${{ inputs.test-command }}"
+        set +e
         if [ -n "$CUSTOM_CMD" ]; then
           eval "$CUSTOM_CMD"
         else
@@ -99,10 +107,12 @@ runs:
             -v --tb=short \
             --cov=src --cov-report=xml:coverage-reports/coverage.xml \
             --cov-report=term-missing \
-            --junitxml=coverage-reports/pytest-report.xml \
-            || true
+            --junitxml=coverage-reports/pytest-report.xml
         fi
-        mkdir -p coverage-reports
+        STATUS=$?
+        set -e
+        printf '%s\n' "$STATUS" > coverage-reports/test-exit-code
+        echo "exit-code=$STATUS" >> "$GITHUB_OUTPUT"
 
     # --- Coverage extraction ---
     - name: Extract coverage
@@ -123,7 +133,7 @@ runs:
           echo "coverage-file=" >> "$GITHUB_OUTPUT"
         fi
 
-    - name: Extract test count
+    - name: Extract test evidence
       id: tests
       shell: bash
       run: |
@@ -132,13 +142,48 @@ runs:
           if [ -f "$f" ]; then REPORT="$f"; break; fi
         done
 
-        if [ -n "$REPORT" ]; then
-          COUNT=$(grep -o 'tests="[0-9]*"' "$REPORT" | grep -o '[0-9]*' || echo 0)
-          echo "count=${COUNT}" >> "$GITHUB_OUTPUT"
-          echo "passed=true" >> "$GITHUB_OUTPUT"
-        else
-          echo "count=0" >> "$GITHUB_OUTPUT"
-          echo "passed=true" >> "$GITHUB_OUTPUT"
+        python - "$REPORT" "$GITHUB_OUTPUT" <<'PY'
+        import sys
+        import xml.etree.ElementTree as ET
+
+        report, output = sys.argv[1:]
+        values = {"count": 0, "failed": 0, "skipped": 0, "passed": "false"}
+        if report:
+            root = ET.parse(report).getroot()
+            if root.tag in {"testsuite", "testsuites"} and "tests" in root.attrib:
+                suites = [root]
+            else:
+                suites = list(root.findall("./testsuite"))
+            total = sum(int(float(s.attrib.get("tests", 0))) for s in suites)
+            failed = sum(
+                int(float(s.attrib.get("failures", 0)))
+                + int(float(s.attrib.get("errors", 0)))
+                for s in suites
+            )
+            skipped = sum(
+                int(float(s.attrib.get("skipped", s.attrib.get("disabled", 0))))
+                for s in suites
+            )
+            values = {
+                "count": total,
+                "failed": failed,
+                "skipped": skipped,
+                "passed": "true" if failed == 0 else "false",
+            }
+        with open(output, "a", encoding="utf-8") as handle:
+            for key, value in values.items():
+                handle.write(f"{key}={value}\n")
+        PY
+
+    - name: Fail on test failure
+      if: inputs.use-docker-compose != 'true'
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: |
+        STATUS=$(cat coverage-reports/test-exit-code 2>/dev/null || echo 1)
+        if [ "$STATUS" -ne 0 ] || [ "${{ steps.tests.outputs.passed }}" != "true" ]; then
+          echo "::error::Python tests failed (exit=$STATUS, failed=${{ steps.tests.outputs.failed }})."
+          exit 1
         fi
 
     - name: Check coverage threshold
