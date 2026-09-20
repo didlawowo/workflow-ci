@@ -44,21 +44,6 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
           package-manager: ${{ env.PACKAGE_MANAGER }}
-
-      - name: Enforce quality and security gate
-        shell: bash
-        run: |
-          set -euo pipefail
-          QUALITY="${{ steps.checks.outputs.quality-passed }}"
-          SECURITY="${{ steps.checks.outputs.security-issues }}"
-          if [[ "$QUALITY" != "true" ]]; then
-            echo "::error::Quality checks reported failure."
-            exit 1
-          fi
-          if [[ -z "$SECURITY" || "$SECURITY" -ne 0 ]]; then
-            echo "::error::Security checks reported ${SECURITY:-unknown} issue(s)."
-            exit 1
-          fi
           playwright: ${{ env.USE_PLAYWRIGHT }}
           codecov-token: ${{ secrets.CODECOV_TOKEN }}
 
@@ -81,6 +66,21 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
           package-manager: ${{ env.PACKAGE_MANAGER }}
+
+      - name: Enforce quality and security gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          QUALITY="${{ steps.checks.outputs.quality-passed }}"
+          SECURITY="${{ steps.checks.outputs.security-issues }}"
+          if [[ "$QUALITY" != "true" ]]; then
+            echo "::error::Quality checks reported failure."
+            exit 1
+          fi
+          if [[ -z "$SECURITY" || "$SECURITY" -ne 0 ]]; then
+            echo "::error::Security checks reported ${SECURITY:-unknown} issue(s)."
+            exit 1
+          fi
 
   docker-build:
     name: "Docker Build & Scan"
