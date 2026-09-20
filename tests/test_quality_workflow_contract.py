@@ -92,4 +92,5 @@ def test_mutation_verify_is_read_only_and_scoped_to_changed_functions():
     assert "vars.UNTRUSTED_RUNNER || 'ubuntu-latest'" in verify
     assert "git\", \"-C\", str(repo), \"diff\", \"--unified=0\"" in verify
     assert "mutation gate failed for changed functions" in verify
-    assert 'comment: "false"' in verify
+    assert "scoped-mutation-evidence-" in verify
+    assert "quality-report@main" not in verify
