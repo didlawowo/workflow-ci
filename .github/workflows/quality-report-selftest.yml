@@ -38,7 +38,7 @@ jobs:
         run: |
           python -m pip install pytest pytest-cov
           mkdir -p coverage-reports
-          pytest tests -q \
+          PYTHONPATH="$GITHUB_WORKSPACE" pytest tests -q \
             --junitxml=coverage-reports/pytest-report.xml \
             --cov=quality_report \
             --cov-report=xml:coverage-reports/coverage.xml
