@@ -23,3 +23,17 @@ def test_quality_evidence_requires_explicit_runner_and_pinned_actions():
     assert "ref: ${{ inputs.workflow-ci-ref }}" in content
     assert "ubuntu-latest" not in content
     assert "@main" not in content
+
+
+def test_quality_evidence_dependency_chain_has_no_workflow_ci_main_refs():
+    root = Path(__file__).resolve().parents[1]
+    paths = [
+        root / ".github" / "actions" / "run-python-tests" / "action.yml",
+        root / ".github" / "actions" / "run-go-tests" / "action.yml",
+        root / ".github" / "actions" / "run-node-tests" / "action.yml",
+    ]
+    for path in paths:
+        content = path.read_text()
+        assert "didlawowo/workflow-ci/" in content
+        assert "@main" not in content
+        assert "@v1.7.1" in content
