@@ -1,6 +1,7 @@
 from pathlib import Path
 
-WORKFLOW = Path(".github/workflows/quality-evidence.yml")
+ROOT = Path(__file__).resolve().parents[1]
+WORKFLOW = ROOT / ".github" / "workflows" / "quality-evidence.yml"
 
 
 def test_quality_evidence_is_reusable_and_not_recursive():
