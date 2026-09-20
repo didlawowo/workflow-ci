@@ -94,3 +94,18 @@ def test_mutation_verify_is_read_only_and_scoped_to_changed_functions():
     assert "mutation gate failed for changed functions" in verify
     assert "scoped-mutation-evidence-" in verify
     assert "quality-report@main" not in verify
+
+
+def test_python_security_action_propagates_requested_check_failures():
+    root = Path(__file__).resolve().parents[1]
+    content = (
+        root / ".github" / "actions" / "python-quality-security" / "action.yml"
+    ).read_text()
+
+    assert "id: mypy" in content
+    assert "id: trufflehog" in content
+    assert "id: safety" in content
+    assert "steps.mypy.outputs.status" in content
+    assert "steps.trufflehog.outcome" in content
+    assert "steps.safety.outputs.status" in content
+    assert "SECURITY_ISSUES=$((SECURITY_ISSUES + 1))" in content
