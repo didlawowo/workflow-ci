@@ -5,6 +5,7 @@ on:
     paths:
       - ".github/actions/quality-report/**"
       - ".github/actions/run-python-tests/**"
+      - ".github/actions/python-quality-security/**"
       - ".github/workflows/quality-evidence.yml"
       - ".github/actions/run-go-tests/**"
       - ".github/actions/run-node-tests/**"
@@ -19,6 +20,7 @@ on:
     paths:
       - ".github/actions/quality-report/**"
       - ".github/actions/run-python-tests/**"
+      - ".github/actions/python-quality-security/**"
       - ".github/workflows/quality-evidence.yml"
       - ".github/actions/run-go-tests/**"
       - ".github/actions/run-node-tests/**"
