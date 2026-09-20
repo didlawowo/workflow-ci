@@ -69,7 +69,6 @@ runs:
       with:
         python-version: ${{ inputs.python-version }}
         install-dev: "true"
-        cache-key-suffix: "-tests"
 
     # --- Docker Compose mode ---
     - name: Run tests with Docker Compose
@@ -142,7 +141,7 @@ runs:
           if [ -f "$f" ]; then REPORT="$f"; break; fi
         done
 
-        python - "$REPORT" "$GITHUB_OUTPUT" <<'PY'
+        uv run python - "$REPORT" "$GITHUB_OUTPUT" <<'PY'
         import sys
         import xml.etree.ElementTree as ET
 
