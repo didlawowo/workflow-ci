@@ -172,15 +172,16 @@ jobs:
     permissions:
       contents: read
       actions: read
-      issues: write
+      issues: read
       pull-requests: read
-    runs-on: ${{ vars.RUNNER || 'ubuntu-latest' }}
+    runs-on: ${{ vars.UNTRUSTED_RUNNER || 'ubuntu-latest' }}
     steps:
       - name: Checkout trusted base policy
         uses: actions/checkout@v7
         with:
           ref: ${{ github.event.pull_request.base.sha }}
           path: .policy
+          fetch-depth: 0
           persist-credentials: false
 
       - name: Re-classify pull request independently
@@ -203,6 +204,16 @@ jobs:
             exit 1
           fi
 
+      - name: Checkout pull request for diff analysis
+        if: steps.policy.outputs.required == 'true'
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ github.event.pull_request.head.repo.full_name }}
+          ref: ${{ github.event.pull_request.head.sha }}
+          path: pr
+          fetch-depth: 0
+          persist-credentials: false
+
       - name: Download mutation evidence
         if: steps.policy.outputs.required == 'true'
         uses: actions/download-artifact@v6
@@ -210,24 +221,43 @@ jobs:
           name: mutation-evidence-${{ github.run_id }}
           path: .mutation-evidence
 
-      - name: Validate engine-native mutation evidence
+      - name: Validate mutation evidence for changed Python functions
         id: validate
         if: steps.policy.outputs.required == 'true'
         shell: bash
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           set -euo pipefail
-          REPORT="$(find .mutation-evidence -type f -name '*.json' -print -quit)"
+          REPORT="$(find .mutation-evidence -type f -name 'mutmut-cicd-stats.json' -print -quit)"
+          RESULTS="$(find .mutation-evidence -type f -name 'mutmut-results.txt' -print -quit)"
+
+          if [[ -z "$REPORT" ]]; then
+            # Non-mutmut engines still use aggregate engine-native validation.
+            REPORT="$(find .mutation-evidence -type f -name '*.json' -print -quit)"
+          fi
           if [[ -z "$REPORT" ]]; then
             echo "::error::No mutation evidence artifact was downloaded."
             exit 1
           fi
-          python - "$REPORT" <<'PY'
+
+          python - "$REPORT" "$RESULTS" "$GITHUB_WORKSPACE/pr" "$BASE_SHA" "$HEAD_SHA" "$GITHUB_OUTPUT" <<'PY'
+          import ast
           import json
+          import re
+          import subprocess
           import sys
           from pathlib import Path
 
-          path = Path(sys.argv[1])
-          data = json.loads(path.read_text(encoding="utf-8"))
+          report_path = Path(sys.argv[1])
+          results_path = Path(sys.argv[2]) if sys.argv[2] else None
+          repo = Path(sys.argv[3])
+          base = sys.argv[4]
+          head = sys.argv[5]
+          output_path = Path(sys.argv[6])
+
+          data = json.loads(report_path.read_text(encoding="utf-8"))
           if not isinstance(data, dict):
               raise SystemExit("mutation evidence must be a JSON object")
 
@@ -259,16 +289,161 @@ jobs:
               total = killed + survived + timeouts + suspicious
           if total <= 0:
               raise SystemExit("mutation evidence contains no measured mutants")
-          if survived or timeouts or suspicious:
-              raise SystemExit(
-                  f"mutation gate failed: survived={survived}, "
-                  f"timeouts={timeouts}, suspicious={suspicious}"
-              )
-          print(f"mutation gate passed: {killed}/{total} mutants killed")
-          PY
-          echo "path=$REPORT" >> "$GITHUB_OUTPUT"
 
-      - name: Publish mutation evidence
+          # Engines without per-mutant locations keep the conservative aggregate gate.
+          if not results_path or not results_path.is_file():
+              if survived or timeouts or suspicious:
+                  raise SystemExit(
+                      f"mutation gate failed: survived={survived}, "
+                      f"timeouts={timeouts}, suspicious={suspicious}"
+                  )
+              scoped_path = report_path
+              print(f"mutation gate passed: {killed}/{total} mutants killed")
+          else:
+              status_re = re.compile(r"^\s*(\S+):\s+([a-z_]+)\s*$")
+              statuses = {}
+              for raw in results_path.read_text(encoding="utf-8").splitlines():
+                  match = status_re.match(raw)
+                  if match:
+                      statuses[match.group(1)] = match.group(2)
+
+              diff = subprocess.run(
+                  [
+                      "git", "-C", str(repo), "diff", "--unified=0", "--no-color",
+                      f"{base}...{head}", "--", "*.py",
+                  ],
+                  check=True,
+                  capture_output=True,
+                  text=True,
+              ).stdout
+
+              changed_lines = {}
+              current_path = None
+              for raw in diff.splitlines():
+                  if raw.startswith("+++ b/"):
+                      current_path = raw[6:]
+                      changed_lines.setdefault(current_path, set())
+                      continue
+                  if not raw.startswith("@@") or current_path is None:
+                      continue
+                  match = re.search(r"\+(\d+)(?:,(\d+))?", raw)
+                  if not match:
+                      continue
+                  start = int(match.group(1))
+                  count = int(match.group(2) or "1")
+                  changed_lines[current_path].update(range(start, start + count))
+
+              changed_functions = {}
+              for relative, lines in changed_lines.items():
+                  path = repo / relative
+                  if not lines or not path.is_file() or path.suffix != ".py":
+                      continue
+                  try:
+                      tree = ast.parse(path.read_text(encoding="utf-8"))
+                  except (SyntaxError, UnicodeDecodeError):
+                      continue
+                  parts = list(Path(relative).with_suffix("").parts)
+                  if parts and parts[0] == "src":
+                      parts = parts[1:]
+                  module = ".".join(parts)
+                  names = set()
+                  for node in ast.walk(tree):
+                      if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                          continue
+                      end = getattr(node, "end_lineno", node.lineno)
+                      if any(node.lineno <= line <= end for line in lines):
+                          names.add(node.name)
+                  if names:
+                      changed_functions[module] = names
+
+              def mutant_function(mutant_id):
+                  if ".x_" not in mutant_id or "__mutmut_" not in mutant_id:
+                      return None, None
+                  module, rest = mutant_id.split(".x_", 1)
+                  name = rest.split("__mutmut_", 1)[0]
+                  return module, name
+
+              scoped = {}
+              for mutant_id, status in statuses.items():
+                  module, generated_name = mutant_function(mutant_id)
+                  names = changed_functions.get(module or "", set())
+                  if not generated_name or not names:
+                      continue
+                  if any(
+                      generated_name == name or generated_name.endswith("__" + name)
+                      for name in names
+                  ):
+                      scoped[mutant_id] = status
+
+              scoped_killed = sum(status == "killed" for status in scoped.values())
+              scoped_survived = sum(status == "survived" for status in scoped.values())
+              scoped_timeout = sum(status in {"timeout", "timed_out"} for status in scoped.values())
+              scoped_suspicious = sum(status == "suspicious" for status in scoped.values())
+              scoped_other = [
+                  mutant_id
+                  for mutant_id, status in scoped.items()
+                  if status not in {"killed", "survived", "timeout", "timed_out", "suspicious"}
+              ]
+
+              if scoped:
+                  print(
+                      "changed-function mutation scope: "
+                      + ", ".join(
+                          f"{module}={sorted(names)}"
+                          for module, names in sorted(changed_functions.items())
+                      )
+                  )
+                  if scoped_survived or scoped_timeout or scoped_suspicious or scoped_other:
+                      survivors = [
+                          mutant_id
+                          for mutant_id, status in scoped.items()
+                          if status != "killed"
+                      ]
+                      preview = "\n".join(f"  - {item}" for item in survivors[:40])
+                      raise SystemExit(
+                          "mutation gate failed for changed functions: "
+                          f"killed={scoped_killed}, survived={scoped_survived}, "
+                          f"timeouts={scoped_timeout}, suspicious={scoped_suspicious}, "
+                          f"other={len(scoped_other)}\n{preview}"
+                      )
+                  print(
+                      f"mutation gate passed for changed functions: "
+                      f"{scoped_killed}/{len(scoped)} mutants killed"
+                  )
+              else:
+                  print(
+                      "::notice::No covered mutation targets were found in changed "
+                      "Python functions; aggregate legacy survivors do not block this PR."
+                  )
+
+              scoped_payload = {
+                  "stats": {
+                      "killed": scoped_killed,
+                      "survived": scoped_survived,
+                      "timeouts": scoped_timeout,
+                      "suspicious": scoped_suspicious,
+                      "total": len(scoped),
+                  },
+                  "scope": {
+                      "base_sha": base,
+                      "head_sha": head,
+                      "changed_functions": {
+                          module: sorted(names)
+                          for module, names in sorted(changed_functions.items())
+                      },
+                  },
+              }
+              scoped_path = Path(".mutation-evidence/scoped-mutation.json")
+              scoped_path.write_text(
+                  json.dumps(scoped_payload, indent=2, sort_keys=True) + "\n",
+                  encoding="utf-8",
+              )
+
+          with output_path.open("a", encoding="utf-8") as handle:
+              handle.write(f"path={scoped_path}\n")
+          PY
+
+      - name: Publish mutation evidence summary
         if: always() && steps.policy.outputs.required == 'true' && steps.validate.outcome == 'success'
         uses: didlawowo/workflow-ci/.github/actions/quality-report@main
         with:
@@ -276,7 +451,7 @@ jobs:
           base-sha: ${{ github.event.pull_request.base.sha }}
           head-sha: ${{ github.event.pull_request.head.sha }}
           github-token: ${{ github.token }}
-          comment: "true"
+          comment: "false"
 
       - name: Confirm mutation testing is not required
         if: steps.policy.outputs.required != 'true'
