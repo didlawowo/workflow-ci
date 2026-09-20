@@ -445,7 +445,7 @@ def merge_reports(existing: dict[str, Any] | None, current: dict[str, Any]) -> d
     # Evidence is only mergeable when it belongs to the same PR head. Carrying
     # coverage or mutation results across commits makes an old successful run
     # look authoritative for code that was never measured.
-    if existing_head and current_head and existing_head != current_head:
+    if current_head and existing_head != current_head:
         return current
 
     merged = dict(existing)
