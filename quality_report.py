@@ -428,8 +428,30 @@ def _extract_state(body: str) -> dict[str, Any] | None:
 def merge_reports(existing: dict[str, Any] | None, current: dict[str, Any]) -> dict[str, Any]:
     if not existing:
         return current
+
+    existing_identity = existing.get("identity")
+    current_identity = current.get("identity")
+    existing_head = (
+        existing_identity.get("head_sha")
+        if isinstance(existing_identity, dict)
+        else None
+    )
+    current_head = (
+        current_identity.get("head_sha")
+        if isinstance(current_identity, dict)
+        else None
+    )
+
+    # Evidence is only mergeable when it belongs to the same PR head. Carrying
+    # coverage or mutation results across commits makes an old successful run
+    # look authoritative for code that was never measured.
+    if existing_head and current_head and existing_head != current_head:
+        return current
+
     merged = dict(existing)
     merged["schema_version"] = current.get("schema_version", existing.get("schema_version", 1))
+    if current_identity is not None:
+        merged["identity"] = current_identity
     for section in ("tests", "coverage", "mutation", "diff", "history"):
         candidate = current.get(section)
         previous = existing.get(section)
@@ -607,6 +629,12 @@ def main() -> int:
     )
     report = {
         "schema_version": 1,
+        "identity": {
+            "base_sha": args.base,
+            "head_sha": args.head,
+            "run_id": os.environ.get("GITHUB_RUN_ID"),
+            "run_attempt": int(os.environ.get("GITHUB_RUN_ATTEMPT", "1")),
+        },
         "tests": tests,
         "coverage": coverage,
         "mutation": parse_mutation(args.mutation),
