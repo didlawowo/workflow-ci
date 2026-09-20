@@ -71,19 +71,32 @@ runs:
       continue-on-error: true
 
     - name: Run MyPy
+      id: mypy
       if: inputs.run-mypy == 'true'
       shell: bash
-      run: uv run mypy . --junit-xml=mypy-report.xml || true
+      run: |
+        if uv run mypy . --junit-xml=mypy-report.xml; then
+          echo "status=passed" >> "$GITHUB_OUTPUT"
+        else
+          echo "status=failed" >> "$GITHUB_OUTPUT"
+        fi
+      continue-on-error: true
 
     - name: Run Bandit
       id: bandit
       if: inputs.run-bandit == 'true'
       shell: bash
       run: |
-        uv run bandit -r ${{ inputs.bandit-paths }} -f json -o bandit-report.json --skip ${{ inputs.bandit-skip-rules }} || true
+        set +e
+        uv run bandit -r ${{ inputs.bandit-paths }} -f json -o bandit-report.json --skip ${{ inputs.bandit-skip-rules }}
+        STATUS=$?
         uv run bandit -r ${{ inputs.bandit-paths }} --skip ${{ inputs.bandit-skip-rules }} || true
+        set -e
+        echo "status=$([[ "$STATUS" -eq 0 ]] && echo passed || echo failed)" >> "$GITHUB_OUTPUT"
+      continue-on-error: true
 
     - name: TruffleHog secret detection
+      id: trufflehog
       if: inputs.run-trufflehog == 'true'
       uses: trufflesecurity/trufflehog@main
       with:
@@ -94,8 +107,14 @@ runs:
       continue-on-error: true
 
     - name: Safety dependency check
+      id: safety
       shell: bash
-      run: uv run safety check --json --output safety-report.json || true
+      run: |
+        if uv run safety check --json --output safety-report.json; then
+          echo "status=passed" >> "$GITHUB_OUTPUT"
+        else
+          echo "status=failed" >> "$GITHUB_OUTPUT"
+        fi
       continue-on-error: true
 
     - name: Analyze results
@@ -116,6 +135,19 @@ runs:
         if [ -f bandit-report.json ]; then
           BANDIT_ISSUES=$(jq '.results | length' bandit-report.json 2>/dev/null || echo 0)
           SECURITY_ISSUES=$((SECURITY_ISSUES + BANDIT_ISSUES))
+        fi
+
+        if [ "${{ inputs.run-bandit }}" = "true" ] && [ "${{ steps.bandit.outputs.status }}" = "failed" ] && [ "${BANDIT_ISSUES:-0}" -eq 0 ]; then
+          QUALITY_PASSED=false
+        fi
+        if [ "${{ inputs.run-mypy }}" = "true" ] && [ "${{ steps.mypy.outputs.status }}" != "passed" ]; then
+          QUALITY_PASSED=false
+        fi
+        if [ "${{ inputs.run-trufflehog }}" = "true" ] && [ "${{ steps.trufflehog.outcome }}" != "success" ]; then
+          SECURITY_ISSUES=$((SECURITY_ISSUES + 1))
+        fi
+        if [ "${{ steps.safety.outputs.status }}" != "passed" ]; then
+          SECURITY_ISSUES=$((SECURITY_ISSUES + 1))
         fi
 
         {
