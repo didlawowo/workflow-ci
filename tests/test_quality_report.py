@@ -114,6 +114,59 @@ class QualityReportTests(unittest.TestCase):
         self.assertEqual(merged["coverage"]["percentage"], 80.0)
         self.assertEqual(merged["mutation"]["score"], 95.0)
 
+    def test_merge_reports_drops_stale_evidence_when_head_changes(self):
+        existing = {
+            "schema_version": 1,
+            "identity": {"head_sha": "old-head"},
+            "tests": {"available": True, "total": 42},
+            "coverage": {"available": True, "percentage": 91.0},
+            "mutation": {"available": True, "score": 100.0},
+            "diff": {"available": True, "files": 4},
+            "history": {"available": True, "commits": 2},
+        }
+        current = {
+            "schema_version": 1,
+            "identity": {"head_sha": "new-head"},
+            "tests": {"available": False},
+            "coverage": {"available": False},
+            "mutation": {"available": False},
+            "diff": {"available": True, "files": 1},
+            "history": {"available": False},
+        }
+
+        merged = quality_report.merge_reports(existing, current)
+
+        self.assertEqual(merged["identity"]["head_sha"], "new-head")
+        self.assertFalse(merged["tests"]["available"])
+        self.assertFalse(merged["coverage"]["available"])
+        self.assertFalse(merged["mutation"]["available"])
+
+    def test_merge_reports_combines_sections_for_same_head(self):
+        existing = {
+            "schema_version": 1,
+            "identity": {"head_sha": "same-head"},
+            "tests": {"available": True, "total": 10},
+            "coverage": {"available": True, "percentage": 80.0},
+            "mutation": {"available": False},
+            "diff": {"available": True, "files": 2},
+            "history": {"available": True, "commits": 2},
+        }
+        current = {
+            "schema_version": 1,
+            "identity": {"head_sha": "same-head"},
+            "tests": {"available": False},
+            "coverage": {"available": False},
+            "mutation": {"available": True, "score": 100.0},
+            "diff": {"available": False},
+            "history": {"available": False},
+        }
+
+        merged = quality_report.merge_reports(existing, current)
+
+        self.assertEqual(merged["tests"]["total"], 10)
+        self.assertEqual(merged["coverage"]["percentage"], 80.0)
+        self.assertEqual(merged["mutation"]["score"], 100.0)
+
     def test_markdown_exposes_failures_and_policy_files(self):
         report = {
             "tests": {
