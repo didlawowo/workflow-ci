@@ -193,6 +193,79 @@ class QualityReportTests(unittest.TestCase):
         self.assertEqual(merged["coverage"]["percentage"], 80.0)
         self.assertEqual(merged["mutation"]["score"], 100.0)
 
+    def test_merge_reports_preserves_full_structural_contract(self):
+        existing = {
+            "schema_version": 7,
+            "identity": {"head_sha": "same-head", "run_id": "old"},
+            "tests": {"available": True, "marker": "old-tests"},
+            "coverage": {"available": True, "marker": "old-coverage"},
+            "mutation": {"available": True, "marker": "old-mutation"},
+            "diff": {"available": True, "marker": "old-diff"},
+            "history": {"available": True, "marker": "old-history"},
+        }
+        current = {
+            "schema_version": 2,
+            "identity": {"head_sha": "same-head", "run_id": "new"},
+            "tests": {"available": True, "marker": "new-tests"},
+            "coverage": {"available": True, "marker": "new-coverage"},
+            "mutation": {"available": True, "marker": "new-mutation"},
+            "diff": {"available": True, "marker": "new-diff"},
+            "history": {"available": True, "marker": "new-history"},
+        }
+
+        merged = quality_report.merge_reports(existing, current)
+
+        self.assertEqual(
+            set(merged),
+            {
+                "schema_version",
+                "identity",
+                "tests",
+                "coverage",
+                "mutation",
+                "diff",
+                "history",
+            },
+        )
+        self.assertEqual(merged["schema_version"], 2)
+        self.assertEqual(merged["identity"], current["identity"])
+        for section in ("tests", "coverage", "mutation", "diff", "history"):
+            self.assertEqual(merged[section], current[section])
+
+    def test_merge_reports_schema_version_fallback_contract(self):
+        base_sections = {
+            "tests": {"available": False},
+            "coverage": {"available": False},
+            "mutation": {"available": False},
+            "diff": {"available": False},
+            "history": {"available": False},
+        }
+
+        existing = {
+            "schema_version": 7,
+            "identity": {"head_sha": "same-head"},
+            **base_sections,
+        }
+        current = {
+            "identity": {"head_sha": "same-head"},
+            **base_sections,
+        }
+        self.assertEqual(
+            quality_report.merge_reports(existing, current)["schema_version"],
+            7,
+        )
+
+        existing_without_schema = {
+            "identity": {"head_sha": "same-head"},
+            **base_sections,
+        }
+        self.assertEqual(
+            quality_report.merge_reports(existing_without_schema, current)[
+                "schema_version"
+            ],
+            1,
+        )
+
     def test_markdown_exposes_failures_and_policy_files(self):
         report = {
             "tests": {
