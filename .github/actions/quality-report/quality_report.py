@@ -93,6 +93,44 @@ def parse_junit(patterns: list[str]) -> dict[str, Any]:
     }
 
 
+def fallback_tests(
+    tests: dict[str, Any],
+    total: str | None,
+    failed: str | None,
+    skipped: str | None,
+    status: str | None,
+) -> dict[str, Any]:
+    """Use trusted action outputs when a framework has no JUnit reporter."""
+    if tests.get("available"):
+        return tests
+    if not status and total is None:
+        return tests
+
+    total_n = int(total) if total and total.isdigit() else None
+    failed_n = int(failed) if failed and failed.isdigit() else (0 if status == "success" else None)
+    skipped_n = int(skipped) if skipped and skipped.isdigit() else 0
+    passed_n = None
+    pass_rate = None
+    if total_n is not None and failed_n is not None:
+        passed_n = max(total_n - failed_n - skipped_n, 0)
+        pass_rate = (passed_n / total_n * 100.0) if total_n else None
+
+    return {
+        "files": [],
+        "total": total_n,
+        "passed": passed_n,
+        "failed": failed_n,
+        "failures": failed_n,
+        "errors": 0,
+        "skipped": skipped_n,
+        "duration_seconds": None,
+        "pass_rate": round(pass_rate, 1) if pass_rate is not None else None,
+        "available": True,
+        "status": status or ("success" if failed_n == 0 else "failure"),
+        "source": "trusted-action-output",
+    }
+
+
 def parse_coverage(patterns: list[str]) -> dict[str, Any]:
     files = _paths(patterns)
     if not files:
@@ -343,11 +381,14 @@ def render_markdown(report: dict[str, Any]) -> str:
 
     test_summary = "N/A"
     if tests["available"]:
-        test_summary = (
-            f"{tests['passed']} passed · {tests['failed']} failed · "
-            f"{tests['skipped']} skipped / {tests['total']} total "
-            f"({tests['pass_rate']}%)"
-        )
+        if tests.get("total") is None:
+            test_summary = f"{tests.get('status', 'unknown')} · count unavailable"
+        else:
+            test_summary = (
+                f"{tests['passed']} passed · {tests['failed']} failed · "
+                f"{tests['skipped']} skipped / {tests['total']} total "
+                f"({tests['pass_rate']}%)"
+            )
 
     coverage_summary = (
         f"{coverage['percentage']}%" if coverage["available"] else "N/A"
@@ -455,6 +496,10 @@ def main() -> int:
     parser.add_argument("--junit", action="append", default=[])
     parser.add_argument("--coverage", action="append", default=[])
     parser.add_argument("--mutation")
+    parser.add_argument("--tests-total")
+    parser.add_argument("--tests-failed")
+    parser.add_argument("--tests-skipped")
+    parser.add_argument("--test-status")
     parser.add_argument("--base")
     parser.add_argument("--head")
     parser.add_argument("--output-json", default=".quality/quality-report.json")
@@ -465,9 +510,16 @@ def main() -> int:
     pr_number_raw = os.environ.get("QUALITY_PR_NUMBER")
     pr_number = int(pr_number_raw) if pr_number_raw and pr_number_raw.isdigit() else None
 
+    tests = fallback_tests(
+        parse_junit(args.junit),
+        args.tests_total,
+        args.tests_failed,
+        args.tests_skipped,
+        args.test_status,
+    )
     report = {
         "schema_version": 1,
-        "tests": parse_junit(args.junit),
+        "tests": tests,
         "coverage": parse_coverage(args.coverage),
         "mutation": parse_mutation(args.mutation),
         "diff": diff_stats(args.base, args.head),
