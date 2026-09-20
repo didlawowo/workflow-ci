@@ -123,6 +123,17 @@ jobs:
             MUTATION_POLICY_LABELS="$MUTATION_POLICY_LABELS" \
             bash "$GITHUB_WORKSPACE/.policy/.ci/mutation.sh"
 
+      - name: Capture mutmut diagnostics
+        if: always() && steps.policy.outputs.required == 'true' && steps.mutation-python.outputs.venv != ''
+        shell: bash
+        working-directory: pr
+        env:
+          MUTATION_VENV: ${{ steps.mutation-python.outputs.venv }}
+        run: |
+          set -euo pipefail
+          mkdir -p .quality
+          "$MUTATION_VENV/bin/mutmut" results > .quality/mutmut-results.txt || true
+
       - name: Locate engine-native mutation evidence
         id: evidence
         if: always() && steps.policy.outputs.required == 'true'
@@ -143,7 +154,9 @@ jobs:
         uses: actions/upload-artifact@v6
         with:
           name: mutation-evidence-${{ github.run_id }}
-          path: ${{ steps.evidence.outputs.path }}
+          path: |
+            ${{ steps.evidence.outputs.path }}
+            pr/.quality/mutmut-results.txt
           retention-days: 7
           if-no-files-found: error
 
