@@ -37,3 +37,75 @@ def test_quality_evidence_dependency_chain_has_no_workflow_ci_main_refs():
         assert "didlawowo/workflow-ci/" in content
         assert "@main" not in content
         assert "@v1.7.0" in content
+
+
+def test_mutation_policy_separates_untrusted_execution_from_trusted_verification():
+    root = Path(__file__).resolve().parents[1]
+    content = (root / ".github" / "workflows" / "mutation-policy.yml").read_text()
+
+    assert "pull_request_target:" not in content
+    assert "pull_request:" in content
+    assert "path: .policy" in content
+    assert "path: pr" in content
+    assert "vars.UNTRUSTED_RUNNER || 'ubuntu-latest'" in content
+    assert 'bash "$GITHUB_WORKSPACE/.policy/.ci/mutation.sh"' in content
+    assert "needs: [mutation-run]" in content
+    assert "actions/download-artifact@v6" in content
+
+
+def test_mutation_policy_requires_machine_readable_evidence_and_zero_survivors():
+    root = Path(__file__).resolve().parents[1]
+    content = (root / ".github" / "workflows" / "mutation-policy.yml").read_text()
+
+    assert "Mandatory mutation run produced no supported engine-native evidence" in content
+    assert "mutation evidence is missing killed/survived counters" in content
+    assert "mutation evidence contains no measured mutants" in content
+    assert "if survived or timeouts or suspicious:" in content
+
+
+def test_language_templates_make_quality_failures_blocking():
+    root = Path(__file__).resolve().parents[1]
+    for language in ("python", "go", "node"):
+        content = (root / "templates" / language / "ci-branch-pipeline.yml").read_text()
+        quality_index = content.index("quality-security:")
+        gate_index = content.index("- name: Enforce quality and security gate")
+
+        assert gate_index > quality_index
+        assert content.count("- name: Enforce quality and security gate") == 1
+        assert (
+            "if: always() && needs.tests.result == 'success' && "
+            "needs.quality-security.result == 'success'"
+        ) in content
+
+    for language in ("python", "go"):
+        content = (root / "templates" / language / "ci-branch-pipeline.yml").read_text()
+        assert 'fail-on-coverage: "true"' in content
+
+
+def test_mutation_verify_is_read_only_and_scoped_to_changed_functions():
+    root = Path(__file__).resolve().parents[1]
+    content = (root / ".github" / "workflows" / "mutation-policy.yml").read_text()
+
+    verify = content.split("  mutation-verify:", 1)[1]
+    assert "issues: write" not in verify
+    assert "pull-requests: write" not in verify
+    assert "vars.UNTRUSTED_RUNNER || 'ubuntu-latest'" in verify
+    assert "git\", \"-C\", str(repo), \"diff\", \"--unified=0\"" in verify
+    assert "mutation gate failed for changed functions" in verify
+    assert "scoped-mutation-evidence-" in verify
+    assert "quality-report@main" not in verify
+
+
+def test_python_security_action_propagates_requested_check_failures():
+    root = Path(__file__).resolve().parents[1]
+    content = (
+        root / ".github" / "actions" / "python-quality-security" / "action.yml"
+    ).read_text()
+
+    assert "id: mypy" in content
+    assert "id: trufflehog" in content
+    assert "id: safety" in content
+    assert "steps.mypy.outputs.status" in content
+    assert "steps.trufflehog.outcome" in content
+    assert "steps.safety.outputs.status" in content
+    assert "SECURITY_ISSUES=$((SECURITY_ISSUES + 1))" in content

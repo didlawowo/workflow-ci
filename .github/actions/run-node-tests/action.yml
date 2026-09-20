@@ -35,6 +35,18 @@ outputs:
   tests-passed:
     description: "Whether all tests passed"
     value: ${{ steps.tests.outputs.passed }}
+  coverage-percentage:
+    description: "Coverage percentage when coverage/coverage-summary.json exists"
+    value: ${{ steps.coverage.outputs.percentage }}
+  test-count:
+    description: "Number of tests when a supported JUnit report exists"
+    value: ${{ steps.evidence.outputs.count }}
+  tests-failed:
+    description: "Number of failed tests, or 1 when the command failed and no JUnit exists"
+    value: ${{ steps.evidence.outputs.failed }}
+  tests-skipped:
+    description: "Number of skipped tests when a supported JUnit report exists"
+    value: ${{ steps.evidence.outputs.skipped }}
 
 runs:
   using: "composite"
@@ -54,11 +66,68 @@ runs:
       id: tests
       shell: bash
       run: |
-        if ${{ inputs.package-manager }} run ${{ inputs.test-script }}; then
+        set +e
+        ${{ inputs.package-manager }} run ${{ inputs.test-script }}
+        STATUS=$?
+        set -e
+        echo "exit-code=$STATUS" >> "$GITHUB_OUTPUT"
+        if [[ "$STATUS" -eq 0 ]]; then
           echo "passed=true" >> "$GITHUB_OUTPUT"
         else
           echo "passed=false" >> "$GITHUB_OUTPUT"
-          exit 1
+        fi
+
+    - name: Extract Node test evidence
+      id: evidence
+      shell: bash
+      env:
+        TEST_EXIT_CODE: ${{ steps.tests.outputs.exit-code }}
+      run: |
+        set -euo pipefail
+        REPORT=""
+        for candidate in           coverage-reports/junit.xml           coverage-reports/junit-report.xml           coverage-reports/test-report.xml           junit.xml           junit-report.xml           test-results/junit.xml; do
+          if [[ -f "$candidate" ]]; then
+            REPORT="$candidate"
+            break
+          fi
+        done
+
+        if [[ -n "$REPORT" ]]; then
+          ATTRS="$(grep -m1 -Eo '<testsuite(s)?[^>]*>' "$REPORT" || true)"
+          TOTAL="$(printf '%s' "$ATTRS" | grep -Eo 'tests="[0-9]+"' | head -1 | grep -Eo '[0-9]+' || true)"
+          FAILURES="$(printf '%s' "$ATTRS" | grep -Eo 'failures="[0-9]+"' | head -1 | grep -Eo '[0-9]+' || true)"
+          ERRORS="$(printf '%s' "$ATTRS" | grep -Eo 'errors="[0-9]+"' | head -1 | grep -Eo '[0-9]+' || true)"
+          SKIPPED="$(printf '%s' "$ATTRS" | grep -Eo '(skipped|disabled)="[0-9]+"' | head -1 | grep -Eo '[0-9]+' || true)"
+          TOTAL="${TOTAL:-}"
+          FAILURES="${FAILURES:-0}"
+          ERRORS="${ERRORS:-0}"
+          SKIPPED="${SKIPPED:-0}"
+          FAILED=$((FAILURES + ERRORS))
+          echo "count=$TOTAL" >> "$GITHUB_OUTPUT"
+          echo "failed=$FAILED" >> "$GITHUB_OUTPUT"
+          echo "skipped=$SKIPPED" >> "$GITHUB_OUTPUT"
+          echo "report=$REPORT" >> "$GITHUB_OUTPUT"
+        else
+          echo "count=" >> "$GITHUB_OUTPUT"
+          if [[ "${TEST_EXIT_CODE:-1}" -eq 0 ]]; then
+            echo "failed=0" >> "$GITHUB_OUTPUT"
+          else
+            echo "failed=1" >> "$GITHUB_OUTPUT"
+          fi
+          echo "skipped=" >> "$GITHUB_OUTPUT"
+          echo "report=" >> "$GITHUB_OUTPUT"
+        fi
+
+    - name: Extract Node coverage evidence
+      id: coverage
+      shell: bash
+      run: |
+        set -euo pipefail
+        if [[ -f coverage/coverage-summary.json ]]; then
+          PCT="$(node -e 'const c=require("./coverage/coverage-summary.json"); const p=c?.total?.lines?.pct; if (typeof p === "number") process.stdout.write(String(p));')"
+          echo "percentage=$PCT" >> "$GITHUB_OUTPUT"
+        else
+          echo "percentage=" >> "$GITHUB_OUTPUT"
         fi
 
     - name: Upload coverage to Codecov
@@ -76,5 +145,16 @@ runs:
         name: node-test-results
         path: |
           coverage/
+          coverage-reports/
+          test-results/
           playwright-report/
         retention-days: 7
+
+    - name: Fail on test failure
+      shell: bash
+      run: |
+        STATUS="${{ steps.tests.outputs.exit-code }}"
+        if [[ "${STATUS:-1}" -ne 0 ]] || [[ "${{ steps.tests.outputs.passed }}" != "true" ]]; then
+          echo "::error::Node tests failed (exit=${STATUS:-unknown})."
+          exit 1
+        fi

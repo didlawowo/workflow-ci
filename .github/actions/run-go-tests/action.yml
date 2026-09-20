@@ -100,7 +100,7 @@ runs:
       run: |
         PCT="${{ steps.coverage.outputs.percentage }}"
         THRESHOLD="${{ inputs.coverage-threshold }}"
-        PASS=$(echo "$PCT >= $THRESHOLD" | bc -l 2>/dev/null || echo 0)
+        PASS=$(awk "BEGIN {print ($PCT >= $THRESHOLD) ? 1 : 0}")
         if [ "$PASS" -ne 1 ]; then
           echo "Coverage ${PCT}% is below threshold ${THRESHOLD}%"
           exit 1

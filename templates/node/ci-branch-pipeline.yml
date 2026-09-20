@@ -67,10 +67,25 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           package-manager: ${{ env.PACKAGE_MANAGER }}
 
+      - name: Enforce quality and security gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          QUALITY="${{ steps.checks.outputs.quality-passed }}"
+          SECURITY="${{ steps.checks.outputs.security-issues }}"
+          if [[ "$QUALITY" != "true" ]]; then
+            echo "::error::Quality checks reported failure."
+            exit 1
+          fi
+          if [[ -z "$SECURITY" || "$SECURITY" -ne 0 ]]; then
+            echo "::error::Security checks reported ${SECURITY:-unknown} issue(s)."
+            exit 1
+          fi
+
   docker-build:
     name: "Docker Build & Scan"
     needs: [tests, quality-security]
-    if: always() && needs.tests.result == 'success'
+    if: always() && needs.tests.result == 'success' && needs.quality-security.result == 'success'
     runs-on: ${{ vars.RUNNER || 'ubuntu-latest' }}
     permissions:
       contents: read
