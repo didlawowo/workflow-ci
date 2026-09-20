@@ -443,15 +443,14 @@ jobs:
               handle.write(f"path={scoped_path}\n")
           PY
 
-      - name: Publish mutation evidence summary
+      - name: Upload scoped mutation evidence
         if: always() && steps.policy.outputs.required == 'true' && steps.validate.outcome == 'success'
-        uses: didlawowo/workflow-ci/.github/actions/quality-report@main
+        uses: actions/upload-artifact@v6
         with:
-          mutation-report: ${{ steps.validate.outputs.path }}
-          base-sha: ${{ github.event.pull_request.base.sha }}
-          head-sha: ${{ github.event.pull_request.head.sha }}
-          github-token: ${{ github.token }}
-          comment: "false"
+          name: scoped-mutation-evidence-${{ github.run_id }}
+          path: ${{ steps.validate.outputs.path }}
+          retention-days: 14
+          if-no-files-found: error
 
       - name: Confirm mutation testing is not required
         if: steps.policy.outputs.required != 'true'
