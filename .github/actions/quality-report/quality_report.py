@@ -166,6 +166,24 @@ def _mutation_value(data: dict[str, Any], aliases: tuple[str, ...]) -> int | Non
     return None
 
 
+def fallback_coverage(
+    coverage: dict[str, Any], percentage: str | None
+) -> dict[str, Any]:
+    """Use the trusted test action percentage when no Cobertura XML exists."""
+    if coverage.get("available") or percentage in (None, ""):
+        return coverage
+    try:
+        value = float(percentage)
+    except ValueError:
+        return coverage
+    return {
+        "available": True,
+        "percentage": round(value, 1),
+        "file": None,
+        "source": "trusted-action-output",
+    }
+
+
 def parse_mutation(path: str | None) -> dict[str, Any]:
     if not path or not Path(path).is_file():
         return {
@@ -496,6 +514,7 @@ def main() -> int:
     parser.add_argument("--junit", action="append", default=[])
     parser.add_argument("--coverage", action="append", default=[])
     parser.add_argument("--mutation")
+    parser.add_argument("--coverage-percentage")
     parser.add_argument("--tests-total")
     parser.add_argument("--tests-failed")
     parser.add_argument("--tests-skipped")
@@ -517,10 +536,14 @@ def main() -> int:
         args.tests_skipped,
         args.test_status,
     )
+    coverage = fallback_coverage(
+        parse_coverage(args.coverage),
+        args.coverage_percentage,
+    )
     report = {
         "schema_version": 1,
         "tests": tests,
-        "coverage": parse_coverage(args.coverage),
+        "coverage": coverage,
         "mutation": parse_mutation(args.mutation),
         "diff": diff_stats(args.base, args.head),
         "history": ci_history(
