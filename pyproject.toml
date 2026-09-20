@@ -1,3 +1,3 @@
 [tool.mutmut]
-source_paths = [".github/actions/quality-report/"]
+source_paths = ["quality_report.py"]
 pytest_add_cli_args_test_selection = ["tests/"]
