@@ -62,7 +62,7 @@ runs:
         QUALITY_HEAD_REF: ${{ github.event.pull_request.head.ref }}
       run: |
         set -euo pipefail
-        SCRIPT="$GITHUB_ACTION_PATH/quality_report.py"
+        SCRIPT="$GITHUB_ACTION_PATH/../../../quality_report.py"
         ARGS=(
           --junit "${{ inputs.junit-glob }}"
           --coverage "${{ inputs.coverage-glob }}"
