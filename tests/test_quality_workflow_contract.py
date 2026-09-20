@@ -18,7 +18,7 @@ def test_quality_evidence_requires_explicit_runner_and_pinned_actions():
     assert "runner:" in content
     assert "runs-on: ${{ inputs.runner }}" in content
     assert "workflow-ci-ref:" in content
-    assert 'default: "v1.7.1"' in content
+    assert 'default: "v1.7.0"' in content
     assert "repository: didlawowo/workflow-ci" in content
     assert "ref: ${{ inputs.workflow-ci-ref }}" in content
     assert "ubuntu-latest" not in content
@@ -36,4 +36,4 @@ def test_quality_evidence_dependency_chain_has_no_workflow_ci_main_refs():
         content = path.read_text()
         assert "didlawowo/workflow-ci/" in content
         assert "@main" not in content
-        assert "@v1.7.1" in content
+        assert "@v1.7.0" in content
