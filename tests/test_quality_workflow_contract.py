@@ -61,3 +61,22 @@ def test_mutation_policy_requires_machine_readable_evidence_and_zero_survivors()
     assert "mutation evidence is missing killed/survived counters" in content
     assert "mutation evidence contains no measured mutants" in content
     assert "if survived or timeouts or suspicious:" in content
+
+
+def test_language_templates_make_quality_failures_blocking():
+    root = Path(__file__).resolve().parents[1]
+    for language in ("python", "go", "node"):
+        content = (root / "templates" / language / "ci-branch-pipeline.yml").read_text()
+        quality_index = content.index("quality-security:")
+        gate_index = content.index("- name: Enforce quality and security gate")
+
+        assert gate_index > quality_index
+        assert content.count("- name: Enforce quality and security gate") == 1
+        assert (
+            "if: always() && needs.tests.result == 'success' && "
+            "needs.quality-security.result == 'success'"
+        ) in content
+
+    for language in ("python", "go"):
+        content = (root / "templates" / language / "ci-branch-pipeline.yml").read_text()
+        assert 'fail-on-coverage: "true"' in content
