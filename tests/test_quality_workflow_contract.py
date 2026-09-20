@@ -109,3 +109,23 @@ def test_python_security_action_propagates_requested_check_failures():
     assert "steps.trufflehog.outcome" in content
     assert "steps.safety.outputs.status" in content
     assert "SECURITY_ISSUES=$((SECURITY_ISSUES + 1))" in content
+
+
+def test_mutation_policy_locks_engine_configuration_to_protected_base():
+    root = Path(__file__).resolve().parents[1]
+    content = (root / ".github" / "workflows" / "mutation-policy.yml").read_text()
+
+    assert "Verify mutation configuration is unchanged" in content
+    assert "Mutation-engine configuration differs from the protected base" in content
+    assert 'result["pyproject.toml"] = mutmut' in content
+    assert 'result["setup.cfg"] = dict(parser.items("mutmut"))' in content
+
+
+def test_mutation_policy_rejects_changed_functions_without_mutants():
+    root = Path(__file__).resolve().parents[1]
+    content = (root / ".github" / "workflows" / "mutation-policy.yml").read_text()
+
+    assert "source_paths is part of the protected policy" in content
+    assert "in_trusted_source_path" in content
+    assert "changed functions produced no mutation evidence" in content
+    assert "pragma: no mutate" in content
