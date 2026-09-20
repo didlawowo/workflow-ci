@@ -1,0 +1,39 @@
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+WORKFLOW = ROOT / ".github" / "workflows" / "quality-evidence.yml"
+
+
+def test_quality_evidence_is_reusable_and_not_recursive():
+    content = WORKFLOW.read_text()
+
+    assert "workflow_call:" in content
+    assert "pull_request:" not in content
+    assert "uses: didlawowo/workflow-ci/.github/workflows/quality-evidence.yml@" not in content
+
+
+def test_quality_evidence_requires_explicit_runner_and_pinned_actions():
+    content = WORKFLOW.read_text()
+
+    assert "runner:" in content
+    assert "runs-on: ${{ inputs.runner }}" in content
+    assert "workflow-ci-ref:" in content
+    assert 'default: "v1.7.0"' in content
+    assert "repository: didlawowo/workflow-ci" in content
+    assert "ref: ${{ inputs.workflow-ci-ref }}" in content
+    assert "ubuntu-latest" not in content
+    assert "@main" not in content
+
+
+def test_quality_evidence_dependency_chain_has_no_workflow_ci_main_refs():
+    root = Path(__file__).resolve().parents[1]
+    paths = [
+        root / ".github" / "actions" / "run-python-tests" / "action.yml",
+        root / ".github" / "actions" / "run-go-tests" / "action.yml",
+        root / ".github" / "actions" / "run-node-tests" / "action.yml",
+    ]
+    for path in paths:
+        content = path.read_text()
+        assert "didlawowo/workflow-ci/" in content
+        assert "@main" not in content
+        assert "@v1.7.0" in content

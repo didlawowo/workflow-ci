@@ -1,18 +1,128 @@
 name: Trusted quality evidence
 
 on:
-  pull_request:
-    branches: [main]
-    types: [opened, synchronize, reopened]
-
-permissions:
-  contents: read
-  actions: read
-  issues: write
-  pull-requests: read
+  workflow_call:
+    inputs:
+      repo-type:
+        description: "Repository language/type: python, go, node/typescript/javascript"
+        required: true
+        type: string
+      runner:
+        description: "Exact runner label to use (for example arc-runner-photo-analyser)"
+        required: true
+        type: string
+      workflow-ci-ref:
+        description: "Pinned workflow-ci ref used for composite actions"
+        required: false
+        type: string
+        default: "v1.7.0"
+      working-directory:
+        required: false
+        type: string
+        default: "."
+      python-version:
+        required: false
+        type: string
+        default: "3.12"
+      go-version:
+        required: false
+        type: string
+        default: "1.24"
+      node-version:
+        required: false
+        type: string
+        default: "22"
+      package-manager:
+        required: false
+        type: string
+        default: "npm"
 
 jobs:
-  evidence:
-    uses: didlawowo/workflow-ci/.github/workflows/quality-evidence.yml@main
-    with:
-      repo-type: python
+  independent-verification:
+    name: "Independent quality evidence"
+    runs-on: ${{ inputs.runner }}
+    permissions:
+      contents: read
+      actions: read
+      issues: write
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Checkout pinned workflow-ci actions
+        uses: actions/checkout@v7
+        with:
+          repository: didlawowo/workflow-ci
+          ref: ${{ inputs.workflow-ci-ref }}
+          path: .workflow-ci
+          persist-credentials: false
+
+      - name: Verify Python tests
+        id: python-tests
+        if: inputs.repo-type == 'python'
+        continue-on-error: true
+        uses: ./.workflow-ci/.github/actions/run-python-tests
+        with:
+          python-version: ${{ inputs.python-version }}
+          working-directory: ${{ inputs.working-directory }}
+          upload-coverage: "false"
+
+      - name: Verify Go tests
+        id: go-tests
+        if: inputs.repo-type == 'go'
+        continue-on-error: true
+        uses: ./.workflow-ci/.github/actions/run-go-tests
+        with:
+          go-version: ${{ inputs.go-version }}
+          working-directory: ${{ inputs.working-directory }}
+          upload-coverage: "false"
+
+      - name: Verify Node tests
+        id: node-tests
+        if: inputs.repo-type == 'node' || inputs.repo-type == 'typescript' || inputs.repo-type == 'javascript'
+        continue-on-error: true
+        uses: ./.workflow-ci/.github/actions/run-node-tests
+        with:
+          node-version: ${{ inputs.node-version }}
+          package-manager: ${{ inputs.package-manager }}
+          upload-coverage: "false"
+
+      - name: Publish trusted quality evidence
+        if: always()
+        uses: ./.workflow-ci/.github/actions/quality-report
+        with:
+          junit-glob: "${{ inputs.working-directory }}/coverage-reports/pytest-report.xml"
+          coverage-glob: "${{ inputs.working-directory }}/coverage-reports/coverage.xml"
+          coverage-percentage: ${{ steps.python-tests.outputs.coverage-percentage || steps.go-tests.outputs.coverage-percentage }}
+          tests-total: ${{ steps.python-tests.outputs.test-count || steps.go-tests.outputs.test-count }}
+          tests-failed: ${{ steps.python-tests.outputs.tests-failed || steps.go-tests.outputs.tests-failed }}
+          tests-skipped: ${{ steps.python-tests.outputs.tests-skipped || steps.go-tests.outputs.tests-skipped }}
+          test-status: ${{ steps.python-tests.outcome || steps.go-tests.outcome || steps.node-tests.outcome }}
+          base-sha: ${{ github.event.pull_request.base.sha }}
+          head-sha: ${{ github.event.pull_request.head.sha }}
+          github-token: ${{ github.token }}
+          comment: "true"
+
+      - name: Enforce independent verification
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          TYPE="${{ inputs.repo-type }}"
+          case "$TYPE" in
+            python)
+              test "${{ steps.python-tests.outcome }}" = "success"
+              ;;
+            go)
+              test "${{ steps.go-tests.outcome }}" = "success"
+              ;;
+            node|typescript|javascript)
+              test "${{ steps.node-tests.outcome }}" = "success"
+              ;;
+            *)
+              echo "::error::Unsupported repo type '$TYPE' for independent verification"
+              exit 1
+              ;;
+          esac
