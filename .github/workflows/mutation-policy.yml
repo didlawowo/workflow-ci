@@ -133,6 +133,20 @@ jobs:
           set -euo pipefail
           mkdir -p .quality
           "$MUTATION_VENV/bin/mutmut" results > .quality/mutmut-results.txt || true
+          : > .quality/mutmut-survivors.txt
+          while IFS= read -r line; do
+            case "$line" in
+              *": survived")
+                ID="${line%%:*}"
+                ID="${ID#" ${ID%%[![:space:]]*}"}"
+                {
+                  echo "### $ID"
+                  "$MUTATION_VENV/bin/mutmut" show "$ID" || true
+                  echo
+                } >> .quality/mutmut-survivors.txt
+                ;;
+            esac
+          done < .quality/mutmut-results.txt
 
       - name: Locate engine-native mutation evidence
         id: evidence
@@ -157,6 +171,7 @@ jobs:
           path: |
             ${{ steps.evidence.outputs.path }}
             pr/.quality/mutmut-results.txt
+            pr/.quality/mutmut-survivors.txt
           retention-days: 7
           if-no-files-found: error
 
