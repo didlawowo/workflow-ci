@@ -1,0 +1,66 @@
+name: "PR Quality Report"
+description: "Aggregate trusted CI evidence into JSON, step summary and a sticky PR comment"
+
+inputs:
+  junit-glob:
+    description: "Glob for JUnit XML files"
+    required: false
+    default: "coverage-reports/*report*.xml"
+  coverage-glob:
+    description: "Glob for Cobertura XML"
+    required: false
+    default: "coverage-reports/coverage.xml"
+  mutation-report:
+    description: "Machine-generated mutation JSON (for example mutmut-cicd-stats.json)"
+    required: false
+    default: ""
+  base-sha:
+    description: "Base commit SHA"
+    required: false
+    default: ""
+  head-sha:
+    description: "Head commit SHA"
+    required: false
+    default: ""
+  github-token:
+    description: "Token used for history lookup and sticky PR comment"
+    required: false
+    default: ""
+  comment:
+    description: "Post/update the sticky PR comment"
+    required: false
+    default: "true"
+
+runs:
+  using: "composite"
+  steps:
+    - name: Build quality evidence
+      shell: bash
+      env:
+        GITHUB_TOKEN: ${{ inputs.github-token }}
+        QUALITY_PR_NUMBER: ${{ github.event.pull_request.number }}
+        QUALITY_HEAD_REF: ${{ github.event.pull_request.head.ref }}
+      run: |
+        set -euo pipefail
+        SCRIPT="$GITHUB_ACTION_PATH/quality_report.py"
+        ARGS=(
+          --junit "${{ inputs.junit-glob }}"
+          --coverage "${{ inputs.coverage-glob }}"
+          --base "${{ inputs.base-sha }}"
+          --head "${{ inputs.head-sha }}"
+        )
+        if [[ -n "${{ inputs.mutation-report }}" ]]; then
+          ARGS+=(--mutation "${{ inputs.mutation-report }}")
+        fi
+        if [[ "${{ inputs.comment }}" == "true" ]]; then
+          ARGS+=(--comment)
+        fi
+        python "$SCRIPT" "${ARGS[@]}"
+
+    - name: Upload quality evidence
+      if: always()
+      uses: actions/upload-artifact@v6
+      with:
+        name: quality-evidence-${{ github.job }}-${{ github.run_id }}
+        path: .quality/
+        retention-days: 14
