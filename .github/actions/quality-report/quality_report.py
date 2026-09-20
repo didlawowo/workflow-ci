@@ -203,13 +203,24 @@ def parse_mutation(path: str | None) -> dict[str, Any]:
     if not isinstance(data, dict):
         raise ValueError("mutation report must be a JSON object")
 
-    killed = _mutation_value(data, ("killed", "killed_mutants", "mutants_killed"))
+    killed = _mutation_value(
+        data, ("killed", "killed_mutants", "mutants_killed")
+    )
     survived = _mutation_value(
-        data, ("survived", "surviving", "survived_mutants", "mutants_survived")
+        data,
+        (
+            "survived",
+            "surviving",
+            "survived_mutants",
+            "mutants_survived",
+            "mutants_lived",
+        ),
     )
     timeouts = _mutation_value(data, ("timeouts", "timeout", "timed_out"))
     suspicious = _mutation_value(data, ("suspicious", "suspicious_mutants"))
-    total = _mutation_value(data, ("total", "total_mutants", "mutants"))
+    total = _mutation_value(
+        data, ("total", "total_mutants", "mutants", "mutants_total")
+    )
     score_raw = None
     for key in ("mutation_score", "score", "mutationScore"):
         if isinstance(data.get(key), (int, float)):
