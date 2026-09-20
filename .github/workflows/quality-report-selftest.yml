@@ -40,7 +40,7 @@ jobs:
           mkdir -p coverage-reports
           pytest tests -q \
             --junitxml=coverage-reports/pytest-report.xml \
-            --cov=.github/actions/quality-report/quality_report.py \
+            --cov=quality_report \
             --cov-report=xml:coverage-reports/coverage.xml
       - name: Build PR quality report
         if: always()
