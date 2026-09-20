@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import base64
 import glob
 import json
 import os
@@ -16,6 +17,7 @@ from pathlib import Path
 from typing import Any
 
 COMMENT_MARKER = "<!-- workflow-ci:quality-report:v1 -->"
+STATE_PREFIX = "<!-- workflow-ci:quality-state:"
 SUSPICIOUS_PREFIXES = (
     ".github/workflows/",
     ".forgejo/workflows/",
@@ -390,6 +392,45 @@ def ci_history(
     return result
 
 
+def _state_marker(report: dict[str, Any]) -> str:
+    raw = json.dumps(report, separators=(",", ":"), sort_keys=True).encode("utf-8")
+    encoded = base64.urlsafe_b64encode(raw).decode("ascii")
+    return f"{STATE_PREFIX}{encoded} -->"
+
+
+def _extract_state(body: str) -> dict[str, Any] | None:
+    start = body.find(STATE_PREFIX)
+    if start < 0:
+        return None
+    start += len(STATE_PREFIX)
+    end = body.find(" -->", start)
+    if end < 0:
+        return None
+    try:
+        raw = base64.urlsafe_b64decode(body[start:end].encode("ascii"))
+        value = json.loads(raw.decode("utf-8"))
+    except (ValueError, json.JSONDecodeError):
+        return None
+    return value if isinstance(value, dict) else None
+
+
+def merge_reports(existing: dict[str, Any] | None, current: dict[str, Any]) -> dict[str, Any]:
+    if not existing:
+        return current
+    merged = dict(existing)
+    merged["schema_version"] = current.get("schema_version", existing.get("schema_version", 1))
+    for section in ("tests", "coverage", "mutation", "diff", "history"):
+        candidate = current.get(section)
+        previous = existing.get(section)
+        if isinstance(candidate, dict) and candidate.get("available"):
+            merged[section] = candidate
+        elif previous is not None:
+            merged[section] = previous
+        elif candidate is not None:
+            merged[section] = candidate
+    return merged
+
+
 def render_markdown(report: dict[str, Any]) -> str:
     tests = report["tests"]
     coverage = report["coverage"]
@@ -422,6 +463,7 @@ def render_markdown(report: dict[str, Any]) -> str:
 
     lines = [
         COMMENT_MARKER,
+        _state_marker(report),
         "## CI Quality Evidence",
         "",
         "| Signal | Evidence |",
@@ -472,7 +514,7 @@ def render_markdown(report: dict[str, Any]) -> str:
 
 
 def upsert_comment(
-    markdown: str,
+    report: dict[str, Any],
     api_url: str,
     repository: str,
     pr_number: int,
@@ -481,12 +523,16 @@ def upsert_comment(
     comments_url = f"{api_url}/repos/{repository}/issues/{pr_number}/comments?per_page=100"
     comments = _api_json(comments_url, token)
     existing_id = None
+    existing_report = None
     if isinstance(comments, list):
         for comment in comments:
             if isinstance(comment, dict) and COMMENT_MARKER in str(comment.get("body", "")):
                 existing_id = comment.get("id")
+                existing_report = _extract_state(str(comment.get("body", "")))
                 break
 
+    merged = merge_reports(existing_report, report)
+    markdown = render_markdown(merged)
     payload = json.dumps({"body": markdown}).encode("utf-8")
     if existing_id:
         url = f"{api_url}/repos/{repository}/issues/comments/{existing_id}"
@@ -507,7 +553,6 @@ def upsert_comment(
     )
     with urllib.request.urlopen(request, timeout=20):
         pass
-
 
 def main() -> int:
     parser = argparse.ArgumentParser()
@@ -573,7 +618,7 @@ def main() -> int:
         api_url = os.environ.get("GITHUB_API_URL")
         repository = os.environ.get("GITHUB_REPOSITORY")
         if token and api_url and repository and pr_number:
-            upsert_comment(markdown, api_url, repository, pr_number, token)
+            upsert_comment(report, api_url, repository, pr_number, token)
 
     print(markdown)
     return 0
