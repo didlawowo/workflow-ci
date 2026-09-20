@@ -37,3 +37,27 @@ def test_quality_evidence_dependency_chain_has_no_workflow_ci_main_refs():
         assert "didlawowo/workflow-ci/" in content
         assert "@main" not in content
         assert "@v1.7.0" in content
+
+
+def test_mutation_policy_separates_untrusted_execution_from_trusted_verification():
+    root = Path(__file__).resolve().parents[1]
+    content = (root / ".github" / "workflows" / "mutation-policy.yml").read_text()
+
+    assert "pull_request_target:" not in content
+    assert "pull_request:" in content
+    assert "path: .policy" in content
+    assert "path: pr" in content
+    assert "vars.UNTRUSTED_RUNNER || 'ubuntu-latest'" in content
+    assert 'bash "$GITHUB_WORKSPACE/.policy/.ci/mutation.sh"' in content
+    assert "needs: [mutation-run]" in content
+    assert "actions/download-artifact@v6" in content
+
+
+def test_mutation_policy_requires_machine_readable_evidence_and_zero_survivors():
+    root = Path(__file__).resolve().parents[1]
+    content = (root / ".github" / "workflows" / "mutation-policy.yml").read_text()
+
+    assert "Mandatory mutation run produced no supported engine-native evidence" in content
+    assert "mutation evidence is missing killed/survived counters" in content
+    assert "mutation evidence contains no measured mutants" in content
+    assert "if survived or timeouts or suspicious:" in content
