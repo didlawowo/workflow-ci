@@ -90,7 +90,7 @@ runs:
         if [[ "${{ inputs.comment }}" == "true" ]]; then
           ARGS+=(--comment)
         fi
-        python "$SCRIPT" "${ARGS[@]}"
+        uv run python "$SCRIPT" "${ARGS[@]}"
 
     - name: Upload quality evidence
       if: always()
