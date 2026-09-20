@@ -33,7 +33,8 @@ jobs:
     if: github.event_name == 'pull_request_target'
     permissions:
       contents: read
-      issues: read
+      actions: read
+      issues: write
       pull-requests: read
     runs-on: ${{ vars.RUNNER || 'ubuntu-latest' }}
     steps:
@@ -77,6 +78,14 @@ jobs:
             echo "::error::.ci/mutation.sh must invoke a supported real mutation engine."
             exit 1
           fi
+          if grep -Eiq 'mutmut[[:space:]]+run' .ci/mutation.sh && ! grep -Eiq 'mutmut[[:space:]]+export-cicd-stats' .ci/mutation.sh; then
+            echo "::error::mutmut runs must export engine-native CI stats with 'mutmut export-cicd-stats'."
+            exit 1
+          fi
+          if grep -Eiq 'gremlins[[:space:]]+unleash' .ci/mutation.sh && ! grep -Eq -- '--output[=[:space:]]+\.quality/gremlins\.json' .ci/mutation.sh; then
+            echo "::error::Gremlins must write engine-native JSON to .quality/gremlins.json."
+            exit 1
+          fi
           # The mutation script comes from the PR. Give it no forge credentials
           # or inherited secrets; only the minimum process environment it needs.
           env -i \
@@ -85,6 +94,29 @@ jobs:
             CI=true \
             MUTATION_POLICY_LABELS="$MUTATION_POLICY_LABELS" \
             bash .ci/mutation.sh
+
+      - name: Locate engine-native mutation evidence
+        id: mutation-evidence
+        if: always() && steps.policy.outputs.required == 'true'
+        shell: bash
+        run: |
+          if [[ -f mutants/mutmut-cicd-stats.json ]]; then
+            echo "path=mutants/mutmut-cicd-stats.json" >> "$GITHUB_OUTPUT"
+          elif [[ -f .quality/gremlins.json ]]; then
+            echo "path=.quality/gremlins.json" >> "$GITHUB_OUTPUT"
+          else
+            echo "path=" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Publish mutation evidence
+        if: always() && steps.policy.outputs.required == 'true'
+        uses: didlawowo/workflow-ci/.github/actions/quality-report@main
+        with:
+          mutation-report: ${{ steps.mutation-evidence.outputs.path }}
+          base-sha: ${{ github.event.pull_request.base.sha }}
+          head-sha: ${{ github.event.pull_request.head.sha }}
+          github-token: ${{ github.token }}
+          comment: "true"
 
       - name: Mutation testing not required
         if: steps.policy.outputs.required != 'true'
