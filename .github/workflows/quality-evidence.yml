@@ -68,6 +68,7 @@ jobs:
           python-version: ${{ inputs.python-version }}
           working-directory: ${{ inputs.working-directory }}
           upload-coverage: "false"
+          fail-on-coverage: "true"
 
       - name: Verify Go tests
         id: go-tests
@@ -78,6 +79,7 @@ jobs:
           go-version: ${{ inputs.go-version }}
           working-directory: ${{ inputs.working-directory }}
           upload-coverage: "false"
+          fail-on-coverage: "true"
 
       - name: Verify Node tests
         id: node-tests
@@ -95,10 +97,10 @@ jobs:
         with:
           junit-glob: "${{ inputs.working-directory }}/coverage-reports/pytest-report.xml"
           coverage-glob: "${{ inputs.working-directory }}/coverage-reports/coverage.xml"
-          coverage-percentage: ${{ steps.python-tests.outputs.coverage-percentage || steps.go-tests.outputs.coverage-percentage }}
-          tests-total: ${{ steps.python-tests.outputs.test-count || steps.go-tests.outputs.test-count }}
-          tests-failed: ${{ steps.python-tests.outputs.tests-failed || steps.go-tests.outputs.tests-failed }}
-          tests-skipped: ${{ steps.python-tests.outputs.tests-skipped || steps.go-tests.outputs.tests-skipped }}
+          coverage-percentage: ${{ steps.python-tests.outputs.coverage-percentage || steps.go-tests.outputs.coverage-percentage || steps.node-tests.outputs.coverage-percentage }}
+          tests-total: ${{ steps.python-tests.outputs.test-count || steps.go-tests.outputs.test-count || steps.node-tests.outputs.test-count }}
+          tests-failed: ${{ steps.python-tests.outputs.tests-failed || steps.go-tests.outputs.tests-failed || steps.node-tests.outputs.tests-failed }}
+          tests-skipped: ${{ steps.python-tests.outputs.tests-skipped || steps.go-tests.outputs.tests-skipped || steps.node-tests.outputs.tests-skipped }}
           test-status: ${{ steps.python-tests.outcome || steps.go-tests.outcome || steps.node-tests.outcome }}
           base-sha: ${{ github.event.pull_request.base.sha }}
           head-sha: ${{ github.event.pull_request.head.sha }}
