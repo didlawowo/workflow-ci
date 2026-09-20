@@ -114,6 +114,32 @@ class QualityReportTests(unittest.TestCase):
         self.assertEqual(merged["coverage"]["percentage"], 80.0)
         self.assertEqual(merged["mutation"]["score"], 95.0)
 
+    def test_merge_reports_discards_legacy_state_without_head_identity(self):
+        existing = {
+            "schema_version": 1,
+            "tests": {"available": True, "total": 99},
+            "coverage": {"available": True, "percentage": 99.0},
+            "mutation": {"available": True, "score": 100.0},
+            "diff": {"available": True, "files": 9},
+            "history": {"available": True, "commits": 9},
+        }
+        current = {
+            "schema_version": 1,
+            "identity": {"head_sha": "new-head"},
+            "tests": {"available": False},
+            "coverage": {"available": False},
+            "mutation": {"available": False},
+            "diff": {"available": True, "files": 1},
+            "history": {"available": False},
+        }
+
+        merged = quality_report.merge_reports(existing, current)
+
+        self.assertEqual(merged["identity"]["head_sha"], "new-head")
+        self.assertFalse(merged["tests"]["available"])
+        self.assertFalse(merged["coverage"]["available"])
+        self.assertFalse(merged["mutation"]["available"])
+
     def test_merge_reports_drops_stale_evidence_when_head_changes(self):
         existing = {
             "schema_version": 1,
