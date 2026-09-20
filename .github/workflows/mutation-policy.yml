@@ -63,6 +63,21 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
+      - name: Prepare isolated Python mutation environment
+        id: mutation-python
+        if: steps.policy.outputs.required == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          if grep -Eiq 'mutmut[[:space:]]+run' .ci/mutation.sh; then
+            VENV="${RUNNER_TEMP:-/tmp}/mutation-venv"
+            rm -rf "$VENV"
+            python3 -m venv "$VENV"
+            echo "venv=$VENV" >> "$GITHUB_OUTPUT"
+          else
+            echo "venv=" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Run mandatory mutation testing
         if: steps.policy.outputs.required == 'true'
         shell: bash
@@ -88,9 +103,15 @@ jobs:
           fi
           # The mutation script comes from the PR. Give it no forge credentials
           # or inherited secrets; only the minimum process environment it needs.
+          MUTATION_VENV="${{ steps.mutation-python.outputs.venv }}"
+          MUTATION_PATH="$PATH"
+          if [[ -n "$MUTATION_VENV" ]]; then
+            MUTATION_PATH="$MUTATION_VENV/bin:$MUTATION_PATH"
+          fi
           env -i \
-            PATH="$PATH" \
+            PATH="$MUTATION_PATH" \
             HOME="$HOME" \
+            VIRTUAL_ENV="$MUTATION_VENV" \
             CI=true \
             MUTATION_POLICY_LABELS="$MUTATION_POLICY_LABELS" \
             bash .ci/mutation.sh
