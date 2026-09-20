@@ -80,3 +80,16 @@ def test_language_templates_make_quality_failures_blocking():
     for language in ("python", "go"):
         content = (root / "templates" / language / "ci-branch-pipeline.yml").read_text()
         assert 'fail-on-coverage: "true"' in content
+
+
+def test_mutation_verify_is_read_only_and_scoped_to_changed_functions():
+    root = Path(__file__).resolve().parents[1]
+    content = (root / ".github" / "workflows" / "mutation-policy.yml").read_text()
+
+    verify = content.split("  mutation-verify:", 1)[1]
+    assert "issues: write" not in verify
+    assert "pull-requests: write" not in verify
+    assert "vars.UNTRUSTED_RUNNER || 'ubuntu-latest'" in verify
+    assert "git\", \"-C\", str(repo), \"diff\", \"--unified=0\"" in verify
+    assert "mutation gate failed for changed functions" in verify
+    assert 'comment: "false"' in verify
