@@ -214,18 +214,22 @@ jobs:
             MUTATION_PATH="$MUTATION_VENV/bin:$MUTATION_PATH"
           fi
           mkdir -p .quality
+          ISOLATED_HOME="${RUNNER_TEMP:-/tmp}/mutation-home"
+          ISOLATED_UV_CACHE="${RUNNER_TEMP:-/tmp}/mutation-uv-cache"
+          rm -rf "$ISOLATED_HOME" "$ISOLATED_UV_CACHE"
+          mkdir -p "$ISOLATED_HOME" "$ISOLATED_UV_CACHE"
           echo "::notice::mutation scope base=${MUTATION_BASE_SHA} head=${MUTATION_HEAD_SHA}"
-          # No forge token or inherited secrets are passed to PR code. Capture
-          # the runner exit code so trusted verification can distinguish an
-          # infrastructure/baseline-test failure from actual mutation survivors.
+          # No forge token, persistent runner HOME or shared uv cache is passed
+          # to PR code. Capture the runner exit code so trusted verification can
+          # distinguish infrastructure/baseline-test failures from survivors.
           set +e
           env -i \
             PATH="$MUTATION_PATH" \
-            HOME="$HOME" \
+            HOME="$ISOLATED_HOME" \
             VIRTUAL_ENV="$MUTATION_VENV" \
             RUNNER_TEMP="${RUNNER_TEMP:-/tmp}" \
             GITHUB_WORKSPACE="$GITHUB_WORKSPACE" \
-            UV_CACHE_DIR="${UV_CACHE_DIR:-}" \
+            UV_CACHE_DIR="$ISOLATED_UV_CACHE" \
             CI=true \
             MUTATION_POLICY_LABELS="$MUTATION_POLICY_LABELS" \
             MUTATION_BASE_SHA="$MUTATION_BASE_SHA" \
