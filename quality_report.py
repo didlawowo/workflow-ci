@@ -302,7 +302,7 @@ def diff_stats(base: str | None, head: str | None) -> dict[str, Any]:
         }
 
     result = subprocess.run(
-        ["git", "diff", "--numstat", f"{base}...{head}"],
+        ["git", "diff", "--numstat", f"{base}..{head}"],
         check=True,
         capture_output=True,
         text=True,
