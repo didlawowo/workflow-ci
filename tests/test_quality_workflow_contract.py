@@ -364,3 +364,12 @@ def test_executable_actions_never_use_mutable_main_refs():
                 if "uses:" not in line:
                     continue
                 assert "@main" not in line, f"{path}: mutable action ref: {line}"
+
+
+def test_release_workflow_never_commits_workflow_ci_checkout():
+    root = Path(__file__).resolve().parents[1]
+    content = (root / ".github" / "workflows" / "release.yml").read_text()
+
+    assert "Exclude workflow-ci checkout from release commits" in content
+    assert "'.workflow-ci/' >> .git/info/exclude" in content
+    assert "git reset -- .workflow-ci 2>/dev/null || true" in content
