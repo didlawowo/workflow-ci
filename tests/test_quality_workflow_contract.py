@@ -45,8 +45,8 @@ def test_mutation_policy_separates_untrusted_execution_from_trusted_verification
 
     assert "pull_request_target:" not in content
     assert "pull_request:" in content
-    assert "path: .policy" in content
-    assert "path: pr" in content
+    assert "Fetch trusted base policy without submodule traversal" in content
+    assert "Fetch pull request code without submodule traversal" in content
     assert "vars.UNTRUSTED_RUNNER || 'ubuntu-latest'" in content
     assert 'bash "$GITHUB_WORKSPACE/.policy/.ci/mutation.sh"' in content
     assert "needs: [mutation-run]" in content
@@ -57,7 +57,7 @@ def test_mutation_policy_requires_machine_readable_evidence_and_zero_survivors()
     root = Path(__file__).resolve().parents[1]
     content = (root / ".github" / "workflows" / "mutation-policy.yml").read_text()
 
-    assert "Mandatory mutation run produced no supported engine-native evidence" in content
+    assert "Mandatory mutation run produced no supported mutation evidence" in content
     assert "mutation evidence is missing killed/survived counters" in content
     assert "mutation evidence contains no measured mutants" in content
     assert "if survived or timeouts or suspicious:" in content
@@ -127,7 +127,8 @@ def test_mutation_policy_rejects_changed_functions_without_mutants():
 
     assert "source_paths is part of the protected policy" in content
     assert "in_trusted_source_path" in content
-    assert "changed functions produced no mutation evidence" in content
+    assert "changed functions produced no mutation " in content
+    assert "evidence (not exercised or excluded)" in content
     assert "pragma: no mutate" in content
 
 
