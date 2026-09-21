@@ -1,6 +1,7 @@
 import importlib.util
 import subprocess
 from pathlib import Path
+from unittest.mock import patch
 
 MODULE_PATH = Path(__file__).resolve().parents[1] / ".ci" / "mutation_scope.py"
 SPEC = importlib.util.spec_from_file_location("mutation_scope", MODULE_PATH)
@@ -158,4 +159,36 @@ def test_scope_reads_multiline_setup_cfg_source_paths(tmp_path: Path):
 
     assert mutation_scope.mutation_targets(repo, base, head) == (
         "service.*compute__mutmut_*",
+    )
+
+
+def test_changed_lines_compares_exact_base_and_head_trees():
+    completed = type("Result", (), {"stdout": ""})()
+
+    with patch.object(
+        mutation_scope.subprocess,
+        "run",
+        return_value=completed,
+    ) as run:
+        assert mutation_scope._changed_lines(
+            Path("/repo"),
+            "base-sha",
+            "head-sha",
+        ) == {}
+
+    run.assert_called_once_with(
+        [
+            "git",
+            "-C",
+            "/repo",
+            "diff",
+            "--unified=0",
+            "--no-color",
+            "base-sha..head-sha",
+            "--",
+            "*.py",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
     )
