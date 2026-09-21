@@ -58,7 +58,8 @@ def test_mutation_policy_requires_machine_readable_evidence_and_zero_survivors()
     root = Path(__file__).resolve().parents[1]
     content = (root / ".github" / "workflows" / "mutation-policy.yml").read_text()
 
-    assert "Mandatory mutation run produced no supported engine-native evidence" in content
+    assert "Require engine-native mutation evidence" in content
+    assert "No engine-native mutation evidence was produced" in content
     assert "mutation evidence is missing killed/survived counters" in content
     assert "mutation evidence contains no measured mutants" in content
     assert "if survived or timeouts or suspicious:" in content
@@ -128,7 +129,8 @@ def test_mutation_policy_rejects_changed_functions_without_mutants():
 
     assert "source_paths is part of the protected policy" in content
     assert "in_trusted_source_path" in content
-    assert "changed functions produced no mutation evidence" in content
+    assert "changed functions produced no mutation " in content
+    assert "evidence (not exercised or excluded)" in content
     assert "pragma: no mutate" in content
 
 
