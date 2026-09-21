@@ -222,3 +222,85 @@ def test_issue_59_mutation_policy_uses_exact_tree_range_and_isolated_home():
     assert 'HOME="$ISOLATED_HOME"' in content
     assert 'UV_CACHE_DIR="$ISOLATED_UV_CACHE"' in content
     assert 'HOME="$HOME"' not in content
+
+
+def test_language_templates_use_single_pr_pipeline_with_concurrency():
+    root = Path(__file__).resolve().parents[1]
+    for language in ("python", "go", "node"):
+        content = (root / "templates" / language / "ci-branch-pipeline.yml").read_text()
+        header = content.split("\njobs:", 1)[0]
+
+        assert "\n  push:" not in header
+        assert "pull_request:" in header
+        assert "workflow_dispatch:" in header
+        assert "concurrency:" in header
+        assert "group: ci-${{ github.workflow }}-${{ github.head_ref || github.ref_name }}" in header
+        assert "cancel-in-progress: true" in header
+
+
+def test_internal_workflow_ci_refs_follow_immutable_version_contract():
+    root = Path(__file__).resolve().parents[1]
+    version = (root / ".workflow-ci-version").read_text().strip()
+    assert version == "v1.7.0"
+
+    scan_roots = (
+        root / ".github" / "actions",
+        root / ".github" / "workflows",
+        root / "templates",
+    )
+    paths = [root / "README.md"]
+    for scan_root in scan_roots:
+        paths.extend(
+            path
+            for path in scan_root.rglob("*")
+            if path.is_file() and path.suffix in {".yml", ".yaml", ".md"}
+        )
+
+    for path in paths:
+        for line in path.read_text().splitlines():
+            if "didlawowo/workflow-ci/" not in line:
+                continue
+            if "uses:" not in line:
+                continue
+            assert f"@{version}" in line, f"{path}: mutable/stale internal ref: {line}"
+
+    release = (root / ".github" / "workflows" / "release.yml").read_text()
+    assert 'workflow-ci-ref:' in release
+    assert 'default: "v1.7.0"' in release
+
+
+def test_internal_ref_sync_helper_is_present_and_checkable():
+    root = Path(__file__).resolve().parents[1]
+    helper = (root / ".github" / "scripts" / "sync_internal_refs.py").read_text()
+
+    assert ".workflow-ci-version" in helper
+    assert "--check" in helper
+    assert "didlawowo/workflow-ci/" in helper
+
+
+def test_issue_56_reacts_to_issue_label_add_and_remove():
+    root = Path(__file__).resolve().parents[1]
+    workflow = (root / ".github" / "workflows" / "mutation-policy.yml").read_text()
+
+    assert "types: [labeled, unlabeled]" in workflow
+    assert "refresh-linked-prs:" in workflow
+    assert "actions: write" in workflow
+    assert "mutation_policy.py refresh" in workflow
+    notify = workflow.split("  notify:", 1)[1].split("  refresh-linked-prs:", 1)[0]
+    assert "github.event.action == 'labeled'" in notify
+
+
+def test_release_workflow_is_idempotent_and_recoverable():
+    root = Path(__file__).resolve().parents[1]
+    content = (root / ".github" / "workflows" / "release.yml").read_text()
+
+    assert "Detect recoverable release state" in content
+    assert "Publish or recover release" in content
+    assert 'git ls-remote origin "refs/tags/$NEW_VERSION"' in content
+    assert 'gh release view "$NEW_VERSION"' in content
+    assert "--generate-notes --verify-tag" in content
+    assert "steps.result.outputs.released" in content
+    assert "steps.publish.outputs.dispatch == 'true'" in content
+
+    before_result = content.split("      - name: Resolve release result", 1)[0]
+    assert "steps.result.outputs.version" not in before_result
