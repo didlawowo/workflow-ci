@@ -132,6 +132,12 @@ jobs:
             STATUS="non-compliant"; SCORE=25
           fi
 
+          {
+            echo "critical-issues=$CRITICAL"
+            echo "total-issues=$TOTAL"
+            echo "compliance-status=$STATUS"
+          } >> "$GITHUB_OUTPUT"
+
           cat >> "$GITHUB_STEP_SUMMARY" << EOF
           ## Security Scan Summary
 
