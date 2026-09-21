@@ -6,6 +6,12 @@ on:
   pull_request:
     types: [opened, synchronize, reopened, labeled, unlabeled, edited]
 
+concurrency:
+  # Keep cancellation semantics aligned with GitHub: only events that can
+  # produce mutation work share a group. Irrelevant edits/labels are isolated.
+  group: mutation-policy-${{ github.repository }}-${{ github.event_name }}-${{ (github.event_name == 'pull_request' && (github.event.action != 'edited' || github.event.changes.body != null) && github.event.pull_request.number) || (github.event_name == 'issues' && (github.event.label.name == 'complexity:high' || github.event.label.name == 'priority:high') && github.event.issue.number) || github.run_id }}
+  cancel-in-progress: true
+
 jobs:
   notify:
     if: >-
@@ -115,7 +121,9 @@ jobs:
         run: uv run --no-project --python 3.12 python .policy/.github/scripts/mutation_policy.py refresh
 
   mutation-run:
-    if: github.event_name == 'pull_request'
+    if: >-
+      github.event_name == 'pull_request' &&
+      (github.event.action != 'edited' || github.event.changes.body != null)
     # PR code and its tests are untrusted. Keep this job read-only and, unless
     # explicitly overridden, off self-hosted/ARC runners.
     permissions:
@@ -426,7 +434,9 @@ jobs:
 
   mutation-verify:
     name: Mutation policy gate
-    if: always() && github.event_name == 'pull_request'
+    if: >-
+      always() && github.event_name == 'pull_request' &&
+      (github.event.action != 'edited' || github.event.changes.body != null)
     needs: [mutation-run]
     permissions:
       contents: read
