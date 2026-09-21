@@ -51,12 +51,15 @@ if [[ -n "${MUTATION_BASE_SHA:-}" || -n "${MUTATION_HEAD_SHA:-}" ]]; then
     exit 1
   fi
 
-  if ! mapfile -t MUTATION_TARGETS < <(
-    "$PYTHON" "$SCRIPT_DIR/mutation_scope.py"       --repo "$PWD"       --base "$MUTATION_BASE_SHA"       --head "$MUTATION_HEAD_SHA"
-  ); then
+  TARGETS_FILE="$(mktemp)"
+  trap 'rm -f "$TARGETS_FILE"' EXIT
+  if ! "$PYTHON" "$SCRIPT_DIR/mutation_scope.py" --repo "$PWD" --base "$MUTATION_BASE_SHA" --head "$MUTATION_HEAD_SHA" > "$TARGETS_FILE"; then
     echo "::error::Mutation scope failure: unable to compute changed Python functions." >&2
     exit 1
   fi
+  mapfile -t MUTATION_TARGETS < "$TARGETS_FILE"
+  rm -f "$TARGETS_FILE"
+  trap - EXIT
 
   if [[ "${#MUTATION_TARGETS[@]}" -eq 0 ]]; then
     mkdir -p .quality
