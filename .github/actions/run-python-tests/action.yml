@@ -117,6 +117,7 @@ runs:
     - name: Extract coverage
       id: coverage
       shell: bash
+      working-directory: ${{ inputs.working-directory }}
       run: |
         COV_FILE=""
         for f in coverage-reports/coverage.xml coverage.xml; do
@@ -126,7 +127,7 @@ runs:
         if [ -n "$COV_FILE" ]; then
           PCT=$(grep -o 'line-rate="[0-9.]*"' "$COV_FILE" | head -1 | grep -o '[0-9.]*' | awk '{printf "%.1f", $1*100}')
           echo "percentage=${PCT}" >> "$GITHUB_OUTPUT"
-          echo "coverage-file=${COV_FILE}" >> "$GITHUB_OUTPUT"
+          echo "coverage-file=${PWD}/${COV_FILE}" >> "$GITHUB_OUTPUT"
         else
           echo "percentage=0" >> "$GITHUB_OUTPUT"
           echo "coverage-file=" >> "$GITHUB_OUTPUT"
@@ -135,13 +136,14 @@ runs:
     - name: Extract test evidence
       id: tests
       shell: bash
+      working-directory: ${{ inputs.working-directory }}
       run: |
         REPORT=""
         for f in coverage-reports/pytest-report.xml pytest-report.xml; do
           if [ -f "$f" ]; then REPORT="$f"; break; fi
         done
 
-        uv run python - "$REPORT" "$GITHUB_OUTPUT" <<'PY'
+        uv run --no-project --python ${{ inputs.python-version }} python - "$REPORT" "$GITHUB_OUTPUT" <<'PY'
         import sys
         import xml.etree.ElementTree as ET
 
@@ -212,6 +214,6 @@ runs:
       with:
         name: python-test-results
         path: |
-          coverage-reports/
-          htmlcov/
+          ${{ inputs.working-directory }}/coverage-reports/
+          ${{ inputs.working-directory }}/htmlcov/
         retention-days: 7
