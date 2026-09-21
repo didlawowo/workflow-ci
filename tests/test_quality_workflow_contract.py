@@ -323,3 +323,12 @@ def test_forgejo_mutation_policy_template_matches_label_refresh_contract():
     for job in ("mutation-run:", "mutation-verify:"):
         assert job in github
         assert job in forgejo
+
+
+def test_release_workflow_never_commits_workflow_ci_checkout():
+    root = Path(__file__).resolve().parents[1]
+    content = (root / ".github" / "workflows" / "release.yml").read_text()
+
+    assert "Exclude workflow-ci checkout from release commits" in content
+    assert "'.workflow-ci/' >> .git/info/exclude" in content
+    assert "git reset -- .workflow-ci 2>/dev/null || true" in content
