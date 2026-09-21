@@ -17,9 +17,27 @@ jobs:
       issues: write
     runs-on: ${{ vars.RUNNER || 'ubuntu-latest' }}
     steps:
-      - uses: actions/checkout@v7
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v3
         with:
-          persist-credentials: false
+          enable-cache: false
+
+      - name: Fetch trusted policy without submodule traversal
+        shell: bash
+        env:
+          TARGET_SHA: ${{ github.sha }}
+          TARGET_REPOSITORY: ${{ github.repository }}
+          POLICY_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          rm -rf .policy
+          git init -q .policy
+          git -C .policy remote add origin "${GITHUB_SERVER_URL}/${TARGET_REPOSITORY}.git"
+          AUTH="$(printf 'x-access-token:%s' "$POLICY_TOKEN" | base64 | tr -d '\n')"
+          git -C .policy -c "http.extraheader=AUTHORIZATION: basic $AUTH" \
+            fetch --no-tags --depth=1 origin "$TARGET_SHA"
+          git -C .policy checkout -q --detach FETCH_HEAD
+
       - name: Explain mandatory mutation testing
         env:
           POLICY_PROVIDER: github
@@ -27,7 +45,7 @@ jobs:
           POLICY_REPOSITORY: ${{ github.repository }}
           POLICY_TOKEN: ${{ github.token }}
           POLICY_EVENT_PATH: ${{ github.event_path }}
-        run: python .github/scripts/mutation_policy.py notify
+        run: uv run --no-project --python 3.12 python .policy/.github/scripts/mutation_policy.py notify
 
   mutation-run:
     if: github.event_name == 'pull_request'
@@ -41,13 +59,29 @@ jobs:
     outputs:
       required: ${{ steps.policy.outputs.required }}
       labels: ${{ steps.policy.outputs.labels }}
+      runner-exit-code: ${{ steps.run-mutation.outputs.exit-code }}
+      evidence-available: ${{ steps.evidence.outputs.available }}
     steps:
-      - name: Checkout trusted base policy
-        uses: actions/checkout@v7
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v3
         with:
-          ref: ${{ github.event.pull_request.base.sha }}
-          path: .policy
-          persist-credentials: false
+          enable-cache: false
+
+      - name: Fetch trusted base policy without submodule traversal
+        shell: bash
+        env:
+          TARGET_SHA: ${{ github.event.pull_request.base.sha }}
+          TARGET_REPOSITORY: ${{ github.repository }}
+          POLICY_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          rm -rf .policy
+          git init -q .policy
+          git -C .policy remote add origin "${GITHUB_SERVER_URL}/${TARGET_REPOSITORY}.git"
+          AUTH="$(printf 'x-access-token:%s' "$POLICY_TOKEN" | base64 | tr -d '\n')"
+          git -C .policy -c "http.extraheader=AUTHORIZATION: basic $AUTH" \
+            fetch --no-tags --depth=1 origin "$TARGET_SHA"
+          git -C .policy checkout -q --detach FETCH_HEAD
 
       - name: Classify pull request from trusted policy
         id: policy
@@ -57,17 +91,29 @@ jobs:
           POLICY_REPOSITORY: ${{ github.repository }}
           POLICY_TOKEN: ${{ github.token }}
           POLICY_EVENT_PATH: ${{ github.event_path }}
-        run: python .policy/.github/scripts/mutation_policy.py classify
+        run: uv run --no-project --python 3.12 python .policy/.github/scripts/mutation_policy.py classify
 
-      - name: Checkout pull request code
+      - name: Fetch pull request code without submodule traversal
         if: steps.policy.outputs.required == 'true'
-        uses: actions/checkout@v7
-        with:
-          repository: ${{ github.event.pull_request.head.repo.full_name }}
-          ref: ${{ github.event.pull_request.head.sha }}
-          path: pr
-          fetch-depth: 0
-          persist-credentials: false
+        shell: bash
+        env:
+          HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          BASE_REPOSITORY: ${{ github.repository }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          POLICY_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          rm -rf pr
+          git init -q pr
+          git -C pr remote add origin "${GITHUB_SERVER_URL}/${HEAD_REPOSITORY}.git"
+          AUTH="$(printf 'x-access-token:%s' "$POLICY_TOKEN" | base64 | tr -d '\n')"
+          git -C pr -c "http.extraheader=AUTHORIZATION: basic $AUTH" \
+            fetch --no-tags origin "$HEAD_SHA"
+          git -C pr checkout -q --detach FETCH_HEAD
+          git -C pr remote add base "${GITHUB_SERVER_URL}/${BASE_REPOSITORY}.git"
+          git -C pr -c "http.extraheader=AUTHORIZATION: basic $AUTH" \
+            fetch --no-tags base "$BASE_SHA"
 
       - name: Verify trusted mutation runner exists
         if: steps.policy.outputs.required == 'true'
@@ -90,7 +136,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          python - "$GITHUB_WORKSPACE/.policy" "$GITHUB_WORKSPACE/pr" <<'PY'
+          uv run --no-project --python 3.12 python - "$GITHUB_WORKSPACE/.policy" "$GITHUB_WORKSPACE/pr" <<'PY'
           import configparser
           import json
           import sys
@@ -142,33 +188,56 @@ jobs:
           if grep -Eiq 'mutmut[[:space:]]+run' "$SCRIPT"; then
             VENV="${RUNNER_TEMP:-/tmp}/mutation-venv"
             rm -rf "$VENV"
-            python3 -m venv "$VENV"
+            echo "::group::mutation bootstrap (uv)"
+            uv python install 3.12
+            uv venv --python 3.12 --seed "$VENV"
+            echo "::endgroup::"
             echo "venv=$VENV" >> "$GITHUB_OUTPUT"
           else
             echo "venv=" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Run trusted mutation runner against PR code
+        id: run-mutation
         if: steps.policy.outputs.required == 'true'
         shell: bash
         working-directory: pr
         env:
           MUTATION_POLICY_LABELS: ${{ steps.policy.outputs.labels }}
           MUTATION_VENV: ${{ steps.mutation-python.outputs.venv }}
+          MUTATION_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          MUTATION_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           set -euo pipefail
           MUTATION_PATH="$PATH"
           if [[ -n "$MUTATION_VENV" ]]; then
             MUTATION_PATH="$MUTATION_VENV/bin:$MUTATION_PATH"
           fi
-          # No forge token or inherited secrets are passed to PR code.
+          mkdir -p .quality
+          echo "::notice::mutation scope base=${MUTATION_BASE_SHA} head=${MUTATION_HEAD_SHA}"
+          # No forge token or inherited secrets are passed to PR code. Capture
+          # the runner exit code so trusted verification can distinguish an
+          # infrastructure/baseline-test failure from actual mutation survivors.
+          set +e
           env -i \
             PATH="$MUTATION_PATH" \
             HOME="$HOME" \
             VIRTUAL_ENV="$MUTATION_VENV" \
+            RUNNER_TEMP="${RUNNER_TEMP:-/tmp}" \
+            GITHUB_WORKSPACE="$GITHUB_WORKSPACE" \
+            UV_CACHE_DIR="${UV_CACHE_DIR:-}" \
             CI=true \
             MUTATION_POLICY_LABELS="$MUTATION_POLICY_LABELS" \
-            bash "$GITHUB_WORKSPACE/.policy/.ci/mutation.sh"
+            MUTATION_BASE_SHA="$MUTATION_BASE_SHA" \
+            MUTATION_HEAD_SHA="$MUTATION_HEAD_SHA" \
+            bash "$GITHUB_WORKSPACE/.policy/.ci/mutation.sh" \
+            2>&1 | tee .quality/mutation-run.log
+          STATUS=${PIPESTATUS[0]}
+          set -e
+          echo "exit-code=$STATUS" >> "$GITHUB_OUTPUT"
+          if [[ "$STATUS" -ne 0 ]]; then
+            echo "::warning::Mutation runner exited with status $STATUS; trusted verification will classify the failure."
+          fi
 
       - name: Capture mutmut diagnostics
         if: always() && steps.policy.outputs.required == 'true' && steps.mutation-python.outputs.venv != ''
@@ -179,7 +248,13 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p .quality
-          "$MUTATION_VENV/bin/mutmut" results > .quality/mutmut-results.txt || true
+          if [[ -s .quality/mutmut-results.txt ]]; then
+            echo "::notice::Using mutmut diagnostics emitted by trusted runner."
+          elif [[ -x "$MUTATION_VENV/bin/mutmut" ]]; then
+            "$MUTATION_VENV/bin/mutmut" results > .quality/mutmut-results.txt || true
+          else
+            echo "::warning::mutmut diagnostics unavailable; engine-native JSON remains authoritative."
+          fi
 
       - name: Locate engine-native mutation evidence
         id: evidence
@@ -189,22 +264,24 @@ jobs:
           set -euo pipefail
           if [[ -f pr/mutants/mutmut-cicd-stats.json ]]; then
             echo "path=pr/mutants/mutmut-cicd-stats.json" >> "$GITHUB_OUTPUT"
+            echo "available=true" >> "$GITHUB_OUTPUT"
           elif [[ -f pr/.quality/gremlins.json ]]; then
             echo "path=pr/.quality/gremlins.json" >> "$GITHUB_OUTPUT"
+            echo "available=true" >> "$GITHUB_OUTPUT"
           else
-            echo "::error::Mandatory mutation run produced no supported engine-native evidence."
-            exit 1
+            echo "path=" >> "$GITHUB_OUTPUT"
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::No engine-native mutation evidence was produced."
           fi
 
       - name: Upload untrusted mutation evidence
-        if: always() && steps.policy.outputs.required == 'true' && steps.evidence.outputs.path != ''
+        if: always() && steps.policy.outputs.required == 'true' && steps.evidence.outputs.available == 'true'
         uses: actions/upload-artifact@v6
         with:
           name: mutation-evidence-${{ github.run_id }}
           path: |
             ${{ steps.evidence.outputs.path }}
-            pr/.quality/mutmut-results.txt
-            pr/mutants/quality_report.py
+            pr/.quality/
           retention-days: 7
           if-no-files-found: error
 
@@ -223,13 +300,26 @@ jobs:
       pull-requests: read
     runs-on: ${{ vars.UNTRUSTED_RUNNER || 'ubuntu-latest' }}
     steps:
-      - name: Checkout trusted base policy
-        uses: actions/checkout@v7
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v3
         with:
-          ref: ${{ github.event.pull_request.base.sha }}
-          path: .policy
-          fetch-depth: 0
-          persist-credentials: false
+          enable-cache: false
+
+      - name: Fetch trusted base policy without submodule traversal
+        shell: bash
+        env:
+          TARGET_SHA: ${{ github.event.pull_request.base.sha }}
+          TARGET_REPOSITORY: ${{ github.repository }}
+          POLICY_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          rm -rf .policy
+          git init -q .policy
+          git -C .policy remote add origin "${GITHUB_SERVER_URL}/${TARGET_REPOSITORY}.git"
+          AUTH="$(printf 'x-access-token:%s' "$POLICY_TOKEN" | base64 | tr -d '\n')"
+          git -C .policy -c "http.extraheader=AUTHORIZATION: basic $AUTH" \
+            fetch --no-tags --depth=1 origin "$TARGET_SHA"
+          git -C .policy checkout -q --detach FETCH_HEAD
 
       - name: Re-classify pull request independently
         id: policy
@@ -239,30 +329,49 @@ jobs:
           POLICY_REPOSITORY: ${{ github.repository }}
           POLICY_TOKEN: ${{ github.token }}
           POLICY_EVENT_PATH: ${{ github.event_path }}
-        run: python .policy/.github/scripts/mutation_policy.py classify
+        run: uv run --no-project --python 3.12 python .policy/.github/scripts/mutation_policy.py classify
 
-      - name: Require successful mutation execution
+      - name: Detect mutation bootstrap failure
         if: steps.policy.outputs.required == 'true'
         shell: bash
         run: |
           set -euo pipefail
           if [[ "${{ needs.mutation-run.result }}" != "success" ]]; then
-            echo "::error::Mandatory mutation execution did not complete successfully."
+            echo "::error title=Mutation bootstrap failure::The mutation job failed before evidence classification. Check uv/bootstrap/git fetch steps."
             exit 1
           fi
 
-      - name: Checkout pull request for diff analysis
+      - name: Fetch pull request for diff analysis without submodule traversal
         if: steps.policy.outputs.required == 'true'
-        uses: actions/checkout@v7
-        with:
-          repository: ${{ github.event.pull_request.head.repo.full_name }}
-          ref: ${{ github.event.pull_request.head.sha }}
-          path: pr
-          fetch-depth: 0
-          persist-credentials: false
+        shell: bash
+        env:
+          HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          BASE_REPOSITORY: ${{ github.repository }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          POLICY_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          rm -rf pr
+          git init -q pr
+          git -C pr remote add origin "${GITHUB_SERVER_URL}/${HEAD_REPOSITORY}.git"
+          AUTH="$(printf 'x-access-token:%s' "$POLICY_TOKEN" | base64 | tr -d '\n')"
+          git -C pr -c "http.extraheader=AUTHORIZATION: basic $AUTH" \
+            fetch --no-tags origin "$HEAD_SHA"
+          git -C pr checkout -q --detach FETCH_HEAD
+          git -C pr remote add base "${GITHUB_SERVER_URL}/${BASE_REPOSITORY}.git"
+          git -C pr -c "http.extraheader=AUTHORIZATION: basic $AUTH" \
+            fetch --no-tags base "$BASE_SHA"
+
+      - name: Require engine-native mutation evidence
+        if: steps.policy.outputs.required == 'true' && needs.mutation-run.outputs.evidence-available != 'true'
+        shell: bash
+        run: |
+          echo "::error title=Mutation runner/baseline-test failure::Runner exit=${{ needs.mutation-run.outputs.runner-exit-code }} and no engine-native mutation evidence was produced."
+          exit 1
 
       - name: Download mutation evidence
-        if: steps.policy.outputs.required == 'true'
+        if: steps.policy.outputs.required == 'true' && needs.mutation-run.outputs.evidence-available == 'true'
         uses: actions/download-artifact@v6
         with:
           name: mutation-evidence-${{ github.run_id }}
@@ -270,7 +379,7 @@ jobs:
 
       - name: Validate mutation evidence for changed Python functions
         id: validate
-        if: steps.policy.outputs.required == 'true'
+        if: steps.policy.outputs.required == 'true' && needs.mutation-run.outputs.evidence-available == 'true'
         shell: bash
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
@@ -289,7 +398,7 @@ jobs:
             exit 1
           fi
 
-          python - "$REPORT" "$RESULTS" "$GITHUB_WORKSPACE/pr" "$GITHUB_WORKSPACE/.policy" "$BASE_SHA" "$HEAD_SHA" "$GITHUB_OUTPUT" <<'PY'
+          uv run --no-project --python 3.12 python - "$REPORT" "$RESULTS" "$GITHUB_WORKSPACE/pr" "$GITHUB_WORKSPACE/.policy" "$BASE_SHA" "$HEAD_SHA" "$GITHUB_OUTPUT" <<'PY'
           import ast
           import json
           import re
@@ -358,7 +467,7 @@ jobs:
               diff = subprocess.run(
                   [
                       "git", "-C", str(repo), "diff", "--unified=0", "--no-color",
-                      f"{base}...{head}", "--", "*.py",
+                      f"{base}..{head}", "--", "*.py",
                   ],
                   check=True,
                   capture_output=True,
@@ -570,6 +679,15 @@ jobs:
           with output_path.open("a", encoding="utf-8") as handle:
               handle.write(f"path={scoped_path}\n")
           PY
+
+      - name: Require successful mutation runner after evidence validation
+        if: steps.policy.outputs.required == 'true' && steps.validate.outcome == 'success'
+        shell: bash
+        run: |
+          if [[ "${{ needs.mutation-run.outputs.runner-exit-code }}" != "0" ]]; then
+            echo "::error title=Mutation runner failure::Engine evidence passed, but the trusted runner exited with status ${{ needs.mutation-run.outputs.runner-exit-code }}."
+            exit 1
+          fi
 
       - name: Upload scoped mutation evidence
         if: always() && steps.policy.outputs.required == 'true' && steps.validate.outcome == 'success'
