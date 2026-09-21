@@ -150,8 +150,7 @@ jobs:
     permissions:
       contents: read
       actions: read
-      issues: write
-      pull-requests: read
+      pull-requests: write
     steps:
       # The publisher needs the git graph for diff statistics, but it never
       # executes repository code. Credentials are removed immediately after
