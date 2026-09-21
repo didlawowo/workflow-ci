@@ -57,6 +57,9 @@ jobs:
           POLICY_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
+          # Self-hosted/ARC workspaces may be reused. Start from a clean caller
+          # tree without invoking submodule traversal on a possibly broken gitlink.
+          find "$GITHUB_WORKSPACE" -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +
           git init -q .
           git remote add origin "${GITHUB_SERVER_URL}/${HEAD_REPOSITORY}.git"
           AUTH="$(printf 'x-access-token:%s' "$POLICY_TOKEN" | base64 | tr -d '\n')"
