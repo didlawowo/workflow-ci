@@ -204,3 +204,18 @@ def test_issue_59_quality_report_provisions_python_with_uv():
         "uv run --no-project --python ${{ inputs.python-version }} python"
         in python_tests
     )
+
+
+def test_issue_59_machine_readable_evidence_is_actually_uploaded():
+    root = Path(__file__).resolve().parents[1]
+    reporter = (
+        root / ".github" / "actions" / "quality-report" / "action.yml"
+    ).read_text()
+    mutation = (
+        root / ".github" / "workflows" / "mutation-policy.yml"
+    ).read_text()
+
+    assert "path: .quality/" in reporter
+    assert "include-hidden-files: true" in reporter
+    assert "scoped-mutation-evidence-" in mutation
+    assert mutation.count("include-hidden-files: true") >= 2
