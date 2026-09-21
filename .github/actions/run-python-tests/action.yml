@@ -76,7 +76,7 @@ runs:
   steps:
     - name: Setup Python environment
       if: inputs.use-docker-compose != 'true' && inputs.working-directory == '.'
-      uses: didlawowo/workflow-ci/.github/actions/setup-python-env@608fc6a1fc2e5565d799c775132f5e74bde5593b
+      uses: didlawowo/workflow-ci/.github/actions/setup-python-env@3147f59553546407f94163368f21e2d4d9f8775e
       with:
         python-version: ${{ inputs.python-version }}
         install-dev: "true"
