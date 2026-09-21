@@ -241,7 +241,7 @@ jobs:
               echo "::error::Mutation bootstrap failure: uv could not provision Python $PYTHON_VERSION."
               exit 1
             fi
-            if ! uv venv "$VENV" --python "$PYTHON_VERSION"; then
+            if ! uv venv "$VENV" --python "$PYTHON_VERSION" --seed; then
               echo "::error::Mutation bootstrap failure: uv could not create $VENV."
               exit 1
             fi
