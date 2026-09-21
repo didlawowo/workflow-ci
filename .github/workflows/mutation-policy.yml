@@ -195,7 +195,7 @@ jobs:
             done
           fi
 
-          echo "Mutation checkout ready for exact scope $MUTATION_BASE_SHA..$MUTATION_HEAD_SHA."
+          echo "Mutation checkout ready for exact scope $MUTATION_BASE_SHA...$MUTATION_HEAD_SHA."
 
       - name: Verify trusted mutation runner exists
         if: steps.policy.outputs.required == 'true'
@@ -513,7 +513,7 @@ jobs:
             done
           fi
 
-          echo "Mutation checkout ready for exact scope $MUTATION_BASE_SHA..$MUTATION_HEAD_SHA."
+          echo "Mutation checkout ready for exact scope $MUTATION_BASE_SHA...$MUTATION_HEAD_SHA."
 
       - name: Download mutation evidence
         if: steps.policy.outputs.required == 'true'
@@ -626,7 +626,7 @@ jobs:
               diff = subprocess.run(
                   [
                       "git", "-C", str(repo), "diff", "--unified=0", "--no-color",
-                      f"{base}..{head}", "--", "*.py",
+                      f"{base}...{head}", "--", "*.py",
                   ],
                   check=True,
                   capture_output=True,
