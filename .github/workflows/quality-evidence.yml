@@ -36,6 +36,26 @@ on:
         required: false
         type: string
         default: "npm"
+      python-test-command:
+        description: "Optional custom Python test command; it must produce python-junit-report-path"
+        required: false
+        type: string
+        default: ""
+      python-junit-report-path:
+        description: "Python JUnit XML path relative to working-directory"
+        required: false
+        type: string
+        default: "coverage-reports/pytest-report.xml"
+      python-coverage-report-path:
+        description: "Python coverage XML path relative to working-directory"
+        required: false
+        type: string
+        default: "coverage-reports/coverage.xml"
+      comment:
+        description: "Publish/update the quality report comment on the pull request"
+        required: false
+        type: boolean
+        default: true
 
 jobs:
   independent-verification:
@@ -67,6 +87,9 @@ jobs:
         with:
           python-version: ${{ inputs.python-version }}
           working-directory: ${{ inputs.working-directory }}
+          test-command: ${{ inputs.python-test-command }}
+          junit-report-path: ${{ inputs.python-junit-report-path }}
+          coverage-report-path: ${{ inputs.python-coverage-report-path }}
           upload-coverage: "false"
           fail-on-coverage: "true"
 
@@ -89,14 +112,15 @@ jobs:
         with:
           node-version: ${{ inputs.node-version }}
           package-manager: ${{ inputs.package-manager }}
+          working-directory: ${{ inputs.working-directory }}
           upload-coverage: "false"
 
       - name: Publish trusted quality evidence
         if: always()
         uses: ./.workflow-ci/.github/actions/quality-report
         with:
-          junit-glob: "${{ inputs.working-directory }}/coverage-reports/pytest-report.xml"
-          coverage-glob: "${{ inputs.working-directory }}/coverage-reports/coverage.xml"
+          junit-glob: "${{ inputs.working-directory }}/${{ inputs.python-junit-report-path }}"
+          coverage-glob: "${{ inputs.working-directory }}/${{ inputs.python-coverage-report-path }}"
           coverage-percentage: ${{ steps.python-tests.outputs.coverage-percentage || steps.go-tests.outputs.coverage-percentage || steps.node-tests.outputs.coverage-percentage }}
           tests-total: ${{ steps.python-tests.outputs.test-count || steps.go-tests.outputs.test-count || steps.node-tests.outputs.test-count }}
           tests-failed: ${{ steps.python-tests.outputs.tests-failed || steps.go-tests.outputs.tests-failed || steps.node-tests.outputs.tests-failed }}
@@ -105,7 +129,7 @@ jobs:
           base-sha: ${{ github.event.pull_request.base.sha }}
           head-sha: ${{ github.event.pull_request.head.sha }}
           github-token: ${{ github.token }}
-          comment: "true"
+          comment: ${{ inputs.comment }}
 
       - name: Enforce independent verification
         if: always()
