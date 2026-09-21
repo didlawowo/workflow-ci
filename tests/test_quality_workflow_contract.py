@@ -173,3 +173,12 @@ def test_mutation_jobs_avoid_actions_checkout_and_diagnose_invalid_gitlinks():
     assert "Mutation checkout diagnostic: gitlink" in mutation_run
     assert "Mutation checkout failure:" in mutation_run
     assert "Mutation checkout diagnostic: gitlink" in mutation_verify
+
+
+def test_issue_59_gitlink_parser_preserves_untrusted_paths_and_hidden_evidence():
+    root = Path(__file__).resolve().parents[1]
+    content = (root / ".github" / "workflows" / "mutation-policy.yml").read_text()
+
+    assert content.count("ls-files --stage -z") >= 2
+    assert content.count('grep -Fxq -- "$gitlink"') >= 2
+    assert content.count("include-hidden-files: true") >= 2
