@@ -76,6 +76,30 @@ def test_stacked_pr_scope_only_targets_child_delta(tmp_path: Path):
     assert all("parent_feature" not in target for target in targets)
 
 
+def test_scope_targets_function_for_deletion_only_hunk(tmp_path: Path):
+    repo = _init_repo(tmp_path)
+    source = repo / "src" / "service.py"
+    source.write_text(
+        "def compute(value):\n"
+        "    if value < 0:\n"
+        "        value = 0\n"
+        "    return value + 1\n",
+        encoding="utf-8",
+    )
+    base = _commit(repo, "initial")
+
+    source.write_text(
+        "def compute(value):\n"
+        "    return value + 1\n",
+        encoding="utf-8",
+    )
+    head = _commit(repo, "delete guard")
+
+    assert mutation_scope.mutation_targets(repo, base, head) == (
+        "service.*compute__mutmut_*",
+    )
+
+
 def test_scope_ignores_python_changes_outside_trusted_source_paths(tmp_path: Path):
     repo = _init_repo(tmp_path)
     source = repo / "src" / "service.py"

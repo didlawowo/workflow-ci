@@ -198,6 +198,19 @@ def test_issue_59_mutation_policy_never_uses_system_python():
     ) >= 4
 
 
+def test_issue_59_deletion_only_hunks_remain_in_mutation_scope():
+    root = Path(__file__).resolve().parents[1]
+    scope = (root / ".ci" / "mutation_scope.py").read_text()
+    workflow = (
+        root / ".github" / "workflows" / "mutation-policy.yml"
+    ).read_text()
+
+    assert "A deletion-only hunk has no lines on the head side" in scope
+    assert "max(start - 1, 1)" in scope
+    assert 'raw.startswith("+++ /dev/null")' in workflow
+    assert "Deletion-only hunks have no new-side lines" in workflow
+
+
 def test_issue_59_mutation_policy_uses_exact_tree_range_and_isolated_home():
     root = Path(__file__).resolve().parents[1]
     content = (
