@@ -2,7 +2,7 @@ name: Mutation testing policy
 
 on:
   issues:
-    types: [labeled]
+    types: [labeled, unlabeled]
   pull_request:
     types: [opened, synchronize, reopened, labeled, unlabeled, edited]
 
@@ -10,6 +10,7 @@ jobs:
   notify:
     if: >-
       github.event_name == 'issues' &&
+      github.event.action == 'labeled' &&
       (github.event.label.name == 'complexity:high' ||
        github.event.label.name == 'priority:high')
     permissions:
@@ -58,6 +59,60 @@ jobs:
           POLICY_TOKEN: ${{ github.token }}
           POLICY_EVENT_PATH: ${{ github.event_path }}
         run: uv run --no-project --python 3.12 python .policy/.github/scripts/mutation_policy.py notify
+
+  refresh-linked-prs:
+    if: >-
+      github.event_name == 'issues' &&
+      (github.event.label.name == 'complexity:high' ||
+       github.event.label.name == 'priority:high')
+    permissions:
+      contents: read
+      issues: read
+      pull-requests: read
+      actions: write
+    runs-on: ${{ vars.RUNNER || 'ubuntu-latest' }}
+    steps:
+      - name: Install uv for policy helpers
+        uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+
+      - name: Fetch trusted policy without submodule traversal
+        env:
+          MUTATION_FETCH_REPOSITORY: ${{ github.repository }}
+          MUTATION_FETCH_SHA: ${{ github.sha }}
+          MUTATION_FETCH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          DEST="$GITHUB_WORKSPACE/.policy"
+          rm -rf "$DEST"
+          mkdir -p "$DEST"
+          git -C "$DEST" init -q
+
+          ASKPASS="${RUNNER_TEMP:-/tmp}/mutation-git-askpass-refresh.sh"
+          trap 'rm -f "$ASKPASS"' EXIT
+          cat > "$ASKPASS" <<'SH'
+          #!/usr/bin/env bash
+          case "$1" in
+            *Username*) printf '%s\n' 'x-access-token' ;;
+            *Password*) printf '%s\n' "$MUTATION_FETCH_TOKEN" ;;
+            *) printf '\n' ;;
+          esac
+          SH
+          chmod 700 "$ASKPASS"
+
+          URL="${GITHUB_SERVER_URL}/${MUTATION_FETCH_REPOSITORY}.git"
+          GIT_ASKPASS="$ASKPASS" GIT_TERMINAL_PROMPT=0 \
+            git -C "$DEST" fetch --no-tags "$URL" "$MUTATION_FETCH_SHA"
+          git -C "$DEST" checkout -q --detach "$MUTATION_FETCH_SHA"
+
+      - name: Recompute linked pull request mutation policy
+        env:
+          POLICY_PROVIDER: github
+          POLICY_API_URL: ${{ github.api_url }}
+          POLICY_REPOSITORY: ${{ github.repository }}
+          POLICY_TOKEN: ${{ github.token }}
+          POLICY_EVENT_PATH: ${{ github.event_path }}
+        run: uv run --no-project --python 3.12 python .policy/.github/scripts/mutation_policy.py refresh
 
   mutation-run:
     if: github.event_name == 'pull_request'
