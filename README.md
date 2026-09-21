@@ -43,7 +43,7 @@ Reference actions from your workflows:
 steps:
   - uses: actions/checkout@v6
 
-  - uses: didlawowo/workflow-ci/.github/actions/docker-build-push@v1.7.0
+  - uses: didlawowo/workflow-ci/.github/actions/docker-build-push@3147f59553546407f94163368f21e2d4d9f8775e
     with:
       image-name: myuser/myapp
       image-tag: v1.0.0
