@@ -114,4 +114,5 @@ runs:
       with:
         name: quality-evidence-${{ github.job }}-${{ github.run_id }}-${{ inputs.artifact-suffix }}
         path: .quality/
+        include-hidden-files: true
         retention-days: 14
