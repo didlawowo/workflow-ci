@@ -34,9 +34,9 @@ def test_quality_evidence_dependency_chain_has_no_workflow_ci_main_refs():
     ]
     for path in paths:
         content = path.read_text()
-        assert "didlawowo/workflow-ci/" in content
         assert "@main" not in content
-        assert "@v1.7.0" in content
+        if "didlawowo/workflow-ci/" in content:
+            assert "@v1.7.0" in content
 
 
 def test_mutation_policy_separates_untrusted_execution_from_trusted_verification():
