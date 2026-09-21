@@ -63,13 +63,13 @@ jobs:
           fetch-depth: 0
 
       - name: Run tests
-        uses: didlawowo/workflow-ci/.github/actions/run-go-tests@main
+        uses: didlawowo/workflow-ci/.github/actions/run-go-tests@v1.7.0
         with:
           go-version: ${{ env.GO_VERSION }}
           working-directory: ${{ env.GO_WORKING_DIR }}
 
       - name: Run security checks
-        uses: didlawowo/workflow-ci/.github/actions/go-quality-security@main
+        uses: didlawowo/workflow-ci/.github/actions/go-quality-security@v1.7.0
         with:
           go-version: ${{ env.GO_VERSION }}
           working-directory: ${{ env.GO_WORKING_DIR }}
@@ -89,7 +89,7 @@ jobs:
 
       - name: Build, push, sign
         id: build
-        uses: didlawowo/workflow-ci/.github/actions/docker-build-push@main
+        uses: didlawowo/workflow-ci/.github/actions/docker-build-push@v1.7.0
         with:
           image-name: ${{ env.IMAGE_NAME }}
           image-tag: ${{ needs.release-please.outputs.tag_name }}

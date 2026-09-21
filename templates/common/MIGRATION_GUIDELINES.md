@@ -60,7 +60,7 @@ sur le mirror oci-storage (`oci-storage.dc-tech.work/mirror-binfmt:latest`).
 ### Exemple complet (Dockerfile qui pull docker.io)
 
 ```yaml
-- uses: didlawowo/workflow-ci/.github/actions/docker-build-push@v1
+- uses: didlawowo/workflow-ci/.github/actions/docker-build-push@v1.7.0
   with:
     # image-tag DOIT utiliser `version` (sans `v`), PAS `tag_name` (avec `v`).
     # Convention SemVer Docker/Helm. Cohérent avec `appVersion` dans Chart.yaml.
@@ -114,7 +114,7 @@ publish-image:           # ou le nom de votre job de build
     packages: write      # push registry (selon le registry)
     id-token: write      # ← OBLIGATOIRE pour Cosign keyless (Fulcio OIDC)
   steps:
-    - uses: didlawowo/workflow-ci/.github/actions/docker-build-push@v1
+    - uses: didlawowo/workflow-ci/.github/actions/docker-build-push@v1.7.0
       with:
         sign: "true"
         sbom: "true"
@@ -151,7 +151,7 @@ permissions:
 
 jobs:
   release:
-    uses: didlawowo/workflow-ci/.github/workflows/release.yml@v1
+    uses: didlawowo/workflow-ci/.github/workflows/release.yml@v1.7.0
     with:
       version-files: |
         <SPÉCIFIQUE_REPO — voir tableau plus bas>
@@ -224,7 +224,7 @@ Changements :
    le Dockerfile a un `FROM docker.io/*`. La partie QEMU passe par le
    mirror oci-storage par défaut (jamais besoin d'auth Docker Hub pour ça) :
    ```yaml
-   - uses: didlawowo/workflow-ci/.github/actions/docker-build-push@v1
+   - uses: didlawowo/workflow-ci/.github/actions/docker-build-push@v1.7.0
      with:
        image-name: oci-storage.dc-tech.work/<repo>/<image>
        # SemVer pur (1.1.3) sans le préfixe `v`. Cohérent avec Chart.yaml
@@ -482,7 +482,7 @@ oci-storage.oci-storage.svc.cluster.local   # HTTP simple, port 80 → 3030
 ### Opt-in sur `docker-build-push` (défaut inchangé)
 
 ```yaml
-- uses: didlawowo/workflow-ci/.github/actions/docker-build-push@v1
+- uses: didlawowo/workflow-ci/.github/actions/docker-build-push@v1.7.0
   with:
     image-name: oci-storage.oci-storage.svc.cluster.local/<image>
     image-tag:  ${{ needs.extract-version.outputs.version }}

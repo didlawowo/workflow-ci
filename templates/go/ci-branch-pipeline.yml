@@ -8,14 +8,18 @@
 name: "CI - Branch Pipeline"
 
 on:
-  push:
-    branches: ["**", "!main"]
   pull_request:
     branches: [main]
     # 'labeled' : nécessaire si un job est conditionné à un label (ex: build
     # d'image preview gardé par `contains(pull_request.labels.*.name, 'preview')`).
     # Sans ça, poser le label après le run initial ne relance rien.
     types: [opened, synchronize, reopened, labeled]
+
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
 
 env:
   GO_VERSION: "1.24"
@@ -41,7 +45,7 @@ jobs:
 
       - name: Run tests
         id: test
-        uses: didlawowo/workflow-ci/.github/actions/run-go-tests@main
+        uses: didlawowo/workflow-ci/.github/actions/run-go-tests@v1.7.0
         with:
           go-version: ${{ env.GO_VERSION }}
           working-directory: ${{ env.GO_WORKING_DIR }}
@@ -65,7 +69,7 @@ jobs:
 
       - name: Run quality & security checks
         id: checks
-        uses: didlawowo/workflow-ci/.github/actions/go-quality-security@main
+        uses: didlawowo/workflow-ci/.github/actions/go-quality-security@v1.7.0
         with:
           go-version: ${{ env.GO_VERSION }}
           working-directory: ${{ env.GO_WORKING_DIR }}
@@ -107,7 +111,7 @@ jobs:
           echo "branch-tag=${BRANCH}-${SHA}" >> "$GITHUB_OUTPUT"
 
       - name: Build and push
-        uses: didlawowo/workflow-ci/.github/actions/docker-build-push@main
+        uses: didlawowo/workflow-ci/.github/actions/docker-build-push@v1.7.0
         with:
           image-name: ${{ env.IMAGE_NAME }}
           image-tag: ${{ steps.tag.outputs.branch-tag }}

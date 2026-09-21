@@ -76,7 +76,7 @@ au workflow réutilisable, qui dispatchera explicitement la cible.
 ```yaml
 jobs:
   release:
-    uses: didlawowo/workflow-ci/.github/workflows/release.yml@v1
+    uses: didlawowo/workflow-ci/.github/workflows/release.yml@v1.7.0
     permissions:
       contents: write
       actions: write          # requis pour le dispatch
@@ -128,7 +128,7 @@ L'entrée `runs-on` fait tourner la release sur le même runner que le reste de 
 ```yaml
 jobs:
   release:
-    uses: didlawowo/workflow-ci/.github/workflows/release.yml@v1.6.0
+    uses: didlawowo/workflow-ci/.github/workflows/release.yml@v1.7.0
     with:
       workflow-ci-ref: v1.6.0
       runs-on: ${{ vars.RUNNER || 'arc-runner-<repo>' }}
@@ -166,7 +166,7 @@ Pour chaîner un downstream (Docker build, ArgoCD bump, …) :
 ```yaml
 jobs:
   release:
-    uses: didlawowo/workflow-ci/.github/workflows/release.yml@main
+    uses: didlawowo/workflow-ci/.github/workflows/release.yml@v1.7.0
     permissions:
       contents: write
   deploy:

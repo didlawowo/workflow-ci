@@ -12,9 +12,14 @@ on:
       - "quality_report.py"
       - ".github/scripts/mutation_policy.py"
       - ".github/workflows/mutation-policy.yml"
+      - ".github/workflows/release.yml"
+      - ".github/scripts/sync_internal_refs.py"
+      - ".workflow-ci-version"
+      - "templates/**"
       - "tests/**"
       - "pyproject.toml"
       - ".ci/mutation.sh"
+      - ".ci/mutation_scope.py"
   push:
     branches: [main]
     paths:
@@ -27,9 +32,14 @@ on:
       - "quality_report.py"
       - ".github/scripts/mutation_policy.py"
       - ".github/workflows/mutation-policy.yml"
+      - ".github/workflows/release.yml"
+      - ".github/scripts/sync_internal_refs.py"
+      - ".workflow-ci-version"
+      - "templates/**"
       - "tests/**"
       - "pyproject.toml"
       - ".ci/mutation.sh"
+      - ".ci/mutation_scope.py"
 
 jobs:
   test:
