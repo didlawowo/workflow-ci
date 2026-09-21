@@ -138,3 +138,24 @@ def test_scope_patterns_are_module_anchored(tmp_path: Path):
     assert mutation_scope.mutation_targets(repo, base, head) == (
         "service.*compute__mutmut_*",
     )
+
+
+def test_scope_reads_multiline_setup_cfg_source_paths(tmp_path: Path):
+    repo = _init_repo(tmp_path)
+    (repo / "pyproject.toml").unlink()
+    (repo / "setup.cfg").write_text(
+        "[mutmut]\n"
+        "source_paths =\n"
+        "    src/\n",
+        encoding="utf-8",
+    )
+    source = repo / "src" / "service.py"
+    source.write_text("def compute():\n    return 1\n", encoding="utf-8")
+    base = _commit(repo, "initial")
+
+    source.write_text("def compute():\n    return 2\n", encoding="utf-8")
+    head = _commit(repo, "change function")
+
+    assert mutation_scope.mutation_targets(repo, base, head) == (
+        "service.*compute__mutmut_*",
+    )
