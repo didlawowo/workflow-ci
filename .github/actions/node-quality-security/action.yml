@@ -46,7 +46,7 @@ runs:
   using: "composite"
   steps:
     - name: Setup Node.js environment
-      uses: didlawowo/workflow-ci/.github/actions/setup-node-env@main
+      uses: didlawowo/workflow-ci/.github/actions/setup-node-env@v1.7.0
       with:
         node-version: ${{ inputs.node-version }}
         package-manager: ${{ inputs.package-manager }}
