@@ -46,8 +46,7 @@ jobs:
     runs-on: ${{ vars.RUNNER || 'ubuntu-latest' }}
     permissions:
       contents: read
-      issues: write
-      pull-requests: read
+      pull-requests: write
       actions: read
     steps:
       - uses: actions/checkout@v7

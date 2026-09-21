@@ -1,3 +1,4 @@
+import io
 import json
 import tempfile
 import unittest
@@ -266,6 +267,39 @@ class QualityReportTests(unittest.TestCase):
             1,
         )
 
+    def test_upsert_comment_fails_closed_on_forbidden_write(self):
+        report = {
+            "schema_version": 1,
+            "identity": {"head_sha": "head"},
+            "tests": {"available": False},
+            "coverage": {"available": False},
+            "mutation": {"available": False},
+            "diff": {"available": False, "suspicious_files": []},
+            "history": {"available": False, "current_run_attempt": 1},
+        }
+        error = quality_report.urllib.error.HTTPError(
+            url="https://api.github.com/repos/example/repo/issues/1/comments",
+            code=403,
+            msg="Forbidden",
+            hdrs={"X-Accepted-GitHub-Permissions": "pull_requests=write"},
+            fp=io.BytesIO(b'{"message":"Resource not accessible by integration"}'),
+        )
+
+        with patch.object(quality_report, "_api_json", return_value=[]), patch.object(
+            quality_report.urllib.request, "urlopen", side_effect=error
+        ):
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "HTTP 403.*pull_requests=write.*Resource not accessible by integration",
+            ):
+                quality_report.upsert_comment(
+                    report,
+                    "https://api.github.com",
+                    "example/repo",
+                    1,
+                    "token",
+                )
+
     def test_markdown_exposes_failures_and_policy_files(self):
         report = {
             "tests": {
@@ -304,6 +338,7 @@ class QualityReportTests(unittest.TestCase):
         }
         markdown = quality_report.render_markdown(report)
 
+        self.assertIn("## CI Quality Report", markdown)
         self.assertIn("8 passed · 1 failed", markdown)
         self.assertIn("90.0%", markdown)
         self.assertIn(".ci/mutation.sh", markdown)
