@@ -47,9 +47,27 @@ jobs:
       issues: write
       pull-requests: read
     steps:
-      - uses: actions/checkout@v7
-        with:
-          fetch-depth: 0
+      - name: Fetch caller repository without submodule traversal
+        shell: bash
+        env:
+          HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          BASE_REPOSITORY: ${{ github.repository }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+          POLICY_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          git init -q .
+          git remote add origin "${GITHUB_SERVER_URL}/${HEAD_REPOSITORY}.git"
+          AUTH="$(printf 'x-access-token:%s' "$POLICY_TOKEN" | base64 | tr -d '\n')"
+          git -c "http.extraheader=AUTHORIZATION: basic $AUTH" \
+            fetch --no-tags origin "$HEAD_SHA"
+          git checkout -q --detach FETCH_HEAD
+          if [[ -n "$BASE_SHA" && "$BASE_SHA" != "0000000000000000000000000000000000000000" ]]; then
+            git remote add base "${GITHUB_SERVER_URL}/${BASE_REPOSITORY}.git"
+            git -c "http.extraheader=AUTHORIZATION: basic $AUTH" \
+              fetch --no-tags base "$BASE_SHA"
+          fi
 
       - name: Checkout pinned workflow-ci actions
         uses: actions/checkout@v7
