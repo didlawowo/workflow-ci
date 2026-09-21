@@ -104,3 +104,4 @@ runs:
         name: quality-evidence-${{ github.job }}-${{ github.run_id }}
         path: .quality/
         retention-days: 14
+        include-hidden-files: true
