@@ -57,6 +57,12 @@ on:
         type: boolean
         default: true
 
+concurrency:
+  # A newer revision of the same caller PR supersedes stale evidence work.
+  # Keep the group repository-scoped because this is a reusable workflow.
+  group: quality-evidence-${{ github.repository }}-${{ github.event.pull_request.number || github.ref_name }}-${{ inputs.repo-type }}-${{ inputs.working-directory }}
+  cancel-in-progress: true
+
 jobs:
   independent-verification:
     name: "Independent quality execution"
