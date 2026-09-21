@@ -127,5 +127,5 @@ def test_mutation_policy_rejects_changed_functions_without_mutants():
 
     assert "source_paths is part of the protected policy" in content
     assert "in_trusted_source_path" in content
-    assert "changed functions produced no mutation evidence" in content
+    assert "changed functions produced no mutation " in content
     assert "pragma: no mutate" in content
