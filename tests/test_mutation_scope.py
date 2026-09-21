@@ -184,7 +184,7 @@ def test_changed_lines_compares_exact_base_and_head_trees():
             "diff",
             "--unified=0",
             "--no-color",
-            "base-sha..head-sha",
+            "base-sha...head-sha",
             "--",
             "*.py",
         ],
