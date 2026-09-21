@@ -302,7 +302,8 @@ def test_release_workflow_is_idempotent_and_recoverable():
     assert "steps.result.outputs.released" in content
     assert "steps.publish.outputs.dispatch == 'true'" in content
 
-    before_result = content.split("      - name: Resolve release result", 1)[0]
+    steps = content.split("    steps:", 1)[1]
+    before_result = steps.split("      - name: Resolve release result", 1)[0]
     assert "steps.result.outputs.version" not in before_result
 
 
@@ -323,6 +324,46 @@ def test_forgejo_mutation_policy_template_matches_label_refresh_contract():
     for job in ("mutation-run:", "mutation-verify:"):
         assert job in github
         assert job in forgejo
+
+
+def test_quality_evidence_separates_read_only_execution_from_privileged_publication():
+    content = WORKFLOW.read_text()
+
+    execution = content.split("  independent-verification:", 1)[1].split(
+        "  publish-evidence:", 1
+    )[0]
+    publisher = content.split("  publish-evidence:", 1)[1]
+
+    assert "issues: write" not in execution
+    assert "pull-requests: write" not in execution
+    assert execution.count("persist-credentials: false") >= 2
+    assert "uses: ./.workflow-ci/.github/actions/quality-report" not in execution
+
+    assert "needs: [independent-verification]" in publisher
+    assert "issues: write" in publisher
+    assert "pull-requests: read" in publisher
+    assert publisher.count("persist-credentials: false") >= 2
+    assert "uses: ./.workflow-ci/.github/actions/quality-report" in publisher
+    assert 'junit-glob: "${{ runner.temp }}/quality-evidence/no-junit.xml"' in publisher
+    assert 'coverage-glob: "${{ runner.temp }}/quality-evidence/no-coverage.xml"' in publisher
+
+
+def test_executable_actions_never_use_mutable_main_refs():
+    root = Path(__file__).resolve().parents[1]
+    scan_roots = (
+        root / ".github" / "actions",
+        root / ".github" / "workflows",
+        root / "templates",
+    )
+
+    for scan_root in scan_roots:
+        for path in scan_root.rglob("*"):
+            if not path.is_file() or path.suffix not in {".yml", ".yaml"}:
+                continue
+            for line in path.read_text().splitlines():
+                if "uses:" not in line:
+                    continue
+                assert "@main" not in line, f"{path}: mutable action ref: {line}"
 
 
 def test_release_workflow_never_commits_workflow_ci_checkout():

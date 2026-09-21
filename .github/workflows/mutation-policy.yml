@@ -2,24 +2,55 @@ name: Mutation testing policy
 
 on:
   issues:
-    types: [labeled]
-  pull_request_target:
+    types: [labeled, unlabeled]
+  pull_request:
     types: [opened, synchronize, reopened, labeled, unlabeled, edited]
 
 jobs:
   notify:
     if: >-
       github.event_name == 'issues' &&
+      github.event.action == 'labeled' &&
       (github.event.label.name == 'complexity:high' ||
        github.event.label.name == 'priority:high')
     permissions:
       contents: read
       issues: write
-    runs-on: arc-runner-workflow-ci
+    runs-on: ${{ vars.RUNNER || 'ubuntu-latest' }}
     steps:
-      - uses: actions/checkout@v7
-        with:
-          persist-credentials: false
+      - name: Install uv for policy helpers
+        uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+
+      - name: Fetch trusted policy without submodule traversal
+        env:
+          MUTATION_FETCH_REPOSITORY: ${{ github.repository }}
+          MUTATION_FETCH_SHA: ${{ github.sha }}
+          MUTATION_FETCH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          DEST="$GITHUB_WORKSPACE/.policy"
+          rm -rf "$DEST"
+          mkdir -p "$DEST"
+          git -C "$DEST" init -q
+
+          ASKPASS="${RUNNER_TEMP:-/tmp}/mutation-git-askpass-notify.sh"
+          trap 'rm -f "$ASKPASS"' EXIT
+          cat > "$ASKPASS" <<'SH'
+          #!/usr/bin/env bash
+          case "$1" in
+            *Username*) printf '%s\n' 'x-access-token' ;;
+            *Password*) printf '%s\n' "$MUTATION_FETCH_TOKEN" ;;
+            *) printf '\n' ;;
+          esac
+          SH
+          chmod 700 "$ASKPASS"
+
+          URL="${GITHUB_SERVER_URL}/${MUTATION_FETCH_REPOSITORY}.git"
+          GIT_ASKPASS="$ASKPASS" GIT_TERMINAL_PROMPT=0 \
+            git -C "$DEST" fetch --no-tags "$URL" "$MUTATION_FETCH_SHA"
+          git -C "$DEST" checkout -q --detach "$MUTATION_FETCH_SHA"
+
       - name: Explain mandatory mutation testing
         env:
           POLICY_PROVIDER: github
@@ -27,25 +58,116 @@ jobs:
           POLICY_REPOSITORY: ${{ github.repository }}
           POLICY_TOKEN: ${{ github.token }}
           POLICY_EVENT_PATH: ${{ github.event_path }}
-        run: python3 .github/scripts/mutation_policy.py notify
+        run: uv run --no-project --python 3.12 python .policy/.github/scripts/mutation_policy.py notify
 
-  mutation-gate:
-    if: github.event_name == 'pull_request_target'
+  refresh-linked-prs:
+    if: >-
+      github.event_name == 'issues' &&
+      (github.event.label.name == 'complexity:high' ||
+       github.event.label.name == 'priority:high')
     permissions:
       contents: read
       issues: read
       pull-requests: read
-    # PR-controlled mutation code runs with credentials scrubbed. The trusted
-    # bootstrap is copied from the base revision before the PR checkout.
-    runs-on: arc-runner-workflow-ci
+      actions: write
+    runs-on: ${{ vars.RUNNER || 'ubuntu-latest' }}
     steps:
-      - name: Checkout trusted policy
-        uses: actions/checkout@v7
-        with:
-          ref: ${{ github.event.pull_request.base.sha }}
-          persist-credentials: false
+      - name: Install uv for policy helpers
+        uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
 
-      - name: Classify pull request
+      - name: Fetch trusted policy without submodule traversal
+        env:
+          MUTATION_FETCH_REPOSITORY: ${{ github.repository }}
+          MUTATION_FETCH_SHA: ${{ github.sha }}
+          MUTATION_FETCH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          DEST="$GITHUB_WORKSPACE/.policy"
+          rm -rf "$DEST"
+          mkdir -p "$DEST"
+          git -C "$DEST" init -q
+
+          ASKPASS="${RUNNER_TEMP:-/tmp}/mutation-git-askpass-refresh.sh"
+          trap 'rm -f "$ASKPASS"' EXIT
+          cat > "$ASKPASS" <<'SH'
+          #!/usr/bin/env bash
+          case "$1" in
+            *Username*) printf '%s\n' 'x-access-token' ;;
+            *Password*) printf '%s\n' "$MUTATION_FETCH_TOKEN" ;;
+            *) printf '\n' ;;
+          esac
+          SH
+          chmod 700 "$ASKPASS"
+
+          URL="${GITHUB_SERVER_URL}/${MUTATION_FETCH_REPOSITORY}.git"
+          GIT_ASKPASS="$ASKPASS" GIT_TERMINAL_PROMPT=0 \
+            git -C "$DEST" fetch --no-tags "$URL" "$MUTATION_FETCH_SHA"
+          git -C "$DEST" checkout -q --detach "$MUTATION_FETCH_SHA"
+
+      - name: Recompute linked pull request mutation policy
+        env:
+          POLICY_PROVIDER: github
+          POLICY_API_URL: ${{ github.api_url }}
+          POLICY_REPOSITORY: ${{ github.repository }}
+          POLICY_TOKEN: ${{ github.token }}
+          POLICY_EVENT_PATH: ${{ github.event_path }}
+        run: uv run --no-project --python 3.12 python .policy/.github/scripts/mutation_policy.py refresh
+
+  mutation-run:
+    if: github.event_name == 'pull_request'
+    # PR code and its tests are untrusted. Keep this job read-only and, unless
+    # explicitly overridden, off self-hosted/ARC runners.
+    permissions:
+      contents: read
+      issues: read
+      pull-requests: read
+    runs-on: ${{ vars.UNTRUSTED_RUNNER || 'ubuntu-latest' }}
+    outputs:
+      required: ${{ steps.policy.outputs.required }}
+      labels: ${{ steps.policy.outputs.labels }}
+    steps:
+      - name: Fetch trusted base policy without submodule traversal
+        env:
+          MUTATION_FETCH_REPOSITORY: ${{ github.repository }}
+          MUTATION_FETCH_SHA: ${{ github.event.pull_request.base.sha }}
+          MUTATION_FETCH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          DEST="$GITHUB_WORKSPACE/.policy"
+          rm -rf "$DEST"
+          mkdir -p "$DEST"
+          git -C "$DEST" init -q
+
+          ASKPASS="${RUNNER_TEMP:-/tmp}/mutation-git-askpass-policy.sh"
+          trap 'rm -f "$ASKPASS"' EXIT
+          cat > "$ASKPASS" <<'SH'
+          #!/usr/bin/env bash
+          case "$1" in
+            *Username*) printf '%s\n' 'x-access-token' ;;
+            *Password*) printf '%s\n' "$MUTATION_FETCH_TOKEN" ;;
+            *) printf '\n' ;;
+          esac
+          SH
+          chmod 700 "$ASKPASS"
+
+          URL="${GITHUB_SERVER_URL}/${MUTATION_FETCH_REPOSITORY}.git"
+          if ! GIT_ASKPASS="$ASKPASS" GIT_TERMINAL_PROMPT=0 \
+            git -C "$DEST" fetch --no-tags "$URL" "$MUTATION_FETCH_SHA"; then
+            echo "::error::Mutation checkout failure: unable to fetch trusted base $MUTATION_FETCH_SHA."
+            exit 1
+          fi
+          if ! git -C "$DEST" checkout --detach "$MUTATION_FETCH_SHA"; then
+            echo "::error::Mutation checkout failure: unable to materialize trusted base $MUTATION_FETCH_SHA."
+            exit 1
+          fi
+          echo "Trusted mutation policy loaded from $MUTATION_FETCH_SHA without traversing submodules."
+
+      - name: Install uv for policy and mutation helpers
+        uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+
+      - name: Classify pull request from trusted policy
         id: policy
         env:
           POLICY_PROVIDER: github
@@ -53,58 +175,778 @@ jobs:
           POLICY_REPOSITORY: ${{ github.repository }}
           POLICY_TOKEN: ${{ github.token }}
           POLICY_EVENT_PATH: ${{ github.event_path }}
-        run: python3 .github/scripts/mutation_policy.py classify
+        run: uv run --no-project --python 3.12 python .policy/.github/scripts/mutation_policy.py classify
 
-      - name: Preserve trusted mutation bootstrap
+      - name: Fetch pull request code without submodule traversal
+        if: steps.policy.outputs.required == 'true'
+        env:
+          MUTATION_HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name }}
+          MUTATION_BASE_REPOSITORY: ${{ github.repository }}
+          MUTATION_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          MUTATION_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          MUTATION_FETCH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          DEST="$GITHUB_WORKSPACE/pr"
+          rm -rf "$DEST"
+          mkdir -p "$DEST"
+          git -C "$DEST" init -q
+
+          ASKPASS="${RUNNER_TEMP:-/tmp}/mutation-git-askpass-pr.sh"
+          trap 'rm -f "$ASKPASS"' EXIT
+          cat > "$ASKPASS" <<'SH'
+          #!/usr/bin/env bash
+          case "$1" in
+            *Username*) printf '%s\n' 'x-access-token' ;;
+            *Password*) printf '%s\n' "$MUTATION_FETCH_TOKEN" ;;
+            *) printf '\n' ;;
+          esac
+          SH
+          chmod 700 "$ASKPASS"
+
+          fetch_commit() {
+            local repository="$1"
+            local sha="$2"
+            local label="$3"
+            local url="${GITHUB_SERVER_URL}/${repository}.git"
+            if ! GIT_ASKPASS="$ASKPASS" GIT_TERMINAL_PROMPT=0 \
+              git -C "$DEST" fetch --no-tags "$url" "$sha"; then
+              echo "::error::Mutation checkout failure: unable to fetch $label commit $sha from $repository."
+              exit 1
+            fi
+          }
+
+          fetch_commit "$MUTATION_HEAD_REPOSITORY" "$MUTATION_HEAD_SHA" "head"
+          git -C "$DEST" update-ref refs/mutation/head "$MUTATION_HEAD_SHA"
+          fetch_commit "$MUTATION_BASE_REPOSITORY" "$MUTATION_BASE_SHA" "base"
+          git -C "$DEST" update-ref refs/mutation/base "$MUTATION_BASE_SHA"
+
+          if ! git -C "$DEST" checkout --detach refs/mutation/head; then
+            echo "::error::Mutation checkout failure: unable to materialize PR head $MUTATION_HEAD_SHA."
+            exit 1
+          fi
+
+          GITLINKS=()
+          while IFS= read -r -d '' entry; do
+            metadata="${entry%%$'\t'*}"
+            gitlink_path="${entry#*$'\t'}"
+            if [[ "$metadata" == 160000\ * ]]; then
+              GITLINKS+=("$gitlink_path")
+            fi
+          done < <(git -C "$DEST" ls-files --stage -z)
+          if [[ "${#GITLINKS[@]}" -gt 0 ]]; then
+            DECLARED_PATHS=""
+            if [[ -f "$DEST/.gitmodules" ]]; then
+              DECLARED_PATHS="$(
+                git -C "$DEST" config -f .gitmodules --get-regexp '^submodule\..*\.path$' 2>/dev/null \
+                  | sed 's/^[^ ]* //' || true
+              )"
+            fi
+            for gitlink in "${GITLINKS[@]}"; do
+              if ! grep -Fxq -- "$gitlink" <<<"$DECLARED_PATHS"; then
+                echo "::warning::Mutation checkout diagnostic: gitlink '$gitlink' has no matching .gitmodules entry; continuing because mutation checkout never traverses submodules."
+              fi
+            done
+          fi
+
+          echo "Mutation checkout ready for exact scope $MUTATION_BASE_SHA...$MUTATION_HEAD_SHA."
+
+      - name: Verify trusted mutation runner exists
         if: steps.policy.outputs.required == 'true'
         shell: bash
         run: |
           set -euo pipefail
-          install -m 0755 .github/scripts/mutation_bootstrap.sh "${RUNNER_TEMP}/mutation-bootstrap.sh"
+          SCRIPT="$GITHUB_WORKSPACE/.policy/.ci/mutation.sh"
+          if [[ ! -f "$SCRIPT" ]]; then
+            echo "::error::.ci/mutation.sh must already exist on the protected base branch."
+            echo "::error::A pull request cannot introduce or replace its own mandatory mutation runner."
+            exit 1
+          fi
+          if ! grep -Eiq 'mutmut[[:space:]]+run|gremlins[[:space:]]+unleash|stryker([^[:alnum:]]+[^[:space:]]+)*[[:space:]]+run|cargo[[:space:]]+mutants|pitest|infection' "$SCRIPT"; then
+            echo "::error::Trusted .ci/mutation.sh does not invoke a supported real mutation engine."
+            exit 1
+          fi
 
-      - name: Checkout pull request code
-        if: steps.policy.outputs.required == 'true'
-        uses: actions/checkout@v7
-        with:
-          repository: ${{ github.event.pull_request.head.repo.full_name }}
-          ref: ${{ github.event.pull_request.head.sha }}
-          fetch-depth: 0
-          persist-credentials: false
-
-      - name: Install uv for Python mutation engines
-        if: steps.policy.outputs.required == 'true'
-        uses: astral-sh/setup-uv@v7
-        with:
-          enable-cache: false
-
-      - name: Run mandatory mutation testing
+      - name: Verify mutation configuration is unchanged
         if: steps.policy.outputs.required == 'true'
         shell: bash
+        run: |
+          set -euo pipefail
+          uv run --no-project --python 3.12 python - "$GITHUB_WORKSPACE/.policy" "$GITHUB_WORKSPACE/pr" <<'PY'
+          import configparser
+          import json
+          import sys
+          import tomllib
+          from pathlib import Path
+
+          def mutation_config(root: Path):
+              result = {}
+
+              pyproject = root / "pyproject.toml"
+              if pyproject.is_file():
+                  data = tomllib.loads(pyproject.read_text(encoding="utf-8"))
+                  mutmut = data.get("tool", {}).get("mutmut")
+                  if isinstance(mutmut, dict):
+                      result["pyproject.toml"] = mutmut
+
+              setup_cfg = root / "setup.cfg"
+              if setup_cfg.is_file():
+                  parser = configparser.ConfigParser()
+                  parser.read(setup_cfg, encoding="utf-8")
+                  if parser.has_section("mutmut"):
+                      result["setup.cfg"] = dict(parser.items("mutmut"))
+
+              return result
+
+          trusted = mutation_config(Path(sys.argv[1]))
+          proposed = mutation_config(Path(sys.argv[2]))
+
+          if trusted != proposed:
+              print("::error::Mutation-engine configuration differs from the protected base.")
+              print("Trusted:", json.dumps(trusted, sort_keys=True))
+              print("Proposed:", json.dumps(proposed, sort_keys=True))
+              print(
+                  "::error::Change mutation policy/configuration in a dedicated PR "
+                  "before relying on it for a high-risk PR."
+              )
+              raise SystemExit(1)
+
+          print("Mutation configuration matches the protected base.")
+          PY
+
+      - name: Prepare isolated Python mutation environment
+        id: mutation-python
+        if: steps.policy.outputs.required == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          SCRIPT="$GITHUB_WORKSPACE/.policy/.ci/mutation.sh"
+          if grep -Eiq 'mutmut[[:space:]]+run' "$SCRIPT"; then
+            VENV="${RUNNER_TEMP:-/tmp}/mutation-venv"
+            PYTHON_VERSION="${MUTATION_PYTHON_VERSION:-3.12}"
+            rm -rf "$VENV"
+            if ! uv python install "$PYTHON_VERSION"; then
+              echo "::error::Mutation bootstrap failure: uv could not provision Python $PYTHON_VERSION."
+              exit 1
+            fi
+            if ! uv venv "$VENV" --python "$PYTHON_VERSION" --seed; then
+              echo "::error::Mutation bootstrap failure: uv could not create $VENV."
+              exit 1
+            fi
+            echo "venv=$VENV" >> "$GITHUB_OUTPUT"
+          else
+            echo "venv=" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Run trusted mutation runner against PR code
+        if: steps.policy.outputs.required == 'true'
+        shell: bash
+        working-directory: pr
         env:
           MUTATION_POLICY_LABELS: ${{ steps.policy.outputs.labels }}
+          MUTATION_VENV: ${{ steps.mutation-python.outputs.venv }}
           MUTATION_BASE_SHA: ${{ github.event.pull_request.base.sha }}
           MUTATION_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           set -euo pipefail
-          trusted_bootstrap="${RUNNER_TEMP}/mutation-bootstrap.sh"
-          [[ -x "$trusted_bootstrap" ]] || {
-            echo "::error::Trusted mutation bootstrap is missing."
-            exit 20
-          }
-          mutation_cache="${RUNNER_TEMP}/mutation-uv-cache"
-          mkdir -p "$mutation_cache"
+          MUTATION_PATH="$PATH"
+          if [[ -n "$MUTATION_VENV" ]]; then
+            MUTATION_PATH="$MUTATION_VENV/bin:$MUTATION_PATH"
+          fi
+          ISOLATED_HOME="${RUNNER_TEMP:-/tmp}/mutation-home"
+          ISOLATED_UV_CACHE="${RUNNER_TEMP:-/tmp}/mutation-uv-cache"
+          rm -rf "$ISOLATED_HOME" "$ISOLATED_UV_CACHE"
+          mkdir -p "$ISOLATED_HOME" "$ISOLATED_UV_CACHE"
+
+          # No forge token, persistent HOME or shared dependency cache is
+          # exposed to PR code on self-hosted/ARC runners.
           env -i \
-            PATH="$PATH" \
-            HOME="$HOME" \
-            RUNNER_TEMP="$RUNNER_TEMP" \
-            UV_CACHE_DIR="$mutation_cache" \
-            UV_LINK_MODE="${UV_LINK_MODE:-copy}" \
+            PATH="$MUTATION_PATH" \
+            HOME="$ISOLATED_HOME" \
+            UV_CACHE_DIR="$ISOLATED_UV_CACHE" \
+            VIRTUAL_ENV="$MUTATION_VENV" \
             CI=true \
             MUTATION_POLICY_LABELS="$MUTATION_POLICY_LABELS" \
             MUTATION_BASE_SHA="$MUTATION_BASE_SHA" \
             MUTATION_HEAD_SHA="$MUTATION_HEAD_SHA" \
-            bash "$trusted_bootstrap"
+            bash "$GITHUB_WORKSPACE/.policy/.ci/mutation.sh"
+
+      - name: Capture mutmut diagnostics
+        if: always() && steps.policy.outputs.required == 'true' && steps.mutation-python.outputs.venv != ''
+        shell: bash
+        working-directory: pr
+        env:
+          MUTATION_VENV: ${{ steps.mutation-python.outputs.venv }}
+        run: |
+          set -euo pipefail
+          mkdir -p .quality
+          if [[ -x "$MUTATION_VENV/bin/mutmut" ]]; then
+            "$MUTATION_VENV/bin/mutmut" results > .quality/mutmut-results.txt || true
+          elif [[ -f .quality/mutation-no-targets.json ]]; then
+            echo "No mutmut diagnostics: exact PR scope contains no mutation targets." > .quality/mutmut-results.txt
+          else
+            echo "::error::Mutation diagnostics unavailable: mutmut was not installed and no no-target evidence exists."
+            exit 1
+          fi
+
+      - name: Locate mutation evidence
+        id: evidence
+        if: always() && steps.policy.outputs.required == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -f pr/mutants/mutmut-cicd-stats.json ]]; then
+            echo "path=pr/mutants/mutmut-cicd-stats.json" >> "$GITHUB_OUTPUT"
+          elif [[ -f pr/.quality/mutation-no-targets.json ]]; then
+            echo "path=pr/.quality/mutation-no-targets.json" >> "$GITHUB_OUTPUT"
+          elif [[ -f pr/.quality/gremlins.json ]]; then
+            echo "path=pr/.quality/gremlins.json" >> "$GITHUB_OUTPUT"
+          else
+            echo "::error::Mandatory mutation run produced no supported mutation evidence."
+            exit 1
+          fi
+
+      - name: Upload untrusted mutation evidence
+        if: always() && steps.policy.outputs.required == 'true' && steps.evidence.outputs.path != ''
+        uses: actions/upload-artifact@v6
+        with:
+          name: mutation-evidence-${{ github.run_id }}
+          path: |
+            ${{ steps.evidence.outputs.path }}
+            pr/.quality/mutmut-results.txt
+            pr/mutants/quality_report.py
+          retention-days: 7
+          if-no-files-found: error
+          include-hidden-files: true
 
       - name: Mutation testing not required
         if: steps.policy.outputs.required != 'true'
         run: echo "No complexity:high or priority:high label found on the PR or linked issue."
+
+  mutation-verify:
+    name: Mutation policy gate
+    if: always() && github.event_name == 'pull_request'
+    needs: [mutation-run]
+    permissions:
+      contents: read
+      actions: read
+      issues: read
+      pull-requests: read
+    runs-on: ${{ vars.UNTRUSTED_RUNNER || 'ubuntu-latest' }}
+    steps:
+      - name: Fetch trusted base policy without submodule traversal
+        env:
+          MUTATION_FETCH_REPOSITORY: ${{ github.repository }}
+          MUTATION_FETCH_SHA: ${{ github.event.pull_request.base.sha }}
+          MUTATION_FETCH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          DEST="$GITHUB_WORKSPACE/.policy"
+          rm -rf "$DEST"
+          mkdir -p "$DEST"
+          git -C "$DEST" init -q
+
+          ASKPASS="${RUNNER_TEMP:-/tmp}/mutation-git-askpass-policy.sh"
+          trap 'rm -f "$ASKPASS"' EXIT
+          cat > "$ASKPASS" <<'SH'
+          #!/usr/bin/env bash
+          case "$1" in
+            *Username*) printf '%s\n' 'x-access-token' ;;
+            *Password*) printf '%s\n' "$MUTATION_FETCH_TOKEN" ;;
+            *) printf '\n' ;;
+          esac
+          SH
+          chmod 700 "$ASKPASS"
+
+          URL="${GITHUB_SERVER_URL}/${MUTATION_FETCH_REPOSITORY}.git"
+          if ! GIT_ASKPASS="$ASKPASS" GIT_TERMINAL_PROMPT=0 \
+            git -C "$DEST" fetch --no-tags "$URL" "$MUTATION_FETCH_SHA"; then
+            echo "::error::Mutation checkout failure: unable to fetch trusted base $MUTATION_FETCH_SHA."
+            exit 1
+          fi
+          if ! git -C "$DEST" checkout --detach "$MUTATION_FETCH_SHA"; then
+            echo "::error::Mutation checkout failure: unable to materialize trusted base $MUTATION_FETCH_SHA."
+            exit 1
+          fi
+          echo "Trusted mutation policy loaded from $MUTATION_FETCH_SHA without traversing submodules."
+
+      - name: Install uv for verification helpers
+        uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+
+      - name: Re-classify pull request independently
+        id: policy
+        env:
+          POLICY_PROVIDER: github
+          POLICY_API_URL: ${{ github.api_url }}
+          POLICY_REPOSITORY: ${{ github.repository }}
+          POLICY_TOKEN: ${{ github.token }}
+          POLICY_EVENT_PATH: ${{ github.event_path }}
+        run: uv run --no-project --python 3.12 python .policy/.github/scripts/mutation_policy.py classify
+
+      - name: Require successful mutation execution
+        if: steps.policy.outputs.required == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "${{ needs.mutation-run.result }}" != "success" ]]; then
+            echo "::error::Mandatory mutation execution did not complete successfully."
+            exit 1
+          fi
+
+      - name: Fetch pull request code without submodule traversal
+        if: steps.policy.outputs.required == 'true'
+        env:
+          MUTATION_HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name }}
+          MUTATION_BASE_REPOSITORY: ${{ github.repository }}
+          MUTATION_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          MUTATION_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          MUTATION_FETCH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          DEST="$GITHUB_WORKSPACE/pr"
+          rm -rf "$DEST"
+          mkdir -p "$DEST"
+          git -C "$DEST" init -q
+
+          ASKPASS="${RUNNER_TEMP:-/tmp}/mutation-git-askpass-pr.sh"
+          trap 'rm -f "$ASKPASS"' EXIT
+          cat > "$ASKPASS" <<'SH'
+          #!/usr/bin/env bash
+          case "$1" in
+            *Username*) printf '%s\n' 'x-access-token' ;;
+            *Password*) printf '%s\n' "$MUTATION_FETCH_TOKEN" ;;
+            *) printf '\n' ;;
+          esac
+          SH
+          chmod 700 "$ASKPASS"
+
+          fetch_commit() {
+            local repository="$1"
+            local sha="$2"
+            local label="$3"
+            local url="${GITHUB_SERVER_URL}/${repository}.git"
+            if ! GIT_ASKPASS="$ASKPASS" GIT_TERMINAL_PROMPT=0 \
+              git -C "$DEST" fetch --no-tags "$url" "$sha"; then
+              echo "::error::Mutation checkout failure: unable to fetch $label commit $sha from $repository."
+              exit 1
+            fi
+          }
+
+          fetch_commit "$MUTATION_HEAD_REPOSITORY" "$MUTATION_HEAD_SHA" "head"
+          git -C "$DEST" update-ref refs/mutation/head "$MUTATION_HEAD_SHA"
+          fetch_commit "$MUTATION_BASE_REPOSITORY" "$MUTATION_BASE_SHA" "base"
+          git -C "$DEST" update-ref refs/mutation/base "$MUTATION_BASE_SHA"
+
+          if ! git -C "$DEST" checkout --detach refs/mutation/head; then
+            echo "::error::Mutation checkout failure: unable to materialize PR head $MUTATION_HEAD_SHA."
+            exit 1
+          fi
+
+          GITLINKS=()
+          while IFS= read -r -d '' entry; do
+            metadata="${entry%%$'\t'*}"
+            gitlink_path="${entry#*$'\t'}"
+            if [[ "$metadata" == 160000\ * ]]; then
+              GITLINKS+=("$gitlink_path")
+            fi
+          done < <(git -C "$DEST" ls-files --stage -z)
+          if [[ "${#GITLINKS[@]}" -gt 0 ]]; then
+            DECLARED_PATHS=""
+            if [[ -f "$DEST/.gitmodules" ]]; then
+              DECLARED_PATHS="$(
+                git -C "$DEST" config -f .gitmodules --get-regexp '^submodule\..*\.path$' 2>/dev/null \
+                  | sed 's/^[^ ]* //' || true
+              )"
+            fi
+            for gitlink in "${GITLINKS[@]}"; do
+              if ! grep -Fxq -- "$gitlink" <<<"$DECLARED_PATHS"; then
+                echo "::warning::Mutation checkout diagnostic: gitlink '$gitlink' has no matching .gitmodules entry; continuing because mutation checkout never traverses submodules."
+              fi
+            done
+          fi
+
+          echo "Mutation checkout ready for exact scope $MUTATION_BASE_SHA...$MUTATION_HEAD_SHA."
+
+      - name: Download mutation evidence
+        if: steps.policy.outputs.required == 'true'
+        uses: actions/download-artifact@v6
+        with:
+          name: mutation-evidence-${{ github.run_id }}
+          path: .mutation-evidence
+
+      - name: Validate mutation evidence for changed Python functions
+        id: validate
+        if: steps.policy.outputs.required == 'true'
+        shell: bash
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          REPORT="$(find .mutation-evidence -type f -name 'mutmut-cicd-stats.json' -print -quit)"
+          RESULTS="$(find .mutation-evidence -type f -name 'mutmut-results.txt' -print -quit)"
+
+          if [[ -z "$REPORT" ]]; then
+            # Non-mutmut engines still use aggregate engine-native validation.
+            REPORT="$(find .mutation-evidence -type f -name '*.json' -print -quit)"
+          fi
+          if [[ -z "$REPORT" ]]; then
+            echo "::error::No mutation evidence artifact was downloaded."
+            exit 1
+          fi
+
+          uv run --no-project --python 3.12 python - "$REPORT" "$RESULTS" "$GITHUB_WORKSPACE/pr" "$GITHUB_WORKSPACE/.policy" "$BASE_SHA" "$HEAD_SHA" "$GITHUB_OUTPUT" <<'PY'
+          import ast
+          import json
+          import re
+          import subprocess
+          import sys
+          from pathlib import Path
+
+          report_path = Path(sys.argv[1])
+          results_path = Path(sys.argv[2]) if sys.argv[2] else None
+          repo = Path(sys.argv[3])
+          policy_root = Path(sys.argv[4])
+          base = sys.argv[5]
+          head = sys.argv[6]
+          output_path = Path(sys.argv[7])
+
+          data = json.loads(report_path.read_text(encoding="utf-8"))
+          if not isinstance(data, dict):
+              raise SystemExit("mutation evidence must be a JSON object")
+
+          def value(*aliases):
+              candidates = [data]
+              for key in ("stats", "summary", "results", "mutations"):
+                  nested = data.get(key)
+                  if isinstance(nested, dict):
+                      candidates.append(nested)
+              for candidate in candidates:
+                  for alias in aliases:
+                      current = candidate.get(alias)
+                      if isinstance(current, (int, float)):
+                          return int(current)
+              return None
+
+          killed = value("killed", "killed_mutants", "mutants_killed")
+          survived = value(
+              "survived", "surviving", "survived_mutants",
+              "mutants_survived", "mutants_lived",
+          )
+          timeouts = value("timeouts", "timeout", "timed_out") or 0
+          suspicious = value("suspicious", "suspicious_mutants") or 0
+          total = value("total", "total_mutants", "mutants", "mutants_total")
+
+          if killed is None or survived is None:
+              raise SystemExit("mutation evidence is missing killed/survived counters")
+          if total is None:
+              total = killed + survived + timeouts + suspicious
+
+          scope_metadata = data.get("scope")
+          no_targets = bool(
+              isinstance(scope_metadata, dict)
+              and scope_metadata.get("no_targets") is True
+          )
+          if no_targets:
+              if (
+                  scope_metadata.get("base_sha") != base
+                  or scope_metadata.get("head_sha") != head
+              ):
+                  raise SystemExit(
+                      "mutation no-target evidence does not match the current base/head SHA"
+                  )
+          elif total <= 0:
+              raise SystemExit("mutation evidence contains no measured mutants")
+
+          # Engines without per-mutant locations keep the conservative aggregate gate.
+          if not results_path or not results_path.is_file():
+              if survived or timeouts or suspicious:
+                  raise SystemExit(
+                      f"mutation gate failed: survived={survived}, "
+                      f"timeouts={timeouts}, suspicious={suspicious}"
+                  )
+              scoped_path = report_path
+              print(f"mutation gate passed: {killed}/{total} mutants killed")
+          else:
+              status_re = re.compile(r"^\s*(\S+):\s+([a-z_]+)\s*$")
+              statuses = {}
+              for raw in results_path.read_text(encoding="utf-8").splitlines():
+                  match = status_re.match(raw)
+                  if match:
+                      statuses[match.group(1)] = match.group(2)
+
+              diff = subprocess.run(
+                  [
+                      "git", "-C", str(repo), "diff", "--unified=0", "--no-color",
+                      f"{base}...{head}", "--", "*.py",
+                  ],
+                  check=True,
+                  capture_output=True,
+                  text=True,
+              ).stdout
+
+              changed_lines = {}
+              current_path = None
+              for raw in diff.splitlines():
+                  if raw.startswith("+++ b/"):
+                      current_path = raw[6:]
+                      changed_lines.setdefault(current_path, set())
+                      continue
+                  if raw.startswith("+++ /dev/null"):
+                      current_path = None
+                      continue
+                  if not raw.startswith("@@") or current_path is None:
+                      continue
+                  match = re.search(r"\+(\d+)(?:,(\d+))?", raw)
+                  if not match:
+                      continue
+                  start = int(match.group(1))
+                  count = int(match.group(2) or "1")
+                  if count:
+                      changed_lines[current_path].update(
+                          range(start, start + count)
+                      )
+                  else:
+                      # Deletion-only hunks have no new-side lines. Mark both
+                      # adjacent surviving lines so deletions inside a function
+                      # stay inside the trusted changed-function scope.
+                      changed_lines[current_path].update(
+                          {max(start - 1, 1), max(start, 1)}
+                      )
+
+              # Reject source-level mutation suppressions in changed code.
+              for raw in diff.splitlines():
+                  if (
+                      raw.startswith("+")
+                      and not raw.startswith("+++")
+                      and "pragma: no mutate" in raw
+                  ):
+                      raise SystemExit(
+                          "mutation gate failed: changed mutation-target code adds "
+                          "a '# pragma: no mutate' suppression"
+                      )
+
+              # source_paths is part of the protected policy. The PR cannot shrink
+              # this scope because the mutation config is compared before execution.
+              source_paths = []
+              trusted_pyproject = policy_root / "pyproject.toml"
+              if trusted_pyproject.is_file():
+                  import tomllib
+                  trusted_config = tomllib.loads(
+                      trusted_pyproject.read_text(encoding="utf-8")
+                  )
+                  configured = (
+                      trusted_config.get("tool", {})
+                      .get("mutmut", {})
+                      .get("source_paths", [])
+                  )
+                  if isinstance(configured, str):
+                      source_paths = [configured]
+                  elif isinstance(configured, list):
+                      source_paths = [str(value) for value in configured]
+
+              trusted_setup_cfg = policy_root / "setup.cfg"
+              if not source_paths and trusted_setup_cfg.is_file():
+                  parser = configparser.ConfigParser()
+                  parser.read(trusted_setup_cfg, encoding="utf-8")
+                  if parser.has_option("mutmut", "source_paths"):
+                      source_paths = [
+                          item.strip()
+                          for item in re.split(
+                              r"[\n,]",
+                              parser.get("mutmut", "source_paths"),
+                          )
+                          if item.strip()
+                      ]
+
+              def in_trusted_source_path(relative):
+                  if not source_paths:
+                      return True
+                  candidate = Path(relative)
+                  for raw in source_paths:
+                      configured = Path(raw)
+                      if candidate == configured:
+                          return True
+                      if (
+                          configured.suffix == ""
+                          and candidate.is_relative_to(configured)
+                      ):
+                          return True
+                  return False
+
+              changed_functions = {}
+              for relative, lines in changed_lines.items():
+                  path = repo / relative
+                  if (
+                      not lines
+                      or not path.is_file()
+                      or path.suffix != ".py"
+                      or not in_trusted_source_path(relative)
+                  ):
+                      continue
+                  try:
+                      tree = ast.parse(path.read_text(encoding="utf-8"))
+                  except (SyntaxError, UnicodeDecodeError):
+                      continue
+                  parts = list(Path(relative).with_suffix("").parts)
+                  if parts and parts[0] == "src":
+                      parts = parts[1:]
+                  module = ".".join(parts)
+                  names = set()
+                  for node in ast.walk(tree):
+                      if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                          continue
+                      end = getattr(node, "end_lineno", node.lineno)
+                      if any(node.lineno <= line <= end for line in lines):
+                          names.add(node.name)
+                  if names:
+                      changed_functions[module] = names
+
+              def mutant_function(mutant_id):
+                  if ".x_" not in mutant_id or "__mutmut_" not in mutant_id:
+                      return None, None
+                  module, rest = mutant_id.split(".x_", 1)
+                  name = rest.split("__mutmut_", 1)[0]
+                  return module, name
+
+              scoped = {}
+              for mutant_id, status in statuses.items():
+                  module, generated_name = mutant_function(mutant_id)
+                  names = changed_functions.get(module or "", set())
+                  if not generated_name or not names:
+                      continue
+                  if any(
+                      generated_name == name or generated_name.endswith("__" + name)
+                      for name in names
+                  ):
+                      scoped[mutant_id] = status
+
+              observed_functions = {}
+              for mutant_id in statuses:
+                  module, generated_name = mutant_function(mutant_id)
+                  if not module or not generated_name:
+                      continue
+                  observed_functions.setdefault(module, set()).add(generated_name)
+
+              if no_targets and changed_functions:
+                  described = ", ".join(
+                      f"{module}={sorted(names)}"
+                      for module, names in sorted(changed_functions.items())
+                  )
+                  raise SystemExit(
+                      "mutation gate failed: no-target evidence contradicts changed "
+                      f"mutation functions: {described}"
+                  )
+              if no_targets:
+                  print(
+                      "::notice::Exact PR delta contains no changed functions in trusted "
+                      "mutation source_paths; engine execution was correctly skipped."
+                  )
+
+              missing_functions = []
+              for module, names in changed_functions.items():
+                  generated = observed_functions.get(module, set())
+                  for name in names:
+                      # main() is orchestration/CLI glue and may be intentionally
+                      # outside unit-level mutation scope. All other changed
+                      # functions in trusted source_paths must produce mutants.
+                      if name == "main":
+                          continue
+                      if not any(
+                          item == name or item.endswith("__" + name)
+                          for item in generated
+                      ):
+                          missing_functions.append(f"{module}.{name}")
+
+              if missing_functions:
+                  raise SystemExit(
+                      "mutation gate failed: changed functions produced no mutation "
+                      "evidence (not exercised or excluded): "
+                      + ", ".join(sorted(missing_functions))
+                  )
+
+              scoped_killed = sum(status == "killed" for status in scoped.values())
+              scoped_survived = sum(status == "survived" for status in scoped.values())
+              scoped_timeout = sum(status in {"timeout", "timed_out"} for status in scoped.values())
+              scoped_suspicious = sum(status == "suspicious" for status in scoped.values())
+              scoped_other = [
+                  mutant_id
+                  for mutant_id, status in scoped.items()
+                  if status not in {"killed", "survived", "timeout", "timed_out", "suspicious"}
+              ]
+
+              if scoped:
+                  print(
+                      "changed-function mutation scope: "
+                      + ", ".join(
+                          f"{module}={sorted(names)}"
+                          for module, names in sorted(changed_functions.items())
+                      )
+                  )
+                  if scoped_survived or scoped_timeout or scoped_suspicious or scoped_other:
+                      survivors = [
+                          mutant_id
+                          for mutant_id, status in scoped.items()
+                          if status != "killed"
+                      ]
+                      preview = "\n".join(f"  - {item}" for item in survivors[:40])
+                      raise SystemExit(
+                          "mutation gate failed for changed functions: "
+                          f"killed={scoped_killed}, survived={scoped_survived}, "
+                          f"timeouts={scoped_timeout}, suspicious={scoped_suspicious}, "
+                          f"other={len(scoped_other)}\n{preview}"
+                      )
+                  print(
+                      f"mutation gate passed for changed functions: "
+                      f"{scoped_killed}/{len(scoped)} mutants killed"
+                  )
+              else:
+                  print(
+                      "::notice::No covered mutation targets were found in changed "
+                      "Python functions; aggregate legacy survivors do not block this PR."
+                  )
+
+              scoped_payload = {
+                  "stats": {
+                      "killed": scoped_killed,
+                      "survived": scoped_survived,
+                      "timeouts": scoped_timeout,
+                      "suspicious": scoped_suspicious,
+                      "total": len(scoped),
+                  },
+                  "scope": {
+                      "base_sha": base,
+                      "head_sha": head,
+                      "no_targets": no_targets,
+                      "changed_functions": {
+                          module: sorted(names)
+                          for module, names in sorted(changed_functions.items())
+                      },
+                  },
+              }
+              scoped_path = Path(".mutation-evidence/scoped-mutation.json")
+              scoped_path.write_text(
+                  json.dumps(scoped_payload, indent=2, sort_keys=True) + "\n",
+                  encoding="utf-8",
+              )
+
+          with output_path.open("a", encoding="utf-8") as handle:
+              handle.write(f"path={scoped_path}\n")
+          PY
+
+      - name: Upload scoped mutation evidence
+        if: always() && steps.policy.outputs.required == 'true' && steps.validate.outcome == 'success'
+        uses: actions/upload-artifact@v6
+        with:
+          name: scoped-mutation-evidence-${{ github.run_id }}
+          path: ${{ steps.validate.outputs.path }}
+          retention-days: 14
+          if-no-files-found: error
+          include-hidden-files: true
+
+      - name: Confirm mutation testing is not required
+        if: steps.policy.outputs.required != 'true'
+        run: echo "Mutation testing is not required for this pull request."
