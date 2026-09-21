@@ -638,7 +638,7 @@ jobs:
                       source_paths = [
                           item.strip()
                           for item in re.split(
-                              r"[\\n,]",
+                              r"[\n,]",
                               parser.get("mutmut", "source_paths"),
                           )
                           if item.strip()
