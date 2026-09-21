@@ -58,9 +58,15 @@ class QualityReportTests(unittest.TestCase):
             "3\t0\t.ci/mutation.sh\n"
         )
         completed = type("Result", (), {"stdout": diff})()
-        with patch.object(quality_report.subprocess, "run", return_value=completed):
+        with patch.object(
+            quality_report.subprocess, "run", return_value=completed
+        ) as run:
             result = quality_report.diff_stats("base", "head")
 
+        self.assertEqual(
+            run.call_args.args[0],
+            ["git", "diff", "--numstat", "base..head"],
+        )
         self.assertEqual(result["files"], 4)
         self.assertEqual(result["production_additions"], 10)
         self.assertEqual(result["test_additions"], 8)
