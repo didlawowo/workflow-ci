@@ -173,10 +173,12 @@ def mutation_targets(repo: Path, base: str, head: str) -> tuple[str, ...]:
             continue
 
         for qualified in visitor.functions:
-            # mutmut accepts Unix-style wildcard matching. The generated mutant
-            # identifier contains the module and each enclosing function/class
-            # name, so this stays scoped even for methods and nested functions.
-            targets.add(f"{module}*{'*'.join(qualified)}*")
+            # Mutmut filters the generated mutant identifier with fnmatch. Anchor
+            # the module and the __mutmut suffix so similarly named modules or
+            # functions cannot leak into the PR scope.
+            targets.add(
+                f"{module}.*{'*'.join(qualified)}__mutmut_*"
+            )
 
     return tuple(sorted(targets))
 
