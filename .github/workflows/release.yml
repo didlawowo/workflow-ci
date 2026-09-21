@@ -187,7 +187,7 @@ jobs:
         if: steps.recovery.outputs.pending != 'true' && steps.bump.outputs.released == 'true' && inputs.version-files != ''
         env:
           VERSION_FILES: ${{ inputs.version-files }}
-          NEW_VERSION: ${{ steps.result.outputs.version }}
+          NEW_VERSION: ${{ steps.bump.outputs.version }}
           TAG_PREFIX: ${{ inputs.tag-prefix }}
         run: |
           set -euo pipefail
@@ -229,7 +229,7 @@ jobs:
           # une expression ${{ }} injectée dans le corps du script serait exécutée par
           # le shell avant même d'être une commande.
           POST_BUMP_COMMAND: ${{ inputs.post-bump-command }}
-          NEW_VERSION: ${{ steps.result.outputs.version }}
+          NEW_VERSION: ${{ steps.bump.outputs.version }}
         run: |
           set -euo pipefail
           echo "Running post-bump command:"
@@ -239,7 +239,7 @@ jobs:
       - name: Prepare release commit
         if: steps.recovery.outputs.pending != 'true' && steps.bump.outputs.released == 'true' && inputs.dry-run != true
         env:
-          NEW_VERSION: ${{ steps.result.outputs.version }}
+          NEW_VERSION: ${{ steps.bump.outputs.version }}
         run: |
           set -euo pipefail
           git add -A
