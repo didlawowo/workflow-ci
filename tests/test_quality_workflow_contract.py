@@ -219,3 +219,25 @@ def test_issue_59_machine_readable_evidence_is_actually_uploaded():
     assert "include-hidden-files: true" in reporter
     assert "scoped-mutation-evidence-" in mutation
     assert mutation.count("include-hidden-files: true") >= 2
+
+
+def test_issue_59_untrusted_mutation_does_not_reuse_runner_home_or_uv_cache():
+    root = Path(__file__).resolve().parents[1]
+    content = (
+        root / ".github" / "workflows" / "mutation-policy.yml"
+    ).read_text()
+
+    assert 'HOME="$ISOLATED_HOME"' in content
+    assert 'UV_CACHE_DIR="$ISOLATED_UV_CACHE"' in content
+    assert 'HOME="$HOME"' not in content
+    assert 'UV_CACHE_DIR="${UV_CACHE_DIR:-}"' not in content
+
+
+def test_issue_59_quality_evidence_cleans_reused_arc_workspace():
+    root = Path(__file__).resolve().parents[1]
+    content = (
+        root / ".github" / "workflows" / "quality-evidence.yml"
+    ).read_text()
+
+    assert 'find "$GITHUB_WORKSPACE" -mindepth 1 -maxdepth 1' in content
+    assert "git init -q ." in content
