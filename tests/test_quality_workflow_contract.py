@@ -129,3 +129,46 @@ def test_mutation_policy_rejects_changed_functions_without_mutants():
     assert "in_trusted_source_path" in content
     assert "changed functions produced no mutation evidence" in content
     assert "pragma: no mutate" in content
+
+
+def test_mutation_policy_uses_uv_without_system_venv_dependency():
+    root = Path(__file__).resolve().parents[1]
+    workflow = (root / ".github" / "workflows" / "mutation-policy.yml").read_text()
+    runner = (root / ".ci" / "mutation.sh").read_text()
+
+    assert "uv python install" in workflow
+    assert 'uv venv "$VENV" --python "$PYTHON_VERSION" --seed' in workflow
+    assert "python3 -m venv" not in workflow
+    assert "python3 -m venv" not in runner
+    assert "Mutation bootstrap failure" in workflow
+    assert "Mutation bootstrap failure" in runner
+
+
+def test_mutation_policy_passes_exact_pull_request_scope_to_runner():
+    root = Path(__file__).resolve().parents[1]
+    workflow = (root / ".github" / "workflows" / "mutation-policy.yml").read_text()
+    runner = (root / ".ci" / "mutation.sh").read_text()
+
+    assert "MUTATION_BASE_SHA: ${{ github.event.pull_request.base.sha }}" in workflow
+    assert "MUTATION_HEAD_SHA: ${{ github.event.pull_request.head.sha }}" in workflow
+    assert 'MUTATION_BASE_SHA="$MUTATION_BASE_SHA"' in workflow
+    assert 'MUTATION_HEAD_SHA="$MUTATION_HEAD_SHA"' in workflow
+    assert "mutation_scope.py" in runner
+    assert "mutation-no-targets.json" in runner
+    assert "No mutation targets in" in runner
+
+
+def test_mutation_jobs_avoid_actions_checkout_and_diagnose_invalid_gitlinks():
+    root = Path(__file__).resolve().parents[1]
+    content = (root / ".github" / "workflows" / "mutation-policy.yml").read_text()
+
+    mutation_jobs = content.split("  mutation-run:", 1)[1]
+    mutation_run, mutation_verify = mutation_jobs.split("  mutation-verify:", 1)
+
+    assert "actions/checkout@" not in mutation_run
+    assert "actions/checkout@" not in mutation_verify
+    assert "Fetch trusted base policy without submodule traversal" in mutation_run
+    assert "Fetch pull request code without submodule traversal" in mutation_run
+    assert "Mutation checkout diagnostic: gitlink" in mutation_run
+    assert "Mutation checkout failure:" in mutation_run
+    assert "Mutation checkout diagnostic: gitlink" in mutation_verify
