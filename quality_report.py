@@ -497,7 +497,7 @@ def render_markdown(report: dict[str, Any]) -> str:
     lines = [
         COMMENT_MARKER,
         _state_marker(report),
-        "## CI Quality Evidence",
+        "## CI Quality Report",
         "",
         "| Signal | Evidence |",
         "|---|---|",
@@ -588,13 +588,14 @@ def upsert_comment(
         with urllib.request.urlopen(request, timeout=20):
             pass
     except urllib.error.HTTPError as exc:
-        if exc.code in (403, 404):
-            print(
-                f"::warning::PR quality comment could not be written (HTTP {exc.code}); "
-                "GITHUB_STEP_SUMMARY and the JSON artifact remain authoritative."
-            )
-            return
-        raise
+        response_body = exc.read().decode("utf-8", errors="replace").strip()
+        accepted = exc.headers.get("X-Accepted-GitHub-Permissions", "unknown")
+        detail = response_body or str(exc.reason)
+        raise RuntimeError(
+            f"PR quality comment write failed (HTTP {exc.code}); "
+            f"accepted GitHub permissions: {accepted}; response: {detail}"
+        ) from exc
+
 
 def main() -> int:
     parser = argparse.ArgumentParser()
