@@ -286,6 +286,7 @@ jobs:
           path: |
             ${{ steps.evidence.outputs.path }}
             pr/.quality/
+            pr/mutants/quality_report.py
           retention-days: 7
           if-no-files-found: error
           include-hidden-files: true
