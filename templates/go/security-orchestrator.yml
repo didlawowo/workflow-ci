@@ -60,7 +60,7 @@ jobs:
 
       - name: Trivy filesystem scan
         id: scan
-        uses: didlawowo/workflow-ci/.github/actions/trivy-filesystem-scan@v1.7.0
+        uses: didlawowo/workflow-ci/.github/actions/trivy-filesystem-scan@3147f59553546407f94163368f21e2d4d9f8775e
         with:
           severity: ${{ steps.severity.outputs.level }}
           fail-on-critical: ${{ inputs.fail-on-issues || 'false' }}
@@ -81,7 +81,7 @@ jobs:
 
       - name: Security checks
         id: checks
-        uses: didlawowo/workflow-ci/.github/actions/go-quality-security@v1.7.0
+        uses: didlawowo/workflow-ci/.github/actions/go-quality-security@3147f59553546407f94163368f21e2d4d9f8775e
         with:
           go-version: ${{ env.GO_VERSION }}
           working-directory: ${{ env.GO_WORKING_DIR }}
