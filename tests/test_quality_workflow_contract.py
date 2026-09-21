@@ -304,3 +304,22 @@ def test_release_workflow_is_idempotent_and_recoverable():
 
     before_result = content.split("      - name: Resolve release result", 1)[0]
     assert "steps.result.outputs.version" not in before_result
+
+
+def test_forgejo_mutation_policy_template_matches_label_refresh_contract():
+    root = Path(__file__).resolve().parents[1]
+    github = (root / ".github" / "workflows" / "mutation-policy.yml").read_text()
+    forgejo = (root / "templates" / "forgejo" / "mutation-policy.yml").read_text()
+
+    assert "types: [labeled, unlabeled]" in forgejo
+    assert "refresh-linked-prs:" in forgejo
+    assert "POLICY_PROVIDER: forgejo" in forgejo
+    assert "POLICY_PROVIDER: github" not in forgejo
+    assert "mutation_policy.py refresh" in forgejo
+    assert "MUTATION_BASE_SHA: ${{ github.event.pull_request.base.sha }}" in forgejo
+    assert "MUTATION_HEAD_SHA: ${{ github.event.pull_request.head.sha }}" in forgejo
+
+    # Keep the actual mutation execution/verification structure in parity.
+    for job in ("mutation-run:", "mutation-verify:"):
+        assert job in github
+        assert job in forgejo
