@@ -53,27 +53,69 @@ class QualityReportTests(unittest.TestCase):
     def test_diff_stats_flags_ci_and_mutation_policy_changes(self):
         diff = (
             "10\t2\tsrc/service.py\n"
+            "4\t1\tsrc/other.py\n"
             "8\t0\ttests/test_service.py\n"
+            "2\t1\ttests/test_other.py\n"
+            "5\t1\tdocs/readme.md\n"
             "2\t1\t.github/workflows/ci.yml\n"
             "3\t0\t.ci/mutation.sh\n"
+            "-\t-\tassets/logo.png\n"
+            "\n"
         )
         completed = type("Result", (), {"stdout": diff})()
+
         with patch.object(
             quality_report.subprocess, "run", return_value=completed
         ) as run:
             result = quality_report.diff_stats("base", "head")
 
-        self.assertEqual(
-            run.call_args.args[0],
+        run.assert_called_once_with(
             ["git", "diff", "--numstat", "base..head"],
+            check=True,
+            capture_output=True,
+            text=True,
         )
-        self.assertEqual(result["files"], 4)
-        self.assertEqual(result["production_additions"], 10)
-        self.assertEqual(result["test_additions"], 8)
         self.assertEqual(
-            result["suspicious_files"],
-            [".github/workflows/ci.yml", ".ci/mutation.sh"],
+            result,
+            {
+                "available": True,
+                "files": 8,
+                "additions": 34,
+                "deletions": 6,
+                "production_additions": 14,
+                "test_additions": 10,
+                "suspicious_files": [
+                    ".github/workflows/ci.yml",
+                    ".ci/mutation.sh",
+                ],
+            },
         )
+
+    def test_diff_stats_without_complete_range_never_runs_git(self):
+        expected = {
+            "available": False,
+            "files": 0,
+            "additions": 0,
+            "deletions": 0,
+            "production_additions": 0,
+            "test_additions": 0,
+            "suspicious_files": [],
+        }
+
+        with patch.object(quality_report.subprocess, "run") as run:
+            for base, head in (
+                (None, "head"),
+                ("base", None),
+                ("", "head"),
+                ("base", ""),
+            ):
+                with self.subTest(base=base, head=head):
+                    self.assertEqual(
+                        quality_report.diff_stats(base, head),
+                        expected,
+                    )
+
+        run.assert_not_called()
 
 
     def test_gremlins_report_is_parsed_from_engine_schema(self):
