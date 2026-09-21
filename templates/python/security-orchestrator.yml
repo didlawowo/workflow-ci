@@ -3,7 +3,7 @@
 # =============================================================================
 # Runs on: daily cron (02:00 UTC) + manual dispatch
 #
-# To adapt: Change RUNNER, PYTHON_VERSION, BANDIT_SKIP_RULES
+# To adapt: Set repository variable RUNNER if needed; change PYTHON_VERSION, PYTHON_WORKING_DIR, BANDIT_SKIP_RULES
 # =============================================================================
 
 name: "Security - Comprehensive Scan"
@@ -34,8 +34,8 @@ permissions:
 # PROJECT CONFIGURATION
 # ─────────────────────────────────────────────────────────────────────────────
 env:
-  RUNNER: "ubuntu-latest"
   PYTHON_VERSION: "3.12"
+  PYTHON_WORKING_DIR: "."
   BANDIT_SKIP_RULES: "B104,B311"
 
 jobs:
@@ -97,6 +97,7 @@ jobs:
         uses: didlawowo/workflow-ci/.github/actions/python-quality-security@main
         with:
           python-version: ${{ env.PYTHON_VERSION }}
+          working-directory: ${{ env.PYTHON_WORKING_DIR }}
           bandit-skip-rules: ${{ env.BANDIT_SKIP_RULES }}
 
   # ═══════════════════════════════════════════════════════════════════════════
