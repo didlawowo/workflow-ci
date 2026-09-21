@@ -166,7 +166,7 @@ Pour chaîner un downstream (Docker build, ArgoCD bump, …) :
 ```yaml
 jobs:
   release:
-    uses: didlawowo/workflow-ci/.github/workflows/release.yml@main
+    uses: didlawowo/workflow-ci/.github/workflows/release.yml@v1.7.0
     permissions:
       contents: write
   deploy:
