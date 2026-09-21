@@ -38,6 +38,18 @@ def test_quality_evidence_requires_explicit_runner_and_pinned_actions():
     assert "@main" not in content
 
 
+def test_quality_evidence_enforces_python_ruff_lint():
+    content = WORKFLOW.read_text()
+    execution = content.split("  independent-verification:", 1)[1].split(
+        "  publish-evidence:", 1
+    )[0]
+
+    assert "- name: Verify Python lint" in execution
+    assert "id: python-lint" in execution
+    assert "uv run --with ruff ruff check . --output-format=github" in execution
+    assert 'test "${{ steps.python-lint.outcome }}" = "success"' in execution
+
+
 def test_quality_evidence_dependency_chain_has_no_workflow_ci_main_refs():
     root = Path(__file__).resolve().parents[1]
     paths = [
