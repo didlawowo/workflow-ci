@@ -46,7 +46,7 @@ jobs:
           fetch-depth: 0
 
       - name: AI Review
-        uses: didlawowo/workflow-ci/.github/actions/llm-pr-review@v1.7.0
+        uses: didlawowo/workflow-ci/.github/actions/llm-pr-review@3147f59553546407f94163368f21e2d4d9f8775e
         with:
           llm-base-url: ${{ env.LLM_BASE_URL }}
           llm-model: ${{ env.LLM_MODEL }}
