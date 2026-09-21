@@ -145,7 +145,7 @@ runs:
         if [ -n "$CUSTOM_CMD" ]; then
           eval "$CUSTOM_CMD"
         else
-          uv run pytest ${{ inputs.test-paths }} \
+          uv run --with pytest --with pytest-cov pytest ${{ inputs.test-paths }} \
             -v --tb=short \
             --cov=src --cov-report=xml:${{ inputs.coverage-report-path }} \
             --cov-report=term-missing \
