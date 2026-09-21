@@ -348,6 +348,16 @@ def test_quality_evidence_separates_read_only_execution_from_privileged_publicat
     assert 'coverage-glob: "${{ runner.temp }}/quality-evidence/no-coverage.xml"' in publisher
 
 
+def test_consumer_selftest_grants_reusable_publisher_pr_write_permission():
+    root = Path(__file__).resolve().parents[1]
+    content = (
+        root / ".github" / "workflows" / "consumer-integration-selftest.yml"
+    ).read_text()
+
+    assert content.count("pull-requests: write") == 3
+    assert "pull-requests: read" not in content
+
+
 def test_executable_actions_never_use_mutable_main_refs():
     root = Path(__file__).resolve().parents[1]
     scan_roots = (
