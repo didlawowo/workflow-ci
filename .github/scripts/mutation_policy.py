@@ -193,7 +193,11 @@ def _is_mutation_policy_run(run: dict, pr_number: int, head_sha: str) -> bool:
 
     path = str(run.get("path") or "")
     name = str(run.get("name") or "")
-    if path and not path.endswith(".github/workflows/mutation-policy.yml"):
+    valid_workflow_paths = (
+        ".github/workflows/mutation-policy.yml",
+        ".forgejo/workflows/mutation-policy.yml",
+    )
+    if path and not path.endswith(valid_workflow_paths):
         return False
     if not path and name and name != "Mutation testing policy":
         return False
