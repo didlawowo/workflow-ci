@@ -83,7 +83,7 @@ jobs:
 
       - name: Run tests
         id: test
-        uses: didlawowo/workflow-ci/.github/actions/run-python-tests@v1.7.0
+        uses: didlawowo/workflow-ci/.github/actions/run-python-tests@3147f59553546407f94163368f21e2d4d9f8775e
         with:
           python-version: ${{ env.PYTHON_VERSION }}
           working-directory: ${{ env.PYTHON_WORKING_DIR }}
@@ -111,7 +111,7 @@ jobs:
 
       - name: Run quality & security checks
         id: checks
-        uses: didlawowo/workflow-ci/.github/actions/python-quality-security@v1.7.0
+        uses: didlawowo/workflow-ci/.github/actions/python-quality-security@3147f59553546407f94163368f21e2d4d9f8775e
         with:
           python-version: ${{ env.PYTHON_VERSION }}
           working-directory: ${{ env.PYTHON_WORKING_DIR }}
@@ -158,7 +158,7 @@ jobs:
           echo "branch-tag=${BRANCH}-${SHA}" >> "$GITHUB_OUTPUT"
 
       - name: Build and push
-        uses: didlawowo/workflow-ci/.github/actions/docker-build-push@v1.7.0
+        uses: didlawowo/workflow-ci/.github/actions/docker-build-push@3147f59553546407f94163368f21e2d4d9f8775e
         with:
           image-name: ${{ env.IMAGE_NAME }}
           image-tag: ${{ steps.tag.outputs.branch-tag }}
