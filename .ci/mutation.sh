@@ -111,9 +111,7 @@ fi
 
 rm -rf mutants
 if [[ "${#MUTATION_TARGETS[@]}" -gt 0 ]]; then
-  for target in "${MUTATION_TARGETS[@]}"; do
-    mutmut run "$target"
-  done
+  mutmut run "${MUTATION_TARGETS[@]}"
 else
   mutmut run
 fi
