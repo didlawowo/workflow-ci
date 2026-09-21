@@ -10,6 +10,10 @@ inputs:
     description: "Install dev dependencies"
     required: false
     default: "true"
+  working-directory:
+    description: "Project directory containing pyproject.toml"
+    required: false
+    default: "."
 
 outputs:
   python-version:
@@ -40,6 +44,7 @@ runs:
 
     - name: Install dependencies
       shell: bash
+      working-directory: ${{ inputs.working-directory }}
       run: |
         if [ "${{ inputs.install-dev }}" = "true" ]; then
           uv sync --extra dev

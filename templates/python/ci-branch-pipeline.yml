@@ -5,8 +5,8 @@
 # Uses composite actions from: didlawowo/workflow-ci
 #
 # To adapt for your project:
-# 1. Change RUNNER to your runner (or ubuntu-latest)
-# 2. Adjust PYTHON_VERSION, COVERAGE_THRESHOLD
+# 1. Set repository variable `RUNNER` for a self-hosted runner (optional; defaults to ubuntu-latest)
+# 2. Adjust PYTHON_VERSION, PYTHON_WORKING_DIR, COVERAGE_THRESHOLD
 # 3. Adjust IMAGE_NAME to your Docker Hub image
 # 4. Set secrets: DOCKER_USERNAME, DOCKER_PASSWORD, CODECOV_TOKEN
 #
@@ -55,8 +55,8 @@ concurrency:
 # PROJECT CONFIGURATION - Edit these values for your project
 # ─────────────────────────────────────────────────────────────────────────────
 env:
-  RUNNER: "ubuntu-latest"
   PYTHON_VERSION: "3.12"
+  PYTHON_WORKING_DIR: "."  # project directory containing pyproject.toml
   COVERAGE_THRESHOLD: "30"
   IMAGE_NAME: ${{ secrets.DOCKER_USERNAME }}/my-app  # <-- change this
   BANDIT_SKIP_RULES: "B104,B311"
@@ -86,6 +86,7 @@ jobs:
         uses: didlawowo/workflow-ci/.github/actions/run-python-tests@main
         with:
           python-version: ${{ env.PYTHON_VERSION }}
+          working-directory: ${{ env.PYTHON_WORKING_DIR }}
           coverage-threshold: ${{ env.COVERAGE_THRESHOLD }}
           fail-on-coverage: "true"
           codecov-token: ${{ secrets.CODECOV_TOKEN }}
@@ -113,6 +114,7 @@ jobs:
         uses: didlawowo/workflow-ci/.github/actions/python-quality-security@main
         with:
           python-version: ${{ env.PYTHON_VERSION }}
+          working-directory: ${{ env.PYTHON_WORKING_DIR }}
           bandit-skip-rules: ${{ env.BANDIT_SKIP_RULES }}
 
       - name: Enforce quality and security gate

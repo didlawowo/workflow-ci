@@ -26,6 +26,10 @@ inputs:
     description: "Paths for Bandit to scan"
     required: false
     default: "src/"
+  working-directory:
+    description: "Project directory containing pyproject.toml"
+    required: false
+    default: "."
 
 outputs:
   quality-passed:
@@ -46,11 +50,12 @@ runs:
       with:
         python-version: ${{ inputs.python-version }}
         install-dev: "true"
-        cache-key-suffix: "-quality"
+        working-directory: ${{ inputs.working-directory }}
 
     - name: Run Ruff linting
       id: ruff-lint
       shell: bash
+      working-directory: ${{ inputs.working-directory }}
       run: |
         if uv run ruff check . --output-format=github; then
           echo "status=passed" >> "$GITHUB_OUTPUT"
@@ -62,6 +67,7 @@ runs:
     - name: Check code formatting
       id: ruff-format
       shell: bash
+      working-directory: ${{ inputs.working-directory }}
       run: |
         if uv run ruff format --check .; then
           echo "status=passed" >> "$GITHUB_OUTPUT"
@@ -74,6 +80,7 @@ runs:
       id: mypy
       if: inputs.run-mypy == 'true'
       shell: bash
+      working-directory: ${{ inputs.working-directory }}
       run: |
         if uv run mypy . --junit-xml=mypy-report.xml; then
           echo "status=passed" >> "$GITHUB_OUTPUT"
@@ -86,6 +93,7 @@ runs:
       id: bandit
       if: inputs.run-bandit == 'true'
       shell: bash
+      working-directory: ${{ inputs.working-directory }}
       run: |
         set +e
         uv run bandit -r ${{ inputs.bandit-paths }} -f json -o bandit-report.json --skip ${{ inputs.bandit-skip-rules }}
@@ -100,7 +108,7 @@ runs:
       if: inputs.run-trufflehog == 'true'
       uses: trufflesecurity/trufflehog@main
       with:
-        path: ./
+        path: ${{ inputs.working-directory }}
         base: ${{ github.event.before || github.sha }}
         head: ${{ github.sha }}
         extra_args: --only-verified
@@ -109,6 +117,7 @@ runs:
     - name: Safety dependency check
       id: safety
       shell: bash
+      working-directory: ${{ inputs.working-directory }}
       run: |
         if uv run safety check --json --output safety-report.json; then
           echo "status=passed" >> "$GITHUB_OUTPUT"
@@ -120,6 +129,7 @@ runs:
     - name: Analyze results
       id: summary
       shell: bash
+      working-directory: ${{ inputs.working-directory }}
       run: |
         SECURITY_ISSUES=0
         QUALITY_PASSED=true
@@ -162,7 +172,7 @@ runs:
       with:
         name: python-quality-reports
         path: |
-          mypy-report.xml
-          bandit-report.json
-          safety-report.json
+          ${{ inputs.working-directory }}/mypy-report.xml
+          ${{ inputs.working-directory }}/bandit-report.json
+          ${{ inputs.working-directory }}/safety-report.json
         retention-days: 7

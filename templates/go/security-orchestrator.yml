@@ -1,7 +1,7 @@
 # =============================================================================
 # Security - Comprehensive Scan (Go)
 # =============================================================================
-# To adapt: Change RUNNER, GO_VERSION
+# To adapt: Set repository variable RUNNER if needed; change GO_VERSION
 # =============================================================================
 
 name: "Security - Comprehensive Scan"
@@ -29,7 +29,6 @@ permissions:
   issues: write
 
 env:
-  RUNNER: "ubuntu-latest"
   GO_VERSION: "1.24"
   GO_WORKING_DIR: "."
 
