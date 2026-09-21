@@ -74,32 +74,44 @@ outputs:
 runs:
   using: "composite"
   steps:
-    - name: Setup Python environment
-      if: inputs.use-docker-compose != 'true' && inputs.working-directory == '.'
-      uses: didlawowo/workflow-ci/.github/actions/setup-python-env@v1.7.0
-      with:
-        python-version: ${{ inputs.python-version }}
-        install-dev: "true"
-
-    # v1.7.0 setup-python-env does not understand working-directory. Keep the
-    # immutable dependency for root projects, but bootstrap nested projects
-    # locally so a pinned run-python-tests action can honor its own contract.
-    - name: Install uv for nested project
-      if: inputs.use-docker-compose != 'true' && inputs.working-directory != '.'
+    - name: Install uv
+      if: inputs.use-docker-compose != 'true'
       uses: astral-sh/setup-uv@v3
       with:
         version: "latest"
-        # Nested consumers are not required to commit uv.lock. setup-uv's
-        # dependency-aware cache fails when no lockfile matches.
         enable-cache: false
 
-    - name: Setup nested Python environment
-      if: inputs.use-docker-compose != 'true' && inputs.working-directory != '.'
+    - name: Setup Python environment
+      if: inputs.use-docker-compose != 'true'
       shell: bash
       working-directory: ${{ inputs.working-directory }}
       run: |
-        uv python install ${{ inputs.python-version }}
-        uv sync --extra dev
+        set -euo pipefail
+        uv python install "${{ inputs.python-version }}"
+
+        DEV_MODES="$(
+          uv run --no-project --python "${{ inputs.python-version }}" python - <<'PY'
+        import pathlib
+        import tomllib
+
+        data = tomllib.loads(pathlib.Path("pyproject.toml").read_text(encoding="utf-8"))
+        modes = []
+        if "dev" in data.get("project", {}).get("optional-dependencies", {}):
+            modes.append("extra")
+        if "dev" in data.get("dependency-groups", {}):
+            modes.append("group")
+        print(" ".join(modes))
+        PY
+        )"
+
+        SYNC_ARGS=()
+        case " ${DEV_MODES} " in
+          *" extra "*) SYNC_ARGS+=(--extra dev) ;;
+        esac
+        case " ${DEV_MODES} " in
+          *" group "*) SYNC_ARGS+=(--group dev) ;;
+        esac
+        uv sync "${SYNC_ARGS[@]}"
 
     # --- Docker Compose mode ---
     - name: Run tests with Docker Compose
