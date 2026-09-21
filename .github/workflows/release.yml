@@ -149,6 +149,12 @@ jobs:
           ref: ${{ inputs.workflow-ci-ref }}
           path: .workflow-ci
 
+      - name: Exclude workflow-ci checkout from release commits
+        shell: bash
+        run: |
+          set -euo pipefail
+          printf '%s\n' '.workflow-ci/' >> .git/info/exclude
+
       - name: Configure git identity
         run: |
           git config user.name "github-actions[bot]"
@@ -243,6 +249,9 @@ jobs:
         run: |
           set -euo pipefail
           git add -A
+          # Never let the helper checkout become part of the caller repository.
+          # This is a second guard in addition to .git/info/exclude.
+          git reset -- .workflow-ci 2>/dev/null || true
           if git diff --cached --quiet; then
             echo "::warning::no changes staged (CHANGELOG/version-files unchanged) — releasing current HEAD"
           else
