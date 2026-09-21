@@ -95,3 +95,5 @@ def test_quality_reporter_does_not_depend_on_consumer_python_tooling():
     assert "Install uv for quality reporter" in content
     assert "uv python install 3.12" in content
     assert "uv run --no-project --python 3.12 python" in content
+    assert "include-hidden-files: true" in content
+    assert '--output-json "$GITHUB_WORKSPACE/.quality/quality-report.json"' in content
