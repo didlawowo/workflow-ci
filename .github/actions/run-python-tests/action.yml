@@ -89,9 +89,9 @@ runs:
       uses: astral-sh/setup-uv@v3
       with:
         version: "latest"
-        enable-cache: ${{ env.UV_CACHE_DIR == '' }}
-        cache-local-path: ${{ env.UV_CACHE_DIR }}
-        prune-cache: ${{ env.UV_CACHE_DIR == '' }}
+        # Nested consumers are not required to commit uv.lock. setup-uv's
+        # dependency-aware cache fails when no lockfile matches.
+        enable-cache: false
 
     - name: Setup nested Python environment
       if: inputs.use-docker-compose != 'true' && inputs.working-directory != '.'
