@@ -182,3 +182,30 @@ def test_issue_59_gitlink_parser_preserves_untrusted_paths_and_hidden_evidence()
     assert content.count("ls-files --stage -z") >= 2
     assert content.count('grep -Fxq -- "$gitlink"') >= 2
     assert content.count("include-hidden-files: true") >= 2
+
+
+def test_issue_59_mutation_policy_never_uses_system_python():
+    root = Path(__file__).resolve().parents[1]
+    content = (
+        root / ".github" / "workflows" / "mutation-policy.yml"
+    ).read_text()
+
+    assert "run: python " not in content
+    assert "\n          python -" not in content
+    assert "python3 -m venv" not in content
+    assert content.count(
+        "uv run --no-project --python 3.12 python"
+    ) >= 4
+
+
+def test_issue_59_mutation_policy_uses_exact_tree_range_and_isolated_home():
+    root = Path(__file__).resolve().parents[1]
+    content = (
+        root / ".github" / "workflows" / "mutation-policy.yml"
+    ).read_text()
+
+    assert 'f"{base}..{head}"' in content
+    assert 'f"{base}...{head}"' not in content
+    assert 'HOME="$ISOLATED_HOME"' in content
+    assert 'UV_CACHE_DIR="$ISOLATED_UV_CACHE"' in content
+    assert 'HOME="$HOME"' not in content
