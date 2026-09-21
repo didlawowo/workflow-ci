@@ -5,7 +5,7 @@
 # Uses: Release Please for versioning, composite actions for build/test/security
 #
 # To adapt for your project:
-# 1. Change RUNNER, IMAGE_NAME, PYTHON_VERSION
+# 1. Set repository variable RUNNER if needed; change IMAGE_NAME, PYTHON_VERSION, PYTHON_WORKING_DIR
 # 2. Set release-type (python, node, go, simple, etc.)
 # 3. Set secrets: DOCKER_USERNAME, DOCKER_PASSWORD, RELEASE_PLEASE_TOKEN
 # =============================================================================
@@ -27,9 +27,9 @@ permissions:
 # PROJECT CONFIGURATION
 # ─────────────────────────────────────────────────────────────────────────────
 env:
-  RUNNER: "ubuntu-latest"
   IMAGE_NAME: ${{ secrets.DOCKER_USERNAME }}/my-app  # <-- change this
   PYTHON_VERSION: "3.12"
+  PYTHON_WORKING_DIR: "."
   RELEASE_TYPE: "python"  # python, node, go, simple
 
 jobs:
@@ -79,11 +79,13 @@ jobs:
         uses: didlawowo/workflow-ci/.github/actions/run-python-tests@main
         with:
           python-version: ${{ env.PYTHON_VERSION }}
+          working-directory: ${{ env.PYTHON_WORKING_DIR }}
 
       - name: Run quality checks
         uses: didlawowo/workflow-ci/.github/actions/python-quality-security@main
         with:
           python-version: ${{ env.PYTHON_VERSION }}
+          working-directory: ${{ env.PYTHON_WORKING_DIR }}
 
   # ═══════════════════════════════════════════════════════════════════════════
   # 🐳 PRODUCTION BUILD
