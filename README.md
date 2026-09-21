@@ -33,7 +33,7 @@ Reusable GitHub Actions composite actions and workflow templates for CI/CD pipel
 | ----------------------- | ---------------------------------- |
 | `setup-node-env`        | Node.js + npm/pnpm/yarn cache      |
 | `run-node-tests`        | test script + Playwright + Codecov |
-| `node-quality-security` | eslint, npm audit                  |
+| `node-quality-security` | eslint + npm/pnpm/yarn audit       |
 
 ## Usage
 
@@ -64,7 +64,15 @@ templates/
 └── node/            # ci-branch-pipeline.yml
 ```
 
-Each template has a `PROJECT CONFIGURATION` section at the top — edit `RUNNER`, `IMAGE_NAME`, version, etc.
+Each template has a `PROJECT CONFIGURATION` section at the top for project-specific values such as `IMAGE_NAME`, language version and working directory.
+
+Runner selection has a single source of truth: the GitHub repository variable `vars.RUNNER`. If it is unset, templates fall back to `ubuntu-latest`; do not add a separate `env.RUNNER`.
+
+### Nested projects and test evidence
+
+Python, Go and Node actions accept `working-directory` so monorepos and projects below the repository root are supported consistently. Python custom test commands have an explicit evidence contract: a successful command must create the configured `junit-report-path` (default `coverage-reports/pytest-report.xml`, relative to `working-directory`). `coverage-report-path` follows the same rule.
+
+Node dependency audits use the selected `package-manager`: `npm audit`, `pnpm audit`, Yarn Classic `yarn audit`, or Yarn Berry `yarn npm audit`.
 
 ### Environnements preview (label-gated)
 
