@@ -139,9 +139,14 @@ jobs:
             exit 1
           fi
 
-          mapfile -t GITLINKS < <(
-            git -C "$DEST" ls-files --stage | awk '$1 == "160000" {print $4}'
-          )
+          GITLINKS=()
+          while IFS= read -r -d '' entry; do
+            metadata="${entry%%$'\t'*}"
+            gitlink_path="${entry#*$'\t'}"
+            if [[ "$metadata" == 160000\ * ]]; then
+              GITLINKS+=("$gitlink_path")
+            fi
+          done < <(git -C "$DEST" ls-files --stage -z)
           if [[ "${#GITLINKS[@]}" -gt 0 ]]; then
             DECLARED_PATHS=""
             if [[ -f "$DEST/.gitmodules" ]]; then
@@ -151,7 +156,7 @@ jobs:
               )"
             fi
             for gitlink in "${GITLINKS[@]}"; do
-              if ! grep -Fxq "$gitlink" <<<"$DECLARED_PATHS"; then
+              if ! grep -Fxq -- "$gitlink" <<<"$DECLARED_PATHS"; then
                 echo "::warning::Mutation checkout diagnostic: gitlink '$gitlink' has no matching .gitmodules entry; continuing because mutation checkout never traverses submodules."
               fi
             done
@@ -322,6 +327,7 @@ jobs:
             pr/mutants/quality_report.py
           retention-days: 7
           if-no-files-found: error
+          include-hidden-files: true
 
       - name: Mutation testing not required
         if: steps.policy.outputs.required != 'true'
@@ -445,9 +451,14 @@ jobs:
             exit 1
           fi
 
-          mapfile -t GITLINKS < <(
-            git -C "$DEST" ls-files --stage | awk '$1 == "160000" {print $4}'
-          )
+          GITLINKS=()
+          while IFS= read -r -d '' entry; do
+            metadata="${entry%%$'\t'*}"
+            gitlink_path="${entry#*$'\t'}"
+            if [[ "$metadata" == 160000\ * ]]; then
+              GITLINKS+=("$gitlink_path")
+            fi
+          done < <(git -C "$DEST" ls-files --stage -z)
           if [[ "${#GITLINKS[@]}" -gt 0 ]]; then
             DECLARED_PATHS=""
             if [[ -f "$DEST/.gitmodules" ]]; then
@@ -457,7 +468,7 @@ jobs:
               )"
             fi
             for gitlink in "${GITLINKS[@]}"; do
-              if ! grep -Fxq "$gitlink" <<<"$DECLARED_PATHS"; then
+              if ! grep -Fxq -- "$gitlink" <<<"$DECLARED_PATHS"; then
                 echo "::warning::Mutation checkout diagnostic: gitlink '$gitlink' has no matching .gitmodules entry; continuing because mutation checkout never traverses submodules."
               fi
             done
@@ -827,6 +838,7 @@ jobs:
           path: ${{ steps.validate.outputs.path }}
           retention-days: 14
           if-no-files-found: error
+          include-hidden-files: true
 
       - name: Confirm mutation testing is not required
         if: steps.policy.outputs.required != 'true'
