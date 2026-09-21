@@ -44,7 +44,7 @@ on:
         description: Ref of workflow-ci to use for the composite action and defaults.
         required: false
         type: string
-        default: "main"
+        default: "v1.7.0"
       runs-on:
         description: |
           Runner label for the release job. Defaults to a GitHub-hosted runner.
@@ -122,8 +122,8 @@ jobs:
       cancel-in-progress: false
 
     outputs:
-      released: ${{ steps.bump.outputs.released }}
-      version: ${{ steps.bump.outputs.version }}
+      released: ${{ steps.result.outputs.released }}
+      version: ${{ steps.result.outputs.version }}
     steps:
       - name: Checkout calling repo
         uses: actions/checkout@v4
@@ -154,23 +154,40 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
+      - name: Detect recoverable release state
+        id: recovery
+        shell: bash
+        run: |
+          set -euo pipefail
+          subject="$(git log -1 --pretty=%s)"
+          if [[ "$subject" =~ ^chore\(release\):[[:space:]]+(.+)[[:space:]]+\[skip[[:space:]]ci\]$ ]]; then
+            version="${BASH_REMATCH[1]}"
+            echo "pending=true" >> "$GITHUB_OUTPUT"
+            echo "version=$version" >> "$GITHUB_OUTPUT"
+            echo "::notice::Recoverable release commit detected at HEAD: $version"
+          else
+            echo "pending=false" >> "$GITHUB_OUTPUT"
+            echo "version=" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Compute bump + write CHANGELOG
         id: bump
+        if: steps.recovery.outputs.pending != 'true'
         uses: ./.workflow-ci/.github/actions/git-cliff-bump
         with:
           config: ${{ inputs.cliff-config }}
           tag-prefix: ${{ inputs.tag-prefix }}
 
       - name: Nothing to release
-        if: steps.bump.outputs.released != 'true'
+        if: steps.recovery.outputs.pending != 'true' && steps.bump.outputs.released != 'true'
         run: |
           echo "No conventional commits since last tag → no release. This is normal."
 
       - name: Patch version files
-        if: steps.bump.outputs.released == 'true' && inputs.version-files != ''
+        if: steps.recovery.outputs.pending != 'true' && steps.bump.outputs.released == 'true' && inputs.version-files != ''
         env:
           VERSION_FILES: ${{ inputs.version-files }}
-          NEW_VERSION: ${{ steps.bump.outputs.version }}
+          NEW_VERSION: ${{ steps.result.outputs.version }}
           TAG_PREFIX: ${{ inputs.tag-prefix }}
         run: |
           set -euo pipefail
@@ -206,57 +223,109 @@ jobs:
       # embarque ce qu'elle produit dans le commit de release plutôt que de laisser
       # une dérive derrière.
       - name: Post-bump command
-        if: steps.bump.outputs.released == 'true' && inputs.post-bump-command != ''
+        if: steps.recovery.outputs.pending != 'true' && steps.bump.outputs.released == 'true' && inputs.post-bump-command != ''
         env:
           # Passage par l'environnement et non par interpolation directe dans `run:` :
           # une expression ${{ }} injectée dans le corps du script serait exécutée par
           # le shell avant même d'être une commande.
           POST_BUMP_COMMAND: ${{ inputs.post-bump-command }}
-          NEW_VERSION: ${{ steps.bump.outputs.version }}
+          NEW_VERSION: ${{ steps.result.outputs.version }}
         run: |
           set -euo pipefail
           echo "Running post-bump command:"
           echo "$POST_BUMP_COMMAND"
           bash -euo pipefail -c "$POST_BUMP_COMMAND"
 
-      - name: Commit, tag and push
-        if: steps.bump.outputs.released == 'true' && inputs.dry-run != true
+      - name: Prepare release commit
+        if: steps.recovery.outputs.pending != 'true' && steps.bump.outputs.released == 'true' && inputs.dry-run != true
         env:
-          NEW_VERSION: ${{ steps.bump.outputs.version }}
+          NEW_VERSION: ${{ steps.result.outputs.version }}
         run: |
           set -euo pipefail
           git add -A
           if git diff --cached --quiet; then
-            echo "::warning::no changes staged (CHANGELOG/version-files unchanged) — tagging anyway"
+            echo "::warning::no changes staged (CHANGELOG/version-files unchanged) — releasing current HEAD"
           else
             git commit -m "chore(release): ${NEW_VERSION} [skip ci]"
           fi
-          git tag -a "${NEW_VERSION}" -m "Release ${NEW_VERSION}"
 
-          # Filet de sécurité : `concurrency` sérialise les runs déclenchés par
-          # un push, mais rien n'empêche un commit poussé à la main d'atterrir
-          # entre le checkout et ici. Le message par défaut de git ne dit alors
-          # pas ce qui s'est passé, et le run rouge se lit comme une régression
-          # de la PR.
-          if ! git push origin "HEAD:${GITHUB_REF_NAME}"; then
-            echo "::error::push refusé — ${GITHUB_REF_NAME} a bougé depuis le checkout." \
-                 "Le tag ${NEW_VERSION} n'a PAS été poussé et aucune release n'a été créée." \
-                 "Relancer ce workflow : il repartira de la pointe courante."
-            exit 1
-          fi
-          git push origin "${NEW_VERSION}"
-
-      - name: Create GitHub Release
-        if: steps.bump.outputs.released == 'true' && inputs.dry-run != true
+      - name: Resolve release result
+        id: result
+        if: always()
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          NEW_VERSION: ${{ steps.bump.outputs.version }}
+          RECOVERY_PENDING: ${{ steps.recovery.outputs.pending }}
+          RECOVERY_VERSION: ${{ steps.recovery.outputs.version }}
+          BUMP_RELEASED: ${{ steps.bump.outputs.released }}
+          BUMP_VERSION: ${{ steps.bump.outputs.version }}
         run: |
           set -euo pipefail
-          gh release create "${NEW_VERSION}" \
-            --title "${NEW_VERSION}" \
-            --notes-file /tmp/release-notes.md \
-            --verify-tag
+          if [[ "$RECOVERY_PENDING" == "true" ]]; then
+            echo "released=true" >> "$GITHUB_OUTPUT"
+            echo "version=$RECOVERY_VERSION" >> "$GITHUB_OUTPUT"
+          elif [[ "$BUMP_RELEASED" == "true" ]]; then
+            echo "released=true" >> "$GITHUB_OUTPUT"
+            echo "version=$BUMP_VERSION" >> "$GITHUB_OUTPUT"
+          else
+            echo "released=false" >> "$GITHUB_OUTPUT"
+            echo "version=" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Publish or recover release
+        id: publish
+        if: steps.result.outputs.released == 'true' && inputs.dry-run != true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NEW_VERSION: ${{ steps.result.outputs.version }}
+          RECOVERY_PENDING: ${{ steps.recovery.outputs.pending }}
+        run: |
+          set -euo pipefail
+          dispatch=false
+
+          if [[ "$RECOVERY_PENDING" != "true" ]]; then
+            if ! git push origin "HEAD:${GITHUB_REF_NAME}"; then
+              echo "::error::push refused — ${GITHUB_REF_NAME} moved since checkout; no tag/release mutation was attempted."
+              exit 1
+            fi
+          fi
+
+          head_sha="$(git rev-parse HEAD)"
+          local_tag_sha="$(git rev-list -n 1 "$NEW_VERSION" 2>/dev/null || true)"
+          if [[ -n "$local_tag_sha" && "$local_tag_sha" != "$head_sha" ]]; then
+            echo "::error::local tag $NEW_VERSION points to $local_tag_sha, expected $head_sha"
+            exit 1
+          fi
+          if [[ -z "$local_tag_sha" ]]; then
+            git tag -a "$NEW_VERSION" -m "Release $NEW_VERSION"
+          fi
+
+          remote_refs="$(git ls-remote origin "refs/tags/$NEW_VERSION" "refs/tags/$NEW_VERSION^{}" || true)"
+          if [[ -z "$remote_refs" ]]; then
+            git push origin "$NEW_VERSION"
+            dispatch=true
+          else
+            remote_commit="$(printf '%s\n' "$remote_refs" | awk '/\^\{\}$/ {print $1; found=1} END {if (!found) {}}')"
+            if [[ -z "$remote_commit" ]]; then
+              remote_commit="$(printf '%s\n' "$remote_refs" | awk 'NR==1 {print $1}')"
+            fi
+            if [[ "$remote_commit" != "$head_sha" ]]; then
+              echo "::error::remote tag $NEW_VERSION points to $remote_commit, expected $head_sha"
+              exit 1
+            fi
+            echo "::notice::remote tag $NEW_VERSION already exists at the expected commit"
+          fi
+
+          if gh release view "$NEW_VERSION" >/dev/null 2>&1; then
+            echo "::notice::GitHub Release $NEW_VERSION already exists"
+          else
+            if [[ -s /tmp/release-notes.md ]]; then
+              gh release create "$NEW_VERSION" --title "$NEW_VERSION" --notes-file /tmp/release-notes.md --verify-tag
+            else
+              gh release create "$NEW_VERSION" --title "$NEW_VERSION" --generate-notes --verify-tag
+            fi
+            dispatch=true
+          fi
+
+          echo "dispatch=$dispatch" >> "$GITHUB_OUTPUT"
 
       # GitHub anti-loop: a tag/commit pushed by GITHUB_TOKEN does not trigger
       # downstream workflows (no `push: tags: v*` event fires). To make the CD
@@ -265,12 +334,11 @@ jobs:
       # must declare `workflow_dispatch:` with `inputs.tag` (string).
       - name: Trigger CD workflow on the new tag
         if: |
-          steps.bump.outputs.released == 'true'
-          && inputs.dry-run != true
+          steps.publish.outputs.dispatch == 'true'
           && inputs.trigger-cd-workflow != ''
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          NEW_VERSION: ${{ steps.bump.outputs.version }}
+          NEW_VERSION: ${{ steps.result.outputs.version }}
           CD_WORKFLOW: ${{ inputs.trigger-cd-workflow }}
         run: |
           set -euo pipefail
@@ -281,9 +349,9 @@ jobs:
             -f "tag=${NEW_VERSION}"
 
       - name: Dry-run summary
-        if: steps.bump.outputs.released == 'true' && inputs.dry-run == true
+        if: steps.recovery.outputs.pending != 'true' && steps.bump.outputs.released == 'true' && inputs.dry-run == true
         env:
-          NEW_VERSION: ${{ steps.bump.outputs.version }}
+          NEW_VERSION: ${{ steps.result.outputs.version }}
         run: |
           echo "::notice::DRY RUN — would have released ${NEW_VERSION}"
           echo "----- CHANGELOG.md (first 80 lines) -----"
