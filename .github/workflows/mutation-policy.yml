@@ -284,6 +284,7 @@ jobs:
             pr/.quality/
           retention-days: 7
           if-no-files-found: error
+          include-hidden-files: true
 
       - name: Mutation testing not required
         if: steps.policy.outputs.required != 'true'
@@ -697,6 +698,7 @@ jobs:
           path: ${{ steps.validate.outputs.path }}
           retention-days: 14
           if-no-files-found: error
+          include-hidden-files: true
 
       - name: Confirm mutation testing is not required
         if: steps.policy.outputs.required != 'true'
