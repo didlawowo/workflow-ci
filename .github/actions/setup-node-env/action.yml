@@ -14,6 +14,10 @@ inputs:
     description: "Additional install arguments"
     required: false
     default: ""
+  working-directory:
+    description: "Project directory containing package.json and the lockfile"
+    required: false
+    default: "."
 
 outputs:
   node-version:
@@ -32,15 +36,29 @@ runs:
       with:
         version: latest
 
+    - name: Resolve dependency lockfile
+      id: lockfile
+      shell: bash
+      run: |
+        case "${{ inputs.package-manager }}" in
+          npm) LOCKFILE="package-lock.json" ;;
+          pnpm) LOCKFILE="pnpm-lock.yaml" ;;
+          yarn) LOCKFILE="yarn.lock" ;;
+          *) echo "::error::Unsupported package manager: ${{ inputs.package-manager }}"; exit 1 ;;
+        esac
+        echo "path=${{ inputs.working-directory }}/$LOCKFILE" >> "$GITHUB_OUTPUT"
+
     - name: Setup Node.js
       id: setup
       uses: actions/setup-node@v4
       with:
         node-version: ${{ inputs.node-version }}
         cache: ${{ inputs.package-manager }}
+        cache-dependency-path: ${{ steps.lockfile.outputs.path }}
 
     - name: Install dependencies
       shell: bash
+      working-directory: ${{ inputs.working-directory }}
       run: |
         case "${{ inputs.package-manager }}" in
           npm)  npm ci ${{ inputs.install-args }} ;;
