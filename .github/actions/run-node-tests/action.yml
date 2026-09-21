@@ -30,6 +30,10 @@ inputs:
     description: "Playwright browsers to install"
     required: false
     default: "chromium"
+  working-directory:
+    description: "Project directory containing package.json and the lockfile"
+    required: false
+    default: "."
 
 outputs:
   tests-passed:
@@ -52,20 +56,62 @@ runs:
   using: "composite"
   steps:
     - name: Setup Node.js environment
+      if: inputs.working-directory == '.'
       uses: didlawowo/workflow-ci/.github/actions/setup-node-env@v1.7.0
       with:
         node-version: ${{ inputs.node-version }}
         package-manager: ${{ inputs.package-manager }}
 
+    - name: Install pnpm for nested project
+      if: inputs.working-directory != '.' && inputs.package-manager == 'pnpm'
+      uses: pnpm/action-setup@v4
+      with:
+        version: latest
+
+    - name: Resolve nested lockfile
+      if: inputs.working-directory != '.'
+      id: nested-lockfile
+      shell: bash
+      run: |
+        case "${{ inputs.package-manager }}" in
+          npm) LOCKFILE="package-lock.json" ;;
+          pnpm) LOCKFILE="pnpm-lock.yaml" ;;
+          yarn) LOCKFILE="yarn.lock" ;;
+          *) echo "::error::Unsupported package manager: ${{ inputs.package-manager }}"; exit 1 ;;
+        esac
+        echo "path=${{ inputs.working-directory }}/$LOCKFILE" >> "$GITHUB_OUTPUT"
+
+    - name: Setup Node.js for nested project
+      if: inputs.working-directory != '.'
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ inputs.node-version }}
+        cache: ${{ inputs.package-manager }}
+        cache-dependency-path: ${{ steps.nested-lockfile.outputs.path }}
+
+    - name: Install nested project dependencies
+      if: inputs.working-directory != '.'
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: |
+        case "${{ inputs.package-manager }}" in
+          npm) npm ci ;;
+          pnpm) pnpm install --frozen-lockfile ;;
+          yarn) yarn install --frozen-lockfile ;;
+        esac
+
     - name: Install Playwright browsers
       if: inputs.playwright == 'true'
       shell: bash
+      working-directory: ${{ inputs.working-directory }}
       run: npx playwright install --with-deps ${{ inputs.playwright-browsers }}
 
     - name: Run tests
       id: tests
       shell: bash
+      working-directory: ${{ inputs.working-directory }}
       run: |
+        mkdir -p coverage-reports
         set +e
         ${{ inputs.package-manager }} run ${{ inputs.test-script }}
         STATUS=$?
@@ -80,6 +126,7 @@ runs:
     - name: Extract Node test evidence
       id: evidence
       shell: bash
+      working-directory: ${{ inputs.working-directory }}
       env:
         TEST_EXIT_CODE: ${{ steps.tests.outputs.exit-code }}
       run: |
@@ -121,6 +168,7 @@ runs:
     - name: Extract Node coverage evidence
       id: coverage
       shell: bash
+      working-directory: ${{ inputs.working-directory }}
       run: |
         set -euo pipefail
         if [[ -f coverage/coverage-summary.json ]]; then
@@ -144,14 +192,15 @@ runs:
       with:
         name: node-test-results
         path: |
-          coverage/
-          coverage-reports/
-          test-results/
-          playwright-report/
+          ${{ inputs.working-directory }}/coverage/
+          ${{ inputs.working-directory }}/coverage-reports/
+          ${{ inputs.working-directory }}/test-results/
+          ${{ inputs.working-directory }}/playwright-report/
         retention-days: 7
 
     - name: Fail on test failure
       shell: bash
+      working-directory: ${{ inputs.working-directory }}
       run: |
         STATUS="${{ steps.tests.outputs.exit-code }}"
         if [[ "${STATUS:-1}" -ne 0 ]] || [[ "${{ steps.tests.outputs.passed }}" != "true" ]]; then
