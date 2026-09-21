@@ -630,6 +630,20 @@ jobs:
                   elif isinstance(configured, list):
                       source_paths = [str(value) for value in configured]
 
+              trusted_setup_cfg = policy_root / "setup.cfg"
+              if not source_paths and trusted_setup_cfg.is_file():
+                  parser = configparser.ConfigParser()
+                  parser.read(trusted_setup_cfg, encoding="utf-8")
+                  if parser.has_option("mutmut", "source_paths"):
+                      source_paths = [
+                          item.strip()
+                          for item in re.split(
+                              r"[\\n,]",
+                              parser.get("mutmut", "source_paths"),
+                          )
+                          if item.strip()
+                      ]
+
               def in_trusted_source_path(relative):
                   if not source_paths:
                       return True
