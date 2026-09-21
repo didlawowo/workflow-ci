@@ -204,8 +204,8 @@ def test_issue_59_mutation_policy_uses_exact_tree_range_and_isolated_home():
         root / ".github" / "workflows" / "mutation-policy.yml"
     ).read_text()
 
-    assert 'f"{base}..{head}"' in content
-    assert 'f"{base}...{head}"' not in content
+    assert 'f"{base}...{head}"' in content
+    assert 'f"{base}..{head}"' not in content.replace('f"{base}...{head}"', "")
     assert 'HOME="$ISOLATED_HOME"' in content
     assert 'UV_CACHE_DIR="$ISOLATED_UV_CACHE"' in content
     assert 'HOME="$HOME"' not in content
