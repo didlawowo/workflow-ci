@@ -115,4 +115,26 @@ def test_scope_keeps_class_and_method_identity(tmp_path: Path):
 
     targets = mutation_scope.mutation_targets(repo, base, head)
 
-    assert targets == ("service*Calculator*compute*",)
+    assert targets == ("service.*Calculator*compute__mutmut_*",)
+
+
+def test_scope_patterns_are_module_anchored(tmp_path: Path):
+    repo = _init_repo(tmp_path)
+    source = repo / "src" / "service.py"
+    source.write_text(
+        "def compute(value):\n"
+        "    return value + 1\n",
+        encoding="utf-8",
+    )
+    base = _commit(repo, "initial")
+
+    source.write_text(
+        "def compute(value):\n"
+        "    return value + 2\n",
+        encoding="utf-8",
+    )
+    head = _commit(repo, "change function")
+
+    assert mutation_scope.mutation_targets(repo, base, head) == (
+        "service.*compute__mutmut_*",
+    )
