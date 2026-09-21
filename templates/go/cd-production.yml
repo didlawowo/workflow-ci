@@ -1,7 +1,7 @@
 # =============================================================================
 # CD - Production Release (Go)
 # =============================================================================
-# To adapt: Change RUNNER, IMAGE_NAME, GO_VERSION, RELEASE_TYPE
+# To adapt: Set repository variable RUNNER if needed; change IMAGE_NAME, GO_VERSION, RELEASE_TYPE
 # Set secrets: DOCKER_USERNAME, DOCKER_PASSWORD, RELEASE_PLEASE_TOKEN
 # =============================================================================
 
@@ -19,7 +19,6 @@ permissions:
   security-events: write
 
 env:
-  RUNNER: "ubuntu-latest"
   IMAGE_NAME: ${{ secrets.DOCKER_USERNAME }}/my-app  # <-- change this
   GO_VERSION: "1.24"
   GO_WORKING_DIR: "."
