@@ -1,7 +1,7 @@
 # =============================================================================
 # CI - Branch Pipeline (Node.js)
 # =============================================================================
-# To adapt: Change RUNNER, NODE_VERSION, IMAGE_NAME, PACKAGE_MANAGER
+# To adapt: Set repository variable RUNNER if needed; change NODE_VERSION, NODE_WORKING_DIR, IMAGE_NAME, PACKAGE_MANAGER
 # Set secrets: DOCKER_USERNAME, DOCKER_PASSWORD, CODECOV_TOKEN
 # =============================================================================
 
@@ -18,8 +18,8 @@ on:
     types: [opened, synchronize, reopened, labeled]
 
 env:
-  RUNNER: "ubuntu-latest"
   NODE_VERSION: "22"
+  NODE_WORKING_DIR: "."  # project directory containing package.json
   PACKAGE_MANAGER: "npm"  # npm, pnpm, yarn
   IMAGE_NAME: ${{ secrets.DOCKER_USERNAME }}/my-app  # <-- change this
   USE_PLAYWRIGHT: "false"  # set to "true" for e2e tests
@@ -44,6 +44,7 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
           package-manager: ${{ env.PACKAGE_MANAGER }}
+          working-directory: ${{ env.NODE_WORKING_DIR }}
           playwright: ${{ env.USE_PLAYWRIGHT }}
           codecov-token: ${{ secrets.CODECOV_TOKEN }}
 
@@ -66,6 +67,7 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
           package-manager: ${{ env.PACKAGE_MANAGER }}
+          working-directory: ${{ env.NODE_WORKING_DIR }}
 
       - name: Enforce quality and security gate
         shell: bash
