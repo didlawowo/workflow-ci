@@ -130,6 +130,7 @@ jobs:
           head-sha: ${{ github.event.pull_request.head.sha }}
           github-token: ${{ github.token }}
           comment: ${{ inputs.comment }}
+          artifact-suffix: ${{ inputs.repo-type }}
 
       - name: Enforce independent verification
         if: always()
