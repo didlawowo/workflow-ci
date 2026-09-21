@@ -45,8 +45,8 @@ def test_mutation_policy_separates_untrusted_execution_from_trusted_verification
 
     assert "pull_request_target:" not in content
     assert "pull_request:" in content
-    assert "path: .policy" in content
-    assert "path: pr" in content
+    assert "Fetch trusted base policy without submodule traversal" in content
+    assert "Fetch pull request code without submodule traversal" in content
     assert "vars.UNTRUSTED_RUNNER || 'ubuntu-latest'" in content
     assert 'bash "$GITHUB_WORKSPACE/.policy/.ci/mutation.sh"' in content
     assert "needs: [mutation-run]" in content
@@ -57,7 +57,7 @@ def test_mutation_policy_requires_machine_readable_evidence_and_zero_survivors()
     root = Path(__file__).resolve().parents[1]
     content = (root / ".github" / "workflows" / "mutation-policy.yml").read_text()
 
-    assert "Mandatory mutation run produced no supported engine-native evidence" in content
+    assert "Mandatory mutation run produced no supported mutation evidence" in content
     assert "mutation evidence is missing killed/survived counters" in content
     assert "mutation evidence contains no measured mutants" in content
     assert "if survived or timeouts or suspicious:" in content
@@ -128,4 +128,84 @@ def test_mutation_policy_rejects_changed_functions_without_mutants():
     assert "source_paths is part of the protected policy" in content
     assert "in_trusted_source_path" in content
     assert "changed functions produced no mutation " in content
+    assert "evidence (not exercised or excluded)" in content
     assert "pragma: no mutate" in content
+
+
+def test_mutation_policy_uses_uv_without_system_venv_dependency():
+    root = Path(__file__).resolve().parents[1]
+    workflow = (root / ".github" / "workflows" / "mutation-policy.yml").read_text()
+    runner = (root / ".ci" / "mutation.sh").read_text()
+
+    assert "uv python install" in workflow
+    assert 'uv venv "$VENV" --python "$PYTHON_VERSION" --seed' in workflow
+    assert "python3 -m venv" not in workflow
+    assert "python3 -m venv" not in runner
+    assert "Mutation bootstrap failure" in workflow
+    assert "Mutation bootstrap failure" in runner
+
+
+def test_mutation_policy_passes_exact_pull_request_scope_to_runner():
+    root = Path(__file__).resolve().parents[1]
+    workflow = (root / ".github" / "workflows" / "mutation-policy.yml").read_text()
+    runner = (root / ".ci" / "mutation.sh").read_text()
+
+    assert "MUTATION_BASE_SHA: ${{ github.event.pull_request.base.sha }}" in workflow
+    assert "MUTATION_HEAD_SHA: ${{ github.event.pull_request.head.sha }}" in workflow
+    assert 'MUTATION_BASE_SHA="$MUTATION_BASE_SHA"' in workflow
+    assert 'MUTATION_HEAD_SHA="$MUTATION_HEAD_SHA"' in workflow
+    assert "mutation_scope.py" in runner
+    assert "mutation-no-targets.json" in runner
+    assert "No mutation targets in" in runner
+
+
+def test_mutation_jobs_avoid_actions_checkout_and_diagnose_invalid_gitlinks():
+    root = Path(__file__).resolve().parents[1]
+    content = (root / ".github" / "workflows" / "mutation-policy.yml").read_text()
+
+    mutation_jobs = content.split("  mutation-run:", 1)[1]
+    mutation_run, mutation_verify = mutation_jobs.split("  mutation-verify:", 1)
+
+    assert "actions/checkout@" not in mutation_run
+    assert "actions/checkout@" not in mutation_verify
+    assert "Fetch trusted base policy without submodule traversal" in mutation_run
+    assert "Fetch pull request code without submodule traversal" in mutation_run
+    assert "Mutation checkout diagnostic: gitlink" in mutation_run
+    assert "Mutation checkout failure:" in mutation_run
+    assert "Mutation checkout diagnostic: gitlink" in mutation_verify
+
+
+def test_issue_59_gitlink_parser_preserves_untrusted_paths_and_hidden_evidence():
+    root = Path(__file__).resolve().parents[1]
+    content = (root / ".github" / "workflows" / "mutation-policy.yml").read_text()
+
+    assert content.count("ls-files --stage -z") >= 2
+    assert content.count('grep -Fxq -- "$gitlink"') >= 2
+    assert content.count("include-hidden-files: true") >= 2
+
+
+def test_issue_59_mutation_policy_never_uses_system_python():
+    root = Path(__file__).resolve().parents[1]
+    content = (
+        root / ".github" / "workflows" / "mutation-policy.yml"
+    ).read_text()
+
+    assert "run: python " not in content
+    assert "\n          python -" not in content
+    assert "python3 -m venv" not in content
+    assert content.count(
+        "uv run --no-project --python 3.12 python"
+    ) >= 4
+
+
+def test_issue_59_mutation_policy_uses_exact_tree_range_and_isolated_home():
+    root = Path(__file__).resolve().parents[1]
+    content = (
+        root / ".github" / "workflows" / "mutation-policy.yml"
+    ).read_text()
+
+    assert 'f"{base}...{head}"' in content
+    assert 'f"{base}..{head}"' not in content.replace('f"{base}...{head}"', "")
+    assert 'HOME="$ISOLATED_HOME"' in content
+    assert 'UV_CACHE_DIR="$ISOLATED_UV_CACHE"' in content
+    assert 'HOME="$HOME"' not in content
