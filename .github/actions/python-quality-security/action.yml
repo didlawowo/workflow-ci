@@ -106,7 +106,7 @@ runs:
     - name: TruffleHog secret detection
       id: trufflehog
       if: inputs.run-trufflehog == 'true'
-      uses: trufflesecurity/trufflehog@main
+      uses: trufflesecurity/trufflehog@288a8a8643a2c5a36b81d231c550dccfa0beeb64 # main 2026-09-16
       with:
         path: ${{ inputs.working-directory }}
         base: ${{ github.event.before || github.sha }}
