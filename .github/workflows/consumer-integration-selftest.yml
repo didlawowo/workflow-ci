@@ -1,0 +1,61 @@
+name: Consumer integration self-test
+
+on:
+  pull_request:
+    paths:
+      - ".github/actions/**"
+      - ".github/workflows/quality-evidence.yml"
+      - ".github/workflows/consumer-integration-selftest.yml"
+      - "tests/fixtures/consumers/**"
+      - "tests/test_issue_55_portability.py"
+
+jobs:
+  python-consumer:
+    permissions:
+      contents: read
+      actions: read
+      issues: write
+      pull-requests: read
+    uses: ./.github/workflows/quality-evidence.yml
+    with:
+      repo-type: python
+      runner: ${{ vars.RUNNER || 'ubuntu-latest' }}
+      workflow-ci-ref: ${{ github.event.pull_request.head.sha }}
+      working-directory: tests/fixtures/consumers/python
+      python-test-command: >-
+        uv run pytest tests -q
+        --cov=src
+        --cov-report=xml:coverage-reports/custom-coverage.xml
+        --junitxml=coverage-reports/custom-junit.xml
+      python-junit-report-path: coverage-reports/custom-junit.xml
+      python-coverage-report-path: coverage-reports/custom-coverage.xml
+      comment: false
+
+  go-consumer:
+    permissions:
+      contents: read
+      actions: read
+      issues: write
+      pull-requests: read
+    uses: ./.github/workflows/quality-evidence.yml
+    with:
+      repo-type: go
+      runner: ${{ vars.RUNNER || 'ubuntu-latest' }}
+      workflow-ci-ref: ${{ github.event.pull_request.head.sha }}
+      working-directory: tests/fixtures/consumers/go
+      comment: false
+
+  node-consumer:
+    permissions:
+      contents: read
+      actions: read
+      issues: write
+      pull-requests: read
+    uses: ./.github/workflows/quality-evidence.yml
+    with:
+      repo-type: node
+      runner: ${{ vars.RUNNER || 'ubuntu-latest' }}
+      workflow-ci-ref: ${{ github.event.pull_request.head.sha }}
+      working-directory: tests/fixtures/consumers/node
+      package-manager: npm
+      comment: false
