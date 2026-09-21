@@ -14,8 +14,15 @@ def test_python_actions_honor_nested_projects_and_explicit_evidence():
 
     assert "Project directory containing pyproject.toml" in setup
     assert "working-directory: ${{ inputs.working-directory }}" in setup
+    assert 'data.get("dependency-groups", {})' in setup
+    assert "SYNC_ARGS+=(--group dev)" in setup
+    assert "SYNC_ARGS+=(--extra dev)" in setup
 
     assert "junit-report-path:" in tests
+    assert 'data.get("dependency-groups", {})' in tests
+    assert "SYNC_ARGS+=(--group dev)" in tests
+    assert "SYNC_ARGS+=(--extra dev)" in tests
+    assert "uv run --with pytest --with pytest-cov pytest" in tests
     assert "coverage-report-path:" in tests
     assert "working-directory: ${{ inputs.working-directory }}" in tests
     assert 'echo "evidence-found=true"' in tests
