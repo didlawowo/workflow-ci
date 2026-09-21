@@ -302,7 +302,8 @@ def test_release_workflow_is_idempotent_and_recoverable():
     assert "steps.result.outputs.released" in content
     assert "steps.publish.outputs.dispatch == 'true'" in content
 
-    before_result = content.split("      - name: Resolve release result", 1)[0]
+    steps = content.split("    steps:", 1)[1]
+    before_result = steps.split("      - name: Resolve release result", 1)[0]
     assert "steps.result.outputs.version" not in before_result
 
 
