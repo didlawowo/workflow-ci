@@ -104,6 +104,14 @@ jobs:
           upload-coverage: "false"
           fail-on-coverage: "true"
 
+      - name: Verify Python lint
+        id: python-lint
+        if: inputs.repo-type == 'python'
+        continue-on-error: true
+        shell: bash
+        working-directory: ${{ inputs.working-directory }}
+        run: uv run --with ruff ruff check . --output-format=github
+
       - name: Verify Go tests
         id: go-tests
         if: inputs.repo-type == 'go'
@@ -135,6 +143,7 @@ jobs:
           case "$TYPE" in
             python)
               test "${{ steps.python-tests.outcome }}" = "success"
+              test "${{ steps.python-lint.outcome }}" = "success"
               ;;
             go)
               test "${{ steps.go-tests.outcome }}" = "success"
