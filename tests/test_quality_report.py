@@ -54,6 +54,8 @@ class QualityReportTests(unittest.TestCase):
         diff = (
             "10\t2\tsrc/service.py\n"
             "4\t1\tsrc/other.py\n"
+            "2\t1\tsrc/file with spaces.py\n"
+            "1\t1\tsrc/name\twithtab.py\n"
             "8\t0\ttests/test_service.py\n"
             "2\t1\ttests/test_other.py\n"
             "5\t1\tdocs/readme.md\n"
@@ -79,10 +81,10 @@ class QualityReportTests(unittest.TestCase):
             result,
             {
                 "available": True,
-                "files": 8,
-                "additions": 34,
-                "deletions": 6,
-                "production_additions": 14,
+                "files": 10,
+                "additions": 37,
+                "deletions": 8,
+                "production_additions": 17,
                 "test_additions": 10,
                 "suspicious_files": [
                     ".github/workflows/ci.yml",
