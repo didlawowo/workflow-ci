@@ -15,7 +15,7 @@ on:
         description: "Pinned workflow-ci ref used for composite actions"
         required: false
         type: string
-        default: "v1.7.0"
+        default: "3147f59553546407f94163368f21e2d4d9f8775e"
       working-directory:
         required: false
         type: string
