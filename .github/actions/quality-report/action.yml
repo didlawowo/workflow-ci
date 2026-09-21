@@ -54,6 +54,11 @@ inputs:
 runs:
   using: "composite"
   steps:
+    - name: Setup uv for quality reporter
+      uses: astral-sh/setup-uv@v3
+      with:
+        enable-cache: false
+
     - name: Build quality evidence
       shell: bash
       env:
@@ -90,7 +95,7 @@ runs:
         if [[ "${{ inputs.comment }}" == "true" ]]; then
           ARGS+=(--comment)
         fi
-        uv run python "$SCRIPT" "${ARGS[@]}"
+        uv run --no-project --python 3.12 python "$SCRIPT" "${ARGS[@]}"
 
     - name: Upload quality evidence
       if: always()
