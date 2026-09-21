@@ -19,9 +19,17 @@ inputs:
     required: false
     default: "tests/"
   working-directory:
-    description: "Working directory"
+    description: "Project directory containing pyproject.toml"
     required: false
     default: "."
+  junit-report-path:
+    description: "JUnit XML path relative to working-directory; custom test commands must produce this file"
+    required: false
+    default: "coverage-reports/pytest-report.xml"
+  coverage-report-path:
+    description: "Coverage XML path relative to working-directory"
+    required: false
+    default: "coverage-reports/coverage.xml"
   upload-coverage:
     description: "Upload coverage to Codecov"
     required: false
@@ -59,16 +67,39 @@ outputs:
   tests-skipped:
     description: "Number of skipped tests"
     value: ${{ steps.tests.outputs.skipped }}
+  test-evidence-found:
+    description: "Whether the configured JUnit evidence file was produced"
+    value: ${{ steps.tests.outputs.evidence-found }}
 
 runs:
   using: "composite"
   steps:
     - name: Setup Python environment
-      if: inputs.use-docker-compose != 'true'
+      if: inputs.use-docker-compose != 'true' && inputs.working-directory == '.'
       uses: didlawowo/workflow-ci/.github/actions/setup-python-env@v1.7.0
       with:
         python-version: ${{ inputs.python-version }}
         install-dev: "true"
+
+    # v1.7.0 setup-python-env does not understand working-directory. Keep the
+    # immutable dependency for root projects, but bootstrap nested projects
+    # locally so a pinned run-python-tests action can honor its own contract.
+    - name: Install uv for nested project
+      if: inputs.use-docker-compose != 'true' && inputs.working-directory != '.'
+      uses: astral-sh/setup-uv@v3
+      with:
+        version: "latest"
+        enable-cache: ${{ env.UV_CACHE_DIR == '' }}
+        cache-local-path: ${{ env.UV_CACHE_DIR }}
+        prune-cache: ${{ env.UV_CACHE_DIR == '' }}
+
+    - name: Setup nested Python environment
+      if: inputs.use-docker-compose != 'true' && inputs.working-directory != '.'
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: |
+        uv python install ${{ inputs.python-version }}
+        uv sync --extra dev
 
     # --- Docker Compose mode ---
     - name: Run tests with Docker Compose
@@ -104,9 +135,9 @@ runs:
         else
           uv run pytest ${{ inputs.test-paths }} \
             -v --tb=short \
-            --cov=src --cov-report=xml:coverage-reports/coverage.xml \
+            --cov=src --cov-report=xml:${{ inputs.coverage-report-path }} \
             --cov-report=term-missing \
-            --junitxml=coverage-reports/pytest-report.xml
+            --junitxml=${{ inputs.junit-report-path }}
         fi
         STATUS=$?
         set -e
@@ -117,16 +148,17 @@ runs:
     - name: Extract coverage
       id: coverage
       shell: bash
+      working-directory: ${{ inputs.working-directory }}
       run: |
         COV_FILE=""
-        for f in coverage-reports/coverage.xml coverage.xml; do
+        for f in "${{ inputs.coverage-report-path }}" coverage-reports/coverage.xml coverage.xml; do
           if [ -f "$f" ]; then COV_FILE="$f"; break; fi
         done
 
         if [ -n "$COV_FILE" ]; then
           PCT=$(grep -o 'line-rate="[0-9.]*"' "$COV_FILE" | head -1 | grep -o '[0-9.]*' | awk '{printf "%.1f", $1*100}')
           echo "percentage=${PCT}" >> "$GITHUB_OUTPUT"
-          echo "coverage-file=${COV_FILE}" >> "$GITHUB_OUTPUT"
+          echo "coverage-file=$(realpath "$COV_FILE")" >> "$GITHUB_OUTPUT"
         else
           echo "percentage=0" >> "$GITHUB_OUTPUT"
           echo "coverage-file=" >> "$GITHUB_OUTPUT"
@@ -135,11 +167,18 @@ runs:
     - name: Extract test evidence
       id: tests
       shell: bash
+      working-directory: ${{ inputs.working-directory }}
       run: |
         REPORT=""
-        for f in coverage-reports/pytest-report.xml pytest-report.xml; do
+        for f in "${{ inputs.junit-report-path }}" coverage-reports/pytest-report.xml pytest-report.xml; do
           if [ -f "$f" ]; then REPORT="$f"; break; fi
         done
+
+        if [ -n "$REPORT" ]; then
+          echo "evidence-found=true" >> "$GITHUB_OUTPUT"
+        else
+          echo "evidence-found=false" >> "$GITHUB_OUTPUT"
+        fi
 
         uv run python - "$REPORT" "$GITHUB_OUTPUT" <<'PY'
         import sys
@@ -180,8 +219,16 @@ runs:
       working-directory: ${{ inputs.working-directory }}
       run: |
         STATUS=$(cat coverage-reports/test-exit-code 2>/dev/null || echo 1)
-        if [ "$STATUS" -ne 0 ] || [ "${{ steps.tests.outputs.passed }}" != "true" ]; then
-          echo "::error::Python tests failed (exit=$STATUS, failed=${{ steps.tests.outputs.failed }})."
+        if [ "$STATUS" -ne 0 ]; then
+          echo "::error::Python test command failed (exit=$STATUS)."
+          exit 1
+        fi
+        if [ -n "${{ inputs.test-command }}" ] && [ "${{ steps.tests.outputs.evidence-found }}" != "true" ]; then
+          echo "::error::Custom test-command succeeded but did not produce the required JUnit evidence: ${{ inputs.junit-report-path }}"
+          exit 1
+        fi
+        if [ "${{ steps.tests.outputs.passed }}" != "true" ]; then
+          echo "::error::Python test evidence reports failure (failed=${{ steps.tests.outputs.failed }})."
           exit 1
         fi
 
@@ -212,6 +259,6 @@ runs:
       with:
         name: python-test-results
         path: |
-          coverage-reports/
-          htmlcov/
+          ${{ inputs.working-directory }}/coverage-reports/
+          ${{ inputs.working-directory }}/htmlcov/
         retention-days: 7
