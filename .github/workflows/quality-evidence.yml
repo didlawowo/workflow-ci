@@ -125,7 +125,7 @@ jobs:
           tests-total: ${{ steps.python-tests.outputs.test-count || steps.go-tests.outputs.test-count || steps.node-tests.outputs.test-count }}
           tests-failed: ${{ steps.python-tests.outputs.tests-failed || steps.go-tests.outputs.tests-failed || steps.node-tests.outputs.tests-failed }}
           tests-skipped: ${{ steps.python-tests.outputs.tests-skipped || steps.go-tests.outputs.tests-skipped || steps.node-tests.outputs.tests-skipped }}
-          test-status: ${{ steps.python-tests.outcome || steps.go-tests.outcome || steps.node-tests.outcome }}
+          test-status: ${{ inputs.repo-type == 'python' && steps.python-tests.outcome || inputs.repo-type == 'go' && steps.go-tests.outcome || steps.node-tests.outcome }}
           base-sha: ${{ github.event.pull_request.base.sha }}
           head-sha: ${{ github.event.pull_request.head.sha }}
           github-token: ${{ github.token }}
