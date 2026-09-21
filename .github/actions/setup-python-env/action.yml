@@ -46,8 +46,32 @@ runs:
       shell: bash
       working-directory: ${{ inputs.working-directory }}
       run: |
-        if [ "${{ inputs.install-dev }}" = "true" ]; then
-          uv sync --extra dev
-        else
+        set -euo pipefail
+        if [ "${{ inputs.install-dev }}" != "true" ]; then
           uv sync
+          exit 0
         fi
+
+        DEV_MODES="$(
+          uv run --no-project --python "${{ inputs.python-version }}" python - <<'PY'
+        import pathlib
+        import tomllib
+
+        data = tomllib.loads(pathlib.Path("pyproject.toml").read_text(encoding="utf-8"))
+        modes = []
+        if "dev" in data.get("project", {}).get("optional-dependencies", {}):
+            modes.append("extra")
+        if "dev" in data.get("dependency-groups", {}):
+            modes.append("group")
+        print(" ".join(modes))
+        PY
+        )"
+
+        SYNC_ARGS=()
+        case " ${DEV_MODES} " in
+          *" extra "*) SYNC_ARGS+=(--extra dev) ;;
+        esac
+        case " ${DEV_MODES} " in
+          *" group "*) SYNC_ARGS+=(--group dev) ;;
+        esac
+        uv sync "${SYNC_ARGS[@]}"
