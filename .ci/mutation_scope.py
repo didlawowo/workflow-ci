@@ -94,6 +94,13 @@ def _changed_lines(repo: Path, base: str, head: str) -> dict[str, set[int]]:
         count = int(match.group(2) or "1")
         if count:
             changed[current_path].update(range(start, start + count))
+        else:
+            # A deletion-only hunk has no lines on the head side. Anchor both
+            # adjacent surviving lines so a deletion inside an existing
+            # function cannot be misclassified as "no mutation targets".
+            changed[current_path].update(
+                {max(start - 1, 1), max(start, 1)}
+            )
 
     return changed
 
