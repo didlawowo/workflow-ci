@@ -64,7 +64,7 @@ def _changed_lines(repo: Path, base: str, head: str) -> dict[str, set[int]]:
             "diff",
             "--unified=0",
             "--no-color",
-            f"{base}...{head}",
+            f"{base}..{head}",
             "--",
             "*.py",
         ],
