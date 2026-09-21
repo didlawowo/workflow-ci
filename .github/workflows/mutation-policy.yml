@@ -17,9 +17,39 @@ jobs:
       issues: write
     runs-on: ${{ vars.RUNNER || 'ubuntu-latest' }}
     steps:
-      - uses: actions/checkout@v7
-        with:
-          persist-credentials: false
+      - name: Install uv for policy helpers
+        uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+
+      - name: Fetch trusted policy without submodule traversal
+        env:
+          MUTATION_FETCH_REPOSITORY: ${{ github.repository }}
+          MUTATION_FETCH_SHA: ${{ github.sha }}
+          MUTATION_FETCH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          DEST="$GITHUB_WORKSPACE/.policy"
+          rm -rf "$DEST"
+          mkdir -p "$DEST"
+          git -C "$DEST" init -q
+
+          ASKPASS="${RUNNER_TEMP:-/tmp}/mutation-git-askpass-notify.sh"
+          trap 'rm -f "$ASKPASS"' EXIT
+          cat > "$ASKPASS" <<'SH'
+          #!/usr/bin/env bash
+          case "$1" in
+            *Username*) printf '%s\n' 'x-access-token' ;;
+            *Password*) printf '%s\n' "$MUTATION_FETCH_TOKEN" ;;
+            *) printf '\n' ;;
+          esac
+          SH
+          chmod 700 "$ASKPASS"
+
+          URL="${GITHUB_SERVER_URL}/${MUTATION_FETCH_REPOSITORY}.git"
+          GIT_ASKPASS="$ASKPASS" GIT_TERMINAL_PROMPT=0 \
+            git -C "$DEST" fetch --no-tags "$URL" "$MUTATION_FETCH_SHA"
+          git -C "$DEST" checkout -q --detach "$MUTATION_FETCH_SHA"
+
       - name: Explain mandatory mutation testing
         env:
           POLICY_PROVIDER: github
@@ -27,7 +57,7 @@ jobs:
           POLICY_REPOSITORY: ${{ github.repository }}
           POLICY_TOKEN: ${{ github.token }}
           POLICY_EVENT_PATH: ${{ github.event_path }}
-        run: python .github/scripts/mutation_policy.py notify
+        run: uv run --no-project --python 3.12 python .policy/.github/scripts/mutation_policy.py notify
 
   mutation-run:
     if: github.event_name == 'pull_request'
@@ -79,6 +109,9 @@ jobs:
           fi
           echo "Trusted mutation policy loaded from $MUTATION_FETCH_SHA without traversing submodules."
 
+      - name: Install uv for policy and mutation helpers
+        uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+
       - name: Classify pull request from trusted policy
         id: policy
         env:
@@ -87,7 +120,7 @@ jobs:
           POLICY_REPOSITORY: ${{ github.repository }}
           POLICY_TOKEN: ${{ github.token }}
           POLICY_EVENT_PATH: ${{ github.event_path }}
-        run: python .policy/.github/scripts/mutation_policy.py classify
+        run: uv run --no-project --python 3.12 python .policy/.github/scripts/mutation_policy.py classify
 
       - name: Fetch pull request code without submodule traversal
         if: steps.policy.outputs.required == 'true'
@@ -162,7 +195,7 @@ jobs:
             done
           fi
 
-          echo "Mutation checkout ready for exact scope $MUTATION_BASE_SHA...$MUTATION_HEAD_SHA."
+          echo "Mutation checkout ready for exact scope $MUTATION_BASE_SHA..$MUTATION_HEAD_SHA."
 
       - name: Verify trusted mutation runner exists
         if: steps.policy.outputs.required == 'true'
@@ -185,7 +218,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          python - "$GITHUB_WORKSPACE/.policy" "$GITHUB_WORKSPACE/pr" <<'PY'
+          uv run --no-project --python 3.12 python - "$GITHUB_WORKSPACE/.policy" "$GITHUB_WORKSPACE/pr" <<'PY'
           import configparser
           import json
           import sys
@@ -227,10 +260,6 @@ jobs:
           print("Mutation configuration matches the protected base.")
           PY
 
-      - name: Install uv for mutation bootstrap
-        if: steps.policy.outputs.required == 'true'
-        uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
-
       - name: Prepare isolated Python mutation environment
         id: mutation-python
         if: steps.policy.outputs.required == 'true'
@@ -270,10 +299,17 @@ jobs:
           if [[ -n "$MUTATION_VENV" ]]; then
             MUTATION_PATH="$MUTATION_VENV/bin:$MUTATION_PATH"
           fi
-          # No forge token or inherited secrets are passed to PR code.
+          ISOLATED_HOME="${RUNNER_TEMP:-/tmp}/mutation-home"
+          ISOLATED_UV_CACHE="${RUNNER_TEMP:-/tmp}/mutation-uv-cache"
+          rm -rf "$ISOLATED_HOME" "$ISOLATED_UV_CACHE"
+          mkdir -p "$ISOLATED_HOME" "$ISOLATED_UV_CACHE"
+
+          # No forge token, persistent HOME or shared dependency cache is
+          # exposed to PR code on self-hosted/ARC runners.
           env -i \
             PATH="$MUTATION_PATH" \
-            HOME="$HOME" \
+            HOME="$ISOLATED_HOME" \
+            UV_CACHE_DIR="$ISOLATED_UV_CACHE" \
             VIRTUAL_ENV="$MUTATION_VENV" \
             CI=true \
             MUTATION_POLICY_LABELS="$MUTATION_POLICY_LABELS" \
@@ -381,6 +417,9 @@ jobs:
           fi
           echo "Trusted mutation policy loaded from $MUTATION_FETCH_SHA without traversing submodules."
 
+      - name: Install uv for verification helpers
+        uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+
       - name: Re-classify pull request independently
         id: policy
         env:
@@ -389,7 +428,7 @@ jobs:
           POLICY_REPOSITORY: ${{ github.repository }}
           POLICY_TOKEN: ${{ github.token }}
           POLICY_EVENT_PATH: ${{ github.event_path }}
-        run: python .policy/.github/scripts/mutation_policy.py classify
+        run: uv run --no-project --python 3.12 python .policy/.github/scripts/mutation_policy.py classify
 
       - name: Require successful mutation execution
         if: steps.policy.outputs.required == 'true'
@@ -474,7 +513,7 @@ jobs:
             done
           fi
 
-          echo "Mutation checkout ready for exact scope $MUTATION_BASE_SHA...$MUTATION_HEAD_SHA."
+          echo "Mutation checkout ready for exact scope $MUTATION_BASE_SHA..$MUTATION_HEAD_SHA."
 
       - name: Download mutation evidence
         if: steps.policy.outputs.required == 'true'
@@ -504,7 +543,7 @@ jobs:
             exit 1
           fi
 
-          python - "$REPORT" "$RESULTS" "$GITHUB_WORKSPACE/pr" "$GITHUB_WORKSPACE/.policy" "$BASE_SHA" "$HEAD_SHA" "$GITHUB_OUTPUT" <<'PY'
+          uv run --no-project --python 3.12 python - "$REPORT" "$RESULTS" "$GITHUB_WORKSPACE/pr" "$GITHUB_WORKSPACE/.policy" "$BASE_SHA" "$HEAD_SHA" "$GITHUB_OUTPUT" <<'PY'
           import ast
           import json
           import re
@@ -587,7 +626,7 @@ jobs:
               diff = subprocess.run(
                   [
                       "git", "-C", str(repo), "diff", "--unified=0", "--no-color",
-                      f"{base}...{head}", "--", "*.py",
+                      f"{base}..{head}", "--", "*.py",
                   ],
                   check=True,
                   capture_output=True,
