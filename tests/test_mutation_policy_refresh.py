@@ -115,6 +115,9 @@ def test_mutation_run_match_requires_policy_workflow_and_pr_identity():
     }
     assert mutation_policy._is_mutation_policy_run(base, 42, "head")
 
+    forgejo = dict(base, path=".forgejo/workflows/mutation-policy.yml")
+    assert mutation_policy._is_mutation_policy_run(forgejo, 42, "head")
+
     wrong_pr = dict(base, pull_requests=[{"number": 99}])
     assert not mutation_policy._is_mutation_policy_run(wrong_pr, 42, "head")
 
