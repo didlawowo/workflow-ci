@@ -82,6 +82,8 @@ runs:
           --coverage "${{ inputs.coverage-glob }}"
           --base "${{ inputs.base-sha }}"
           --head "${{ inputs.head-sha }}"
+          --output-json "$GITHUB_WORKSPACE/.quality/quality-report.json"
+          --output-markdown "$GITHUB_WORKSPACE/.quality/quality-report.md"
         )
         if [[ -n "${{ inputs.mutation-report }}" ]]; then
           ARGS+=(--mutation "${{ inputs.mutation-report }}")
