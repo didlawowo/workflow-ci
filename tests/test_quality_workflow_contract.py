@@ -52,7 +52,7 @@ def test_quality_evidence_dependency_chain_has_no_workflow_ci_main_refs():
             assert "@v1.7.0" in content
 
 
-def test_mutation_policy_cancels_stale_pr_revisions_and_filters_irrelevant_edits():
+def test_mutation_policy_cancels_only_relevant_pr_and_issue_events():
     root = Path(__file__).resolve().parents[1]
     content = (root / ".github" / "workflows" / "mutation-policy.yml").read_text()
     header = content.split("\njobs:", 1)[0]
@@ -60,8 +60,32 @@ def test_mutation_policy_cancels_stale_pr_revisions_and_filters_irrelevant_edits
     assert "types: [opened, synchronize, reopened, labeled, unlabeled, edited]" in header
     assert "concurrency:" in header
     assert "group: mutation-policy-${{ github.repository }}-${{ github.event_name }}-" in header
+    assert "github.event.action != 'edited' || github.event.changes.body != null" in header
+    assert "github.event.label.name == 'complexity:high'" in header
+    assert "github.event.label.name == 'priority:high'" in header
+    assert "github.run_id" in header
     assert "cancel-in-progress: true" in header
-    assert content.count("github.event.changes.body != null") >= 2
+
+    # Title-only edits and unrelated issue labels use the run-id fallback, so
+    # they cannot cancel a real gate and then skip all mutation work.
+    assert content.count("github.event.changes.body != null") >= 3
+
+
+def test_forgejo_filters_irrelevant_edits_and_isolates_noop_concurrency():
+    root = Path(__file__).resolve().parents[1]
+    content = (root / "templates" / "forgejo" / "mutation-policy.yml").read_text()
+    header = content.split("\njobs:", 1)[0]
+    mutation_run = content.split("  mutation-run:", 1)[1].split(
+        "  mutation-verify:", 1
+    )[0]
+    mutation_verify = content.split("  mutation-verify:", 1)[1]
+
+    assert "github.run_id" in header
+    assert "github.event.label.name == 'complexity:high'" in header
+    assert "github.event.label.name == 'priority:high'" in header
+    assert "github.event.changes.body != null" in header
+    assert "github.event.changes.body != null" in mutation_run
+    assert "github.event.changes.body != null" in mutation_verify
 
 
 def test_mutation_policy_separates_untrusted_execution_from_trusted_verification():
