@@ -45,8 +45,9 @@ def test_mutation_policy_separates_untrusted_execution_from_trusted_verification
 
     assert "pull_request_target:" not in content
     assert "pull_request:" in content
-    assert "path: .policy" in content
-    assert "path: pr" in content
+    assert "git init -q .policy" in content
+    assert "git init -q pr" in content
+    assert "actions/checkout@" not in content
     assert "vars.UNTRUSTED_RUNNER || 'ubuntu-latest'" in content
     assert 'bash "$GITHUB_WORKSPACE/.policy/.ci/mutation.sh"' in content
     assert "needs: [mutation-run]" in content
@@ -129,3 +130,75 @@ def test_mutation_policy_rejects_changed_functions_without_mutants():
     assert "in_trusted_source_path" in content
     assert "changed functions produced no mutation evidence" in content
     assert "pragma: no mutate" in content
+
+
+def test_issue_59_mutation_bootstrap_is_uv_only_and_arc_portable():
+    root = Path(__file__).resolve().parents[1]
+    workflow = (
+        root / ".github" / "workflows" / "mutation-policy.yml"
+    ).read_text()
+    runner = (root / ".ci" / "mutation.sh").read_text()
+
+    assert "astral-sh/setup-uv@v3" in workflow
+    assert "python3 -m venv" not in workflow
+    assert "uv venv --python 3.12 --seed" in workflow
+    assert "run: python " not in workflow
+    assert "uv run --no-project --python 3.12 python" in workflow
+
+    assert "python3 -m venv" not in runner
+    assert "python -m pip" not in runner
+    assert "uv venv --python" in runner
+    assert "uv pip install --python" in runner
+
+
+def test_issue_59_mutation_uses_exact_pr_base_and_head():
+    root = Path(__file__).resolve().parents[1]
+    content = (
+        root / ".github" / "workflows" / "mutation-policy.yml"
+    ).read_text()
+
+    assert "MUTATION_BASE_SHA: ${{ github.event.pull_request.base.sha }}" in content
+    assert "MUTATION_HEAD_SHA: ${{ github.event.pull_request.head.sha }}" in content
+    assert 'MUTATION_BASE_SHA="$MUTATION_BASE_SHA"' in content
+    assert 'MUTATION_HEAD_SHA="$MUTATION_HEAD_SHA"' in content
+    assert 'f"{base}..{head}"' in content
+    assert 'f"{base}...{head}"' not in content
+
+
+def test_issue_59_gitlink_safe_checkout_does_not_traverse_submodules():
+    root = Path(__file__).resolve().parents[1]
+    mutation = (
+        root / ".github" / "workflows" / "mutation-policy.yml"
+    ).read_text()
+    evidence = (
+        root / ".github" / "workflows" / "quality-evidence.yml"
+    ).read_text()
+
+    assert "actions/checkout@" not in mutation
+    assert "git init -q .policy" in mutation
+    assert "git init -q pr" in mutation
+    assert "http.extraheader=AUTHORIZATION: basic" in mutation
+
+    assert "Fetch caller repository without submodule traversal" in evidence
+    assert "git init -q ." in evidence
+    assert "http.extraheader=AUTHORIZATION: basic" in evidence
+
+
+def test_issue_59_quality_report_provisions_python_with_uv():
+    root = Path(__file__).resolve().parents[1]
+    reporter = (
+        root / ".github" / "actions" / "quality-report" / "action.yml"
+    ).read_text()
+    python_tests = (
+        root / ".github" / "actions" / "run-python-tests" / "action.yml"
+    ).read_text()
+
+    assert "Setup uv for quality reporter" in reporter
+    assert "astral-sh/setup-uv@v3" in reporter
+    assert "uv run --no-project --python 3.12 python" in reporter
+
+    assert "working-directory: ${{ inputs.working-directory }}" in python_tests
+    assert (
+        "uv run --no-project --python ${{ inputs.python-version }} python"
+        in python_tests
+    )
