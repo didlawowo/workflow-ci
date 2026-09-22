@@ -103,6 +103,7 @@ jobs:
     timeout-minutes: 20
     permissions:
       contents: read
+      actions: read
       security-events: write
     outputs:
       quality-passed: ${{ steps.checks.outputs.quality-passed }}
@@ -148,6 +149,7 @@ jobs:
     timeout-minutes: 35
     permissions:
       contents: read
+      actions: read
       security-events: write
       packages: write
 
