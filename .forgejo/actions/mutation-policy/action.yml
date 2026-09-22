@@ -1,0 +1,61 @@
+name: Central mutation policy for Forgejo
+description: Use the canonical Workflow CI classifier and Python/Go runners without distributing engine code
+inputs:
+  api-url:
+    description: Forgejo API URL
+    required: true
+  server-url:
+    description: Forgejo HTTPS server URL
+    required: true
+  repository:
+    description: Consumer owner/repository
+    required: true
+  token:
+    description: Job token used only by trusted classification and fetch
+    required: true
+  event-path:
+    description: Trusted Forgejo event JSON
+    required: true
+outputs:
+  required:
+    description: Whether the canonical policy requires mutation
+    value: ${{ steps.prepare.outputs.required }}
+runs:
+  using: composite
+  steps:
+    - uses: https://github.com/astral-sh/setup-uv@v10.1.0
+      with:
+        enable-cache: false
+        github-token: ""
+    - name: Classify and prepare immutable mutation scope
+      id: prepare
+      shell: bash
+      env:
+        POLICY_PROVIDER: forgejo
+        POLICY_API_URL: ${{ inputs.api-url }}
+        POLICY_REPOSITORY: ${{ inputs.repository }}
+        POLICY_TOKEN: ${{ inputs.token }}
+        POLICY_EVENT_PATH: ${{ inputs.event-path }}
+        MUTATION_SERVER_URL: ${{ inputs.server-url }}
+      run: uv run --no-project --python 3.12 python "$GITHUB_ACTION_PATH/../../../.ci/forgejo_mutation.py" prepare
+    - name: Setup the protected Go toolchain
+      if: steps.prepare.outputs.required == 'true' && steps.prepare.outputs.engine == 'go'
+      uses: https://github.com/actions/setup-go@v6
+      with:
+        go-version-file: ${{ steps.prepare.outputs.go-mod }}
+        cache: false
+        token: ""
+    - name: Execute central mutation engine in the unprivileged sandbox
+      if: steps.prepare.outputs.required == 'true'
+      shell: bash
+      env:
+        MUTATION_STATE: ${{ steps.prepare.outputs.state }}
+      run: |
+        set -euo pipefail
+        # setup-uv may install below /root. Expose only the public executable,
+        # never root's HOME or its credential/configuration directories.
+        BIN="$(dirname "$MUTATION_STATE")/engine/bin"
+        mkdir -p "$BIN"
+        install -m 0755 "$(command -v uv)" "$BIN/uv"
+        export PATH="$BIN:$PATH"
+        uv run --no-project --python 3.12 python "$GITHUB_ACTION_PATH/../../../.ci/forgejo_mutation.py" execute --state "$MUTATION_STATE"
