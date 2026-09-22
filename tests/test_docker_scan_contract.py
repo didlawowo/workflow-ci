@@ -249,3 +249,37 @@ def test_templates_grant_actions_read_when_they_publish_sarif(template):
     text = (ROOT / template).read_text(encoding="utf-8")
     assert "docker-build-push@" in text
     assert "actions: read" in text
+
+
+def test_trivy_summary_is_written_to_step_summary_and_pr_comment_is_best_effort():
+    summary = STEPS["Build Trivy Markdown summary"]
+    assert "GITHUB_STEP_SUMMARY" in summary
+    assert "Top findings" in summary
+    assert "Showing 20 of" in summary
+    assert "workflow-ci:trivy-report:" in summary
+
+    comment = STEPS["Publish Trivy summary on pull request"]
+    assert "continue-on-error: true" in comment
+    assert "github.event_name == 'pull_request'" in comment
+    assert "issues.listComments" in comment
+    assert "issues.updateComment" in comment
+    assert "issues.createComment" in comment
+
+    warning = STEPS["Warn when PR scan comment failed"]
+    assert "steps.trivy-pr-comment.outcome == 'failure'" in warning
+    assert "::warning title=Trivy PR comment failed::" in warning
+
+
+@pytest.mark.parametrize(
+    "template",
+    [
+        "templates/go/ci-branch-pipeline.yml",
+        "templates/go/cd-production.yml",
+        "templates/node/ci-branch-pipeline.yml",
+        "templates/python/ci-branch-pipeline.yml",
+        "templates/python/cd-production.yml",
+    ],
+)
+def test_templates_allow_best_effort_trivy_pr_comment(template):
+    text = (ROOT / template).read_text(encoding="utf-8")
+    assert "pull-requests: write" in text
