@@ -76,6 +76,15 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  mutation:
+    name: "Mutation quality gate"
+    permissions:
+      contents: read
+      actions: read
+      issues: read
+      pull-requests: read
+    uses: $/.github/workflows/mutation-policy.yml
+
   independent-verification:
     name: "Independent quality execution"
     runs-on: ${{ inputs.runner }}
@@ -278,7 +287,7 @@ jobs:
     name: "Publish trusted quality evidence"
     timeout-minutes: 10
     if: always()
-    needs: [independent-verification]
+    needs: [independent-verification, mutation]
     concurrency:
       group: quality-report-${{ github.repository }}-${{ github.event.pull_request.number || github.ref_name }}
       cancel-in-progress: false
@@ -296,6 +305,13 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
+      - name: Download trusted mutation evidence
+        if: needs.mutation.outputs.required == 'true' && needs.mutation.outputs.artifact-name != ''
+        uses: actions/download-artifact@v6
+        with:
+          name: ${{ needs.mutation.outputs.artifact-name }}
+          path: .mutation-evidence
+
       - name: Publish trusted quality evidence
         uses: $/.github/actions/quality-report
         with:
@@ -310,7 +326,8 @@ jobs:
           coverage-threshold: ${{ needs.independent-verification.outputs.coverage-threshold }}
           quality-status: ${{ needs.independent-verification.outputs.quality-status }}
           security-issues: ${{ needs.independent-verification.outputs.security-issues }}
-          mutation-required: "false"
+          mutation-report: ${{ needs.mutation.outputs.artifact-name != '' && '.mutation-evidence/scoped-mutation.json' || '' }}
+          mutation-required: ${{ needs.mutation.outputs.required == 'true' }}
           tests-total: ${{ needs.independent-verification.outputs.tests-total }}
           tests-failed: ${{ needs.independent-verification.outputs.tests-failed }}
           tests-skipped: ${{ needs.independent-verification.outputs.tests-skipped }}
