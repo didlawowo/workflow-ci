@@ -126,18 +126,24 @@ def test_trusted_quality_enforces_ruff_and_sonarqube_quality_gate():
     assert "uv run --with ruff ruff check . --output-format=github" in workflow
     assert 'test "${{ steps.python-lint.outcome }}" = "success"' in workflow
 
-    assert "sonar-enabled:" in workflow
-    assert 'default: "https://sonarqube.dc-tech.work"' in workflow
+    assert "sonar-enabled:" not in workflow
+    assert "sonar-project-key:" not in workflow
+    assert "sonar-extra-args:" not in workflow
     assert "SONAR_TOKEN:" in workflow
     assert "uses: $/.github/actions/sonarqube-scan" in workflow
+    assert "project-key: ${{ vars.SONAR_PROJECT_KEY }}" in workflow
     assert "steps.sonarqube.outcome" in workflow
-    assert "SonarQube Quality Gate failed or analysis could not complete" in workflow
+    assert "SonarQube Quality Gate failed, is not configured, or analysis could not complete" in workflow
+    assert "sonar-project.properties is protected quality policy" in workflow
+    assert "github.repository != 'didlawowo/workflow-ci'" in workflow
 
     assert "SonarSource/sonarqube-scan-action@v8.2.2" in sonar
     assert "-Dsonar.projectKey=${{ inputs.project-key }}" in sonar
-    assert "-Dsonar.host.url=${{ inputs.sonar-host-url }}" in sonar
-    assert "-Dsonar.qualitygate.wait=${{ inputs.wait-for-quality-gate }}" in sonar
-    assert "-Dsonar.qualitygate.timeout=${{ inputs.quality-gate-timeout }}" in sonar
+    assert "-Dsonar.host.url=https://sonarqube.dc-tech.work" in sonar
+    assert "-Dsonar.qualitygate.wait=true" in sonar
+    assert "-Dsonar.qualitygate.timeout=300" in sonar
+    assert "extra-args:" not in sonar
+    assert "wait-for-quality-gate:" not in sonar
 
 def test_language_templates_make_quality_failures_blocking():
     root = Path(__file__).resolve().parents[1]
@@ -436,7 +442,7 @@ def test_consumer_selftest_grants_reusable_publisher_pr_write_permission():
     ).read_text()
 
     assert content.count("pull-requests: write") == 3
-    assert content.count("sonar-enabled: false") == 3
+    assert "sonar-enabled:" not in content
     assert "pull-requests: read" not in content
 
 
