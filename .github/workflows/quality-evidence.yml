@@ -79,6 +79,7 @@ jobs:
   independent-verification:
     name: "Independent quality execution"
     runs-on: ${{ inputs.runner }}
+    timeout-minutes: 25
     permissions:
       contents: read
       actions: read
@@ -88,7 +89,7 @@ jobs:
       tests-failed: ${{ steps.python-tests.outputs.tests-failed || steps.go-tests.outputs.tests-failed || steps.node-tests.outputs.tests-failed }}
       tests-skipped: ${{ steps.python-tests.outputs.tests-skipped || steps.go-tests.outputs.tests-skipped || steps.node-tests.outputs.tests-skipped }}
       test-status: ${{ inputs.repo-type == 'python' && steps.python-tests.outcome || inputs.repo-type == 'go' && steps.go-tests.outcome || steps.node-tests.outcome }}
-      sonar-status: ${{ github.repository == 'didlawowo/workflow-ci' && 'disabled' || steps.sonarqube.outcome }}
+      sonar-status: ${{ vars.SONAR_ENABLED == 'true' && steps.sonarqube.outcome || 'disabled' }}
       sonar-project-url: ${{ steps.sonarqube.outputs.project-url }}
       sonar-current-coverage: ${{ steps.sonarqube.outputs.current-coverage }}
       sonar-main-coverage: ${{ steps.sonarqube.outputs.main-coverage }}
@@ -185,7 +186,7 @@ jobs:
           working-directory: ${{ inputs.working-directory }}
 
       - name: Protect SonarQube analysis policy
-        if: github.repository != 'didlawowo/workflow-ci' && github.event_name == 'pull_request'
+        if: vars.SONAR_ENABLED == 'true' && github.event_name == 'pull_request'
         shell: bash
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
@@ -199,7 +200,7 @@ jobs:
 
       - name: Resolve SonarQube coverage argument
         id: sonar-coverage
-        if: github.repository != 'didlawowo/workflow-ci'
+        if: vars.SONAR_ENABLED == 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -225,7 +226,7 @@ jobs:
 
       - name: Verify SonarQube Quality Gate
         id: sonarqube
-        if: github.repository != 'didlawowo/workflow-ci'
+        if: vars.SONAR_ENABLED == 'true'
         continue-on-error: true
         uses: $/.github/actions/sonarqube-scan
         with:
@@ -264,7 +265,7 @@ jobs:
               ;;
           esac
 
-          if [[ "${{ github.repository }}" != "didlawowo/workflow-ci" ]]; then
+          if [[ "${{ vars.SONAR_ENABLED }}" == "true" ]]; then
             if [[ "${{ steps.sonarqube.outcome }}" != "success" ]]; then
               echo "::error::SonarQube Quality Gate failed, is not configured, or analysis could not complete."
               FAILED=1
@@ -275,6 +276,7 @@ jobs:
 
   publish-evidence:
     name: "Publish trusted quality evidence"
+    timeout-minutes: 10
     if: always()
     needs: [independent-verification]
     concurrency:
@@ -313,7 +315,7 @@ jobs:
           tests-failed: ${{ needs.independent-verification.outputs.tests-failed }}
           tests-skipped: ${{ needs.independent-verification.outputs.tests-skipped }}
           test-status: ${{ needs.independent-verification.outputs.test-status }}
-          sonar-required: ${{ github.repository != 'didlawowo/workflow-ci' }}
+          sonar-required: ${{ vars.SONAR_ENABLED == 'true' }}
           sonar-status: ${{ needs.independent-verification.outputs.sonar-status }}
           sonar-project-url: ${{ needs.independent-verification.outputs.sonar-project-url }}
           base-sha: ${{ github.event.pull_request.base.sha }}
