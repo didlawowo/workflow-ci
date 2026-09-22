@@ -17,48 +17,13 @@ jobs:
       - uses: astral-sh/setup-uv@v3
         with:
           enable-cache: false
-      - name: Materialize reviewed patch and update migrated contracts
+      - name: Materialize reviewed patch and migrated contracts
         run: |
           uv run --no-project --with pyyaml python - <<'PY'
           import subprocess
           import yaml
-          previous = subprocess.check_output(['git', 'show', '250e6e09393d7f31bc513e9f567bbeeb0799e623:.github/workflows/prepare-issues-79-80.yml'], text=True)
-          command = yaml.safe_load(previous)['jobs']['prepare']['steps'][2]['run']
-          subprocess.run(['bash', '-e', '-c', command], check=True)
-          PY
-          python3 - <<'PY'
-          from pathlib import Path
-          p = Path('tests/test_issue_55_portability.py')
-          text = p.read_text()
-          expr = '$' + '{{ github.workspace }}'
-          old = '    assert "path: ' + expr + '" in quality'
-          new = '    scanner = read(".github/actions/python-quality-security/trufflehog.sh")\n    assert "trufflehog.sh" in quality\n    assert \'git -C "${GITHUB_WORKSPACE:?}" rev-parse --show-toplevel\' in scanner'
-          assert old in text
-          text = text.replace(old, new)
-          start = text.index('def test_trufflehog_scans_pr_base_to_head_not_merge_sha_to_itself():')
-          end = text.index('\ndef test_node_actions_', start)
-          replacement = '''def test_trufflehog_scans_pr_base_to_head_not_merge_sha_to_itself():
-              quality = read(".github/actions/python-quality-security/action.yml")
-              scanner = read(".github/actions/python-quality-security/trufflehog.sh")
-              assert "trufflehog.sh" in quality
-              assert ".pull_request.base.sha" in scanner
-              assert ".pull_request.head.sha" in scanner
-              assert "--since-commit" in scanner
-              assert "0000000000000000000000000000000000000000" in scanner
-              assert '--branch "$HEAD"' in scanner
-              assert "github.event.before || github.sha" not in quality
-          '''
-          # Dedent the body from this YAML block's Python indentation.
-          import textwrap
-          lines = replacement.splitlines()
-          replacement = lines[0] + '\n' + textwrap.indent(textwrap.dedent('\n'.join(lines[1:])), '    ') + '\n\n'
-          p.write_text(text[:start] + replacement + text[end:])
-          p = Path('tests/test_quality_workflow_contract.py')
-          text = p.read_text()
-          old = "mutation-required: " + '$' + "{{ needs.mutation.outputs.required == 'true' }}"
-          new = "mutation-required: " + '$' + "{{ needs.mutation.outputs.required || 'unknown' }}"
-          assert text.count(old) == 1
-          p.write_text(text.replace(old, new))
+          previous = subprocess.check_output(['git', 'show', 'e94307d53b5234ddabcb79fdd0dee3df3d9de728:.github/workflows/prepare-issues-79-80.yml'], text=True)
+          subprocess.run(['bash', '-e', '-c', yaml.safe_load(previous)['jobs']['prepare']['steps'][2]['run']], check=True)
           PY
       - name: Format and lint new tests
         run: |
@@ -67,11 +32,11 @@ jobs:
           bash -n .github/actions/python-quality-security/trufflehog.sh
       - name: Full regression suite
         run: uv run --no-project --with pytest --with pyyaml python -m pytest -q tests
-      - name: Real TruffleHog Docker smoke
+      - name: Real TruffleHog Docker smoke on ARC shared workspace
         run: |
           set -euo pipefail
           SCRIPT="$GITHUB_WORKSPACE/.github/actions/python-quality-security/trufflehog.sh"
-          WORK=$(mktemp -d)
+          WORK=$(mktemp -d "$GITHUB_WORKSPACE/.trufflehog-smoke.XXXXXX")
           trap 'rm -rf "$WORK"' EXIT
           git -C "$WORK" init -q
           git -C "$WORK" config user.name Test
@@ -80,35 +45,18 @@ jobs:
           git -C "$WORK" add .
           git -C "$WORK" commit -qm fixture
           SHA=$(git -C "$WORK" rev-parse HEAD)
-          GITHUB_WORKSPACE="$WORK" GITHUB_SHA="$SHA" GITHUB_EVENT_NAME=workflow_dispatch bash "$SCRIPT"
+          if ! GITHUB_WORKSPACE="$WORK" GITHUB_SHA="$SHA" GITHUB_EVENT_NAME=workflow_dispatch bash "$SCRIPT"; then
+            echo 'Diagnosing the public synthetic fixture only (no repository secrets).'
+            docker run --rm -v "$WORK:/repo:ro" -w /repo ghcr.io/trufflesecurity/trufflehog:latest git file:///repo/ --branch "$SHA" --fail --fail-on-scan-errors --no-update --only-verified --json
+            exit 1
+          fi
       - name: Publish validated Git tree only
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          python3 - <<'PY'
-          import hashlib, json, os, urllib.request
-          from pathlib import Path
-          paths = [
-              'quality_report.py', '.github/workflows/quality-evidence.yml',
-              '.github/actions/quality-report/action.yml',
-              '.github/actions/python-quality-security/action.yml',
-              '.github/actions/python-quality-security/trufflehog.sh',
-              'tests/test_mutation_report_fail_closed.py', 'tests/test_secret_scan.py',
-              'tests/test_issue_55_portability.py', 'tests/test_quality_workflow_contract.py',
-              'docs/issues-79-80.md', '.github/workflows/quality-report-selftest.yml',
-          ]
-          tree = []
-          for path in paths:
-              raw = Path(path).read_bytes()
-              digest = hashlib.sha1(b'blob ' + str(len(raw)).encode() + b'\0' + raw).hexdigest()
-              print('VALIDATED_BLOB', path, digest)
-              tree.append({'path': path, 'mode': '100644', 'type': 'blob', 'content': raw.decode()})
-          request = urllib.request.Request(
-              'https://api.github.com/repos/didlawowo/workflow-ci/git/trees',
-              data=json.dumps({'base_tree': '412c29d1d0861e2910aeb7f34168f873f20eae9e', 'tree': tree}).encode(),
-              headers={'Authorization': 'Bearer ' + os.environ['GH_TOKEN'], 'Accept': 'application/vnd.github+json'},
-              method='POST',
-          )
-          with urllib.request.urlopen(request, timeout=30) as response:
-              print('VALIDATED_TREE=' + json.load(response)['sha'])
+          uv run --no-project --with pyyaml python - <<'PY'
+          import subprocess
+          import yaml
+          previous = subprocess.check_output(['git', 'show', 'e94307d53b5234ddabcb79fdd0dee3df3d9de728:.github/workflows/prepare-issues-79-80.yml'], text=True)
+          subprocess.run(['bash', '-e', '-c', yaml.safe_load(previous)['jobs']['prepare']['steps'][6]['run']], check=True)
           PY
