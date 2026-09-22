@@ -1,0 +1,82 @@
+name: Mutation issue policy
+
+on:
+  workflow_call:
+    inputs:
+      runner:
+        description: "Trusted runner label for mutation policy maintenance jobs"
+        required: false
+        type: string
+        default: ""
+  issues:
+    types: [labeled, unlabeled]
+
+concurrency:
+  group: mutation-issue-policy-${{ github.repository }}-${{ github.event.issue.number || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  notify:
+    if: >-
+      github.event_name == 'issues' &&
+      github.event.action == 'labeled' &&
+      (github.event.label.name == 'complexity:high' ||
+       github.event.label.name == 'priority:high')
+    permissions:
+      contents: read
+      issues: write
+    runs-on: ${{ inputs.runner || vars.RUNNER || 'ubuntu-latest' }}
+    timeout-minutes: 5
+    steps:
+      - name: Install uv for policy helpers
+        uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+
+      - name: Checkout central workflow implementation
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: .workflow-ci
+          persist-credentials: false
+
+      - name: Explain mandatory mutation testing
+        env:
+          POLICY_PROVIDER: github
+          POLICY_API_URL: ${{ github.api_url }}
+          POLICY_REPOSITORY: ${{ github.repository }}
+          POLICY_TOKEN: ${{ github.token }}
+          POLICY_EVENT_PATH: ${{ github.event_path }}
+        run: uv run --no-project --python 3.12 python .workflow-ci/.github/scripts/mutation_policy.py notify
+
+  refresh-linked-prs:
+    if: >-
+      github.event_name == 'issues' &&
+      (github.event.label.name == 'complexity:high' ||
+       github.event.label.name == 'priority:high')
+    permissions:
+      contents: read
+      issues: read
+      pull-requests: read
+      actions: write
+    runs-on: ${{ inputs.runner || vars.RUNNER || 'ubuntu-latest' }}
+    timeout-minutes: 5
+    steps:
+      - name: Install uv for policy helpers
+        uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+
+      - name: Checkout central workflow implementation
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: .workflow-ci
+          persist-credentials: false
+
+      - name: Recompute linked pull request mutation policy
+        env:
+          POLICY_PROVIDER: github
+          POLICY_API_URL: ${{ github.api_url }}
+          POLICY_REPOSITORY: ${{ github.repository }}
+          POLICY_TOKEN: ${{ github.token }}
+          POLICY_EVENT_PATH: ${{ github.event_path }}
+        run: uv run --no-project --python 3.12 python .workflow-ci/.github/scripts/mutation_policy.py refresh

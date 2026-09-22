@@ -43,7 +43,7 @@ Reference actions from your workflows:
 steps:
   - uses: actions/checkout@v6
 
-  - uses: didlawowo/workflow-ci/.github/actions/docker-build-push@v1.7.0
+  - uses: didlawowo/workflow-ci/.github/actions/docker-build-push@v1.8.0
     with:
       image-name: myuser/myapp
       image-tag: v1.0.0
@@ -91,6 +91,44 @@ Sinon, poser le label après le run initial ne déclenche aucun build → l'imag
 `pr-<n>` n'existe pas → `ImagePullBackOff` sur le pod preview. Les templates
 `ci-branch-pipeline.yml` incluent déjà ce type par défaut.
 
+## SonarQube Quality Gate
+
+The reusable `quality-evidence.yml` workflow runs the official SonarQube scanner against
+`https://sonarqube.dc-tech.work` and waits for the server-side Quality Gate. A failed gate
+fails the trusted quality job; the PR quality report also links to the SonarQube project.
+
+Consumers keep the release pin at the workflow boundary:
+
+```yaml
+jobs:
+  trusted-quality:
+    uses: didlawowo/workflow-ci/.github/workflows/quality-evidence.yml@v1.8.0
+    with:
+      repo-type: python
+      runner: ${{ vars.RUNNER }}
+    secrets:
+      SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+      SONAR_ROOT_CERT: ${{ secrets.SONAR_ROOT_CERT }} # optional
+```
+
+`SONAR_TOKEN` must be able to analyze the configured project. `SONAR_PROJECT_KEY` is read
+directly from the caller repository variable by the reusable workflow; it is deliberately not a
+workflow input, so a pull request cannot redirect analysis to another SonarQube project. The
+SonarQube host, full-repository scan base and blocking Quality Gate wait are also fixed by
+workflow-ci. A pull request that changes `sonar-project.properties` is rejected by trusted
+quality evidence; such policy changes must be reviewed separately on the protected base branch.
+
+`sonar-project.properties` is optional: the project key, host and blocking Quality Gate settings
+are supplied centrally. If a repository needs custom Sonar properties such as source/exclusion
+rules, merge that file to `main` before enabling Sonar. Only then set `SONAR_ENABLED=true`; the
+evaluated PR is intentionally not allowed to change its own Sonar policy.
+
+Quality Gate thresholds stay in SonarQube, so tightening coverage/security/duplication rules does
+not require another workflow-ci release.
+
+Same-repository action composition uses GitHub's `$/...` self-reference. This resolves internal
+actions to the exact commit of the tagged workflow and prevents stale cross-version pins.
+
 ## Secrets Required
 
 | Secret                 | Used by           |
@@ -100,3 +138,12 @@ Sinon, poser le label après le run initial ne déclenche aucun build → l'imag
 | `CODECOV_TOKEN`        | test actions      |
 | `ANTHROPIC_API_KEY`    | security-review   |
 | `RELEASE_PLEASE_TOKEN` | cd-production     |
+| `SONAR_TOKEN`          | quality-evidence  |
+| `SONAR_ROOT_CERT`      | quality-evidence (optional internal CA) |
+
+## Repository variables for quality evidence
+
+| Variable | Value |
+| --- | --- |
+| `SONAR_PROJECT_KEY` | Exact SonarQube project key imported for the repository |
+| `SONAR_ENABLED` | `true` to execute the SonarQube gate; otherwise Sonar is skipped |

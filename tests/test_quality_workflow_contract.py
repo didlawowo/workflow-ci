@@ -25,50 +25,51 @@ def test_quality_evidence_cancels_stale_caller_revisions():
     assert "cancel-in-progress: true" in header
 
 
-def test_quality_evidence_requires_explicit_runner_and_pinned_actions():
+def test_quality_evidence_requires_explicit_runner_and_same_commit_actions():
     content = WORKFLOW.read_text()
 
     assert "runner:" in content
     assert "runs-on: ${{ inputs.runner }}" in content
     assert "workflow-ci-ref:" in content
-    assert 'default: "v1.7.0"' in content
-    assert "repository: didlawowo/workflow-ci" in content
-    assert "ref: ${{ inputs.workflow-ci-ref }}" in content
+    assert 'default: ""' in content
+    assert "repository: didlawowo/workflow-ci" not in content
+    assert "uses: $/.github/actions/run-python-tests" in content
+    assert "uses: $/.github/actions/run-go-tests" in content
+    assert "uses: $/.github/actions/run-node-tests" in content
     assert "ubuntu-latest" not in content
     assert "@main" not in content
 
 
-def test_quality_evidence_dependency_chain_has_no_workflow_ci_main_refs():
+def test_quality_evidence_dependency_chain_uses_same_commit_self_refs():
     root = Path(__file__).resolve().parents[1]
-    paths = [
-        root / ".github" / "actions" / "run-python-tests" / "action.yml",
-        root / ".github" / "actions" / "run-go-tests" / "action.yml",
-        root / ".github" / "actions" / "run-node-tests" / "action.yml",
-    ]
-    for path in paths:
-        content = path.read_text()
+    go_tests = (root / ".github" / "actions" / "run-go-tests" / "action.yml").read_text()
+    node_tests = (root / ".github" / "actions" / "run-node-tests" / "action.yml").read_text()
+    python_quality = (root / ".github" / "actions" / "python-quality-security" / "action.yml").read_text()
+    go_quality = (root / ".github" / "actions" / "go-quality-security" / "action.yml").read_text()
+    node_quality = (root / ".github" / "actions" / "node-quality-security" / "action.yml").read_text()
+
+    for content in (go_tests, node_tests, python_quality, go_quality, node_quality):
         assert "@main" not in content
-        if "didlawowo/workflow-ci/" in content:
-            assert "@v1.7.0" in content
+        assert "didlawowo/workflow-ci/.github/actions/" not in content
+
+    assert "uses: $/.github/actions/setup-go-env" in go_tests
+    assert "uses: $/.github/actions/setup-node-env" in node_tests
 
 
-def test_mutation_policy_cancels_only_relevant_pr_and_issue_events():
+def test_mutation_policy_cancels_only_relevant_pr_events():
     root = Path(__file__).resolve().parents[1]
     content = (root / ".github" / "workflows" / "mutation-policy.yml").read_text()
     header = content.split("\njobs:", 1)[0]
 
+    assert "workflow_call:" in header
     assert "types: [opened, synchronize, reopened, labeled, unlabeled, edited]" in header
+    assert "issues:" not in header
     assert "concurrency:" in header
-    assert "group: mutation-policy-${{ github.repository }}-${{ github.event_name }}-" in header
-    assert "github.event.action != 'edited' || github.event.changes.body != null" in header
-    assert "github.event.label.name == 'complexity:high'" in header
-    assert "github.event.label.name == 'priority:high'" in header
-    assert "github.run_id" in header
+    assert "group: mutation-policy-${{ github.repository }}-" in header
+    assert "github.event.pull_request.number || github.run_id" in header
+    assert "inputs.scope-key || 'default'" in header
     assert "cancel-in-progress: true" in header
-
-    # Title-only edits and unrelated issue labels use the run-id fallback, so
-    # they cannot cancel a real gate and then skip all mutation work.
-    assert content.count("github.event.changes.body != null") >= 3
+    assert content.count("github.event.changes.body != null") >= 2
 
 
 def test_forgejo_filters_irrelevant_edits_and_isolates_noop_concurrency():
@@ -97,9 +98,29 @@ def test_mutation_policy_separates_untrusted_execution_from_trusted_verification
     assert "Fetch trusted base policy without submodule traversal" in content
     assert "Fetch pull request code without submodule traversal" in content
     assert "vars.UNTRUSTED_RUNNER || 'ubuntu-latest'" in content
-    assert 'bash "$GITHUB_WORKSPACE/.policy/.ci/mutation.sh"' in content
+    assert "Resolve trusted mutation runner" in content
+    assert ".workflow-ci/.ci/mutation-go.sh" in content
+    assert ".workflow-ci/.ci/mutation.sh" in content
+    assert "Setup Go for central Gremlins runner" in content
+    assert "go-version-file: pr/go.mod" in content
+    assert 'bash "${{ steps.runner.outputs.path }}"' in content
+    assert "job.workflow_repository" in content
+    assert "job.workflow_sha" in content
     assert "needs: [mutation-run]" in content
     assert "actions/download-artifact@v6" in content
+
+
+def test_central_go_mutation_runner_is_pinned_and_strict():
+    root = Path(__file__).resolve().parents[1]
+    runner = (root / ".ci" / "mutation-go.sh").read_text()
+
+    assert 'GREMLINS_VERSION="0.6.0"' in runner
+    assert '--diff "$BASE_SHA"' in runner
+    assert "--output .quality/gremlins-raw.json" in runner
+    assert '"survived": survived' in runner
+    assert "not_covered" in runner
+    assert "timeouts" in runner
+    assert "sha256sum -c -" in runner
 
 
 def test_mutation_policy_requires_machine_readable_evidence_and_zero_survivors():
@@ -112,6 +133,45 @@ def test_mutation_policy_requires_machine_readable_evidence_and_zero_survivors()
     assert "if survived or timeouts or suspicious:" in content
 
 
+
+def test_trusted_quality_enforces_ruff_and_sonarqube_quality_gate():
+    root = Path(__file__).resolve().parents[1]
+    workflow = WORKFLOW.read_text()
+    sonar = (root / ".github" / "actions" / "sonarqube-scan" / "action.yml").read_text()
+
+    assert "Verify Python quality and security" in workflow
+    assert "uses: $/.github/actions/python-quality-security" in workflow
+    python_quality = (
+        root / ".github" / "actions" / "python-quality-security" / "action.yml"
+    ).read_text()
+    assert "Run Ruff linting" in python_quality
+    assert "uvx --from ruff==0.16.8 ruff check ." in python_quality
+
+    assert "sonar-enabled:" not in workflow
+    assert "sonar-project-key:" not in workflow
+    assert "sonar-extra-args:" not in workflow
+    assert "SONAR_TOKEN:" in workflow
+    assert "uses: $/.github/actions/sonarqube-scan" in workflow
+    assert "project-key: ${{ vars.SONAR_PROJECT_KEY }}" in workflow
+    assert "steps.sonarqube.outcome" in workflow
+    assert "SonarQube Quality Gate failed, is not configured, or analysis could not complete" in workflow
+    assert "sonar-project.properties is protected quality policy" in workflow
+    assert "vars.SONAR_ENABLED == 'true'" in workflow
+    assert "github.repository != 'didlawowo/workflow-ci'" not in workflow
+
+    assert "SonarSource/sonarqube-scan-action@v8.2.2" in sonar
+    assert "-Dsonar.projectKey=${{ inputs.project-key }}" in sonar
+    assert "-Dsonar.host.url=https://sonarqube.dc-tech.work" in sonar
+    assert "-Dsonar.qualitygate.wait=true" in sonar
+    assert "-Dsonar.qualitygate.timeout=300" in sonar
+    assert "coverage-args:" not in sonar
+    assert "repo-type:" in sonar
+    assert "working-directory:" in sonar
+    assert "python-coverage-report-path:" in sonar
+    assert "Invalid $label path for SonarQube" in sonar
+    assert "extra-args:" not in sonar
+    assert "wait-for-quality-gate:" not in sonar
+
 def test_language_templates_make_quality_failures_blocking():
     root = Path(__file__).resolve().parents[1]
     for language in ("python", "go", "node"):
@@ -121,8 +181,11 @@ def test_language_templates_make_quality_failures_blocking():
 
         assert gate_index > quality_index
         assert content.count("- name: Enforce quality and security gate") == 1
+        assert "push:\n    branches: [main]" in content
+        assert "cancel-in-progress: true" in content
         assert (
-            "if: always() && needs.tests.result == 'success' && "
+            "if: always() && github.event_name != 'pull_request' && "
+            "needs.tests.result == 'success' && "
             "needs.quality-security.result == 'success'"
         ) in content
 
@@ -138,7 +201,7 @@ def test_mutation_verify_is_read_only_and_scoped_to_changed_functions():
     verify = content.split("  mutation-verify:", 1)[1]
     assert "issues: write" not in verify
     assert "pull-requests: write" not in verify
-    assert "vars.UNTRUSTED_RUNNER || 'ubuntu-latest'" in verify
+    assert "inputs.trusted-runner || vars.RUNNER || 'ubuntu-latest'" in verify
     assert "git\", \"-C\", str(repo), \"diff\", \"--unified=0\"" in verify
     assert "mutation gate failed for changed functions" in verify
     assert "scoped-mutation-evidence-" in verify
@@ -273,24 +336,26 @@ def test_issue_59_mutation_policy_uses_exact_tree_range_and_isolated_home():
     assert 'HOME="$HOME"' not in content
 
 
-def test_language_templates_use_single_pr_pipeline_with_concurrency():
+def test_language_templates_split_pr_fast_path_from_main_heavy_path():
     root = Path(__file__).resolve().parents[1]
     for language in ("python", "go", "node"):
         content = (root / "templates" / language / "ci-branch-pipeline.yml").read_text()
         header = content.split("\njobs:", 1)[0]
 
-        assert "\n  push:" not in header
+        assert "\n  push:\n    branches: [main]" in header
         assert "pull_request:" in header
         assert "workflow_dispatch:" in header
         assert "concurrency:" in header
         assert "group: ci-${{ github.workflow }}-${{ github.head_ref || github.ref_name }}" in header
         assert "cancel-in-progress: true" in header
+        assert "github.event_name != 'pull_request'" in content
+        assert "timeout-minutes:" in content
 
 
 def test_internal_workflow_ci_refs_follow_immutable_version_contract():
     root = Path(__file__).resolve().parents[1]
     version = (root / ".workflow-ci-version").read_text().strip()
-    assert version == "v1.7.0"
+    assert version == "v1.8.0"
 
     scan_roots = (
         root / ".github" / "actions",
@@ -315,7 +380,7 @@ def test_internal_workflow_ci_refs_follow_immutable_version_contract():
 
     release = (root / ".github" / "workflows" / "release.yml").read_text()
     assert 'workflow-ci-ref:' in release
-    assert 'default: "v1.7.0"' in release
+    assert 'default: "v1.8.0"' in release
 
 
 def test_internal_ref_sync_helper_is_present_and_checkable():
@@ -329,12 +394,17 @@ def test_internal_ref_sync_helper_is_present_and_checkable():
 
 def test_issue_56_reacts_to_issue_label_add_and_remove():
     root = Path(__file__).resolve().parents[1]
-    workflow = (root / ".github" / "workflows" / "mutation-policy.yml").read_text()
+    workflow = (
+        root / ".github" / "workflows" / "mutation-issue-policy.yml"
+    ).read_text()
 
     assert "types: [labeled, unlabeled]" in workflow
     assert "refresh-linked-prs:" in workflow
     assert "actions: write" in workflow
     assert "mutation_policy.py refresh" in workflow
+    assert "inputs.runner || vars.RUNNER || 'ubuntu-latest'" in workflow
+    assert "job.workflow_repository" in workflow
+    assert "job.workflow_sha" in workflow
     notify = workflow.split("  notify:", 1)[1].split("  refresh-linked-prs:", 1)[0]
     assert "github.event.action == 'labeled'" in notify
 
@@ -388,14 +458,21 @@ def test_quality_evidence_separates_read_only_execution_from_privileged_publicat
 
     assert "issues: write" not in execution
     assert "pull-requests: write" not in execution
-    assert execution.count("persist-credentials: false") >= 2
-    assert "uses: ./.workflow-ci/.github/actions/quality-report" not in execution
+    assert execution.count("persist-credentials: false") >= 1
+    assert "uses: $/.github/actions/quality-report" not in execution
+    assert "repository: didlawowo/workflow-ci" not in execution
 
-    assert "needs: [independent-verification]" in publisher
+    assert "needs: [independent-verification, mutation]" in publisher
+    assert "scope-key: ${{ format('{0}-{1}', inputs.repo-type, inputs.working-directory) }}" in content
+    assert "Download trusted mutation evidence" in publisher
+    assert "needs.mutation.outputs.report-file" in publisher
+    assert "format('.mutation-evidence/{0}', needs.mutation.outputs.report-file)" in publisher
+    assert "mutation-required: ${{ needs.mutation.outputs.required == 'true' }}" in publisher
     assert "issues: write" not in publisher
     assert "pull-requests: write" in publisher
-    assert publisher.count("persist-credentials: false") >= 2
-    assert "uses: ./.workflow-ci/.github/actions/quality-report" in publisher
+    assert publisher.count("persist-credentials: false") >= 1
+    assert "uses: $/.github/actions/quality-report" in publisher
+    assert "repository: didlawowo/workflow-ci" not in publisher
     assert 'junit-glob: "${{ runner.temp }}/quality-evidence/no-junit.xml"' in publisher
     assert 'coverage-glob: "${{ runner.temp }}/quality-evidence/no-coverage.xml"' in publisher
 
@@ -407,6 +484,7 @@ def test_consumer_selftest_grants_reusable_publisher_pr_write_permission():
     ).read_text()
 
     assert content.count("pull-requests: write") == 3
+    assert "sonar-enabled:" not in content
     assert "pull-requests: read" not in content
 
 

@@ -1,0 +1,171 @@
+name: "SonarQube Quality Gate"
+description: "Run SonarQube analysis against the central server and block on the server-side Quality Gate"
+
+inputs:
+  sonar-token:
+    description: "SonarQube analysis token"
+    required: true
+  sonar-root-cert:
+    description: "Optional PEM root certificate for the SonarQube TLS chain"
+    required: false
+    default: ""
+  project-key:
+    description: "Exact SonarQube project key"
+    required: true
+  repo-type:
+    description: "Repository language/type"
+    required: true
+  working-directory:
+    description: "Project directory relative to repository root"
+    required: false
+    default: "."
+  python-coverage-report-path:
+    description: "Python coverage XML path relative to working-directory"
+    required: false
+    default: "coverage-reports/coverage.xml"
+
+outputs:
+  project-url:
+    description: "SonarQube project dashboard URL"
+    value: ${{ steps.metadata.outputs.project-url }}
+  current-coverage:
+    description: "Coverage percentage for the current pull request analysis"
+    value: ${{ steps.metrics.outputs.current-coverage }}
+  main-coverage:
+    description: "Coverage percentage currently stored for main"
+    value: ${{ steps.metrics.outputs.main-coverage }}
+  changed-lines-coverage:
+    description: "SonarQube new-code coverage for the current pull request"
+    value: ${{ steps.metrics.outputs.changed-lines-coverage }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Validate SonarQube configuration
+      id: metadata
+      shell: bash
+      env:
+        SONAR_TOKEN_VALUE: ${{ inputs.sonar-token }}
+        SONAR_HOST_VALUE: "https://sonarqube.dc-tech.work"
+        SONAR_PROJECT_VALUE: ${{ inputs.project-key }}
+      run: |
+        set -euo pipefail
+        if [[ -z "$SONAR_TOKEN_VALUE" ]]; then
+          echo "::error::SONAR_TOKEN is required when SonarQube quality gating is enabled."
+          exit 1
+        fi
+        if [[ -z "$SONAR_PROJECT_VALUE" ]]; then
+          echo "::error::sonar-project-key is required when SonarQube quality gating is enabled."
+          exit 1
+        fi
+        if [[ "$SONAR_HOST_VALUE" != https://* && "$SONAR_HOST_VALUE" != http://* ]]; then
+          echo "::error::Invalid SonarQube host URL: $SONAR_HOST_VALUE"
+          exit 1
+        fi
+        HOST="${SONAR_HOST_VALUE%/}"
+        echo "project-url=${HOST}/dashboard?id=${SONAR_PROJECT_VALUE}" >> "$GITHUB_OUTPUT"
+
+    - name: Resolve trusted SonarQube coverage property
+      id: coverage
+      shell: bash
+      env:
+        REPO_TYPE: ${{ inputs.repo-type }}
+        WORKDIR: ${{ inputs.working-directory }}
+        PYTHON_COVERAGE: ${{ inputs.python-coverage-report-path }}
+      run: |
+        set -euo pipefail
+        validate_path() {
+          local label="$1"
+          local value="$2"
+          if [[ -z "$value" || "$value" =~ [[:space:]] || "$value" == /* || "$value" == *".."* || ! "$value" =~ ^[A-Za-z0-9._/-]+$ ]]; then
+            echo "::error::Invalid $label path for SonarQube: '$value'"
+            exit 1
+          fi
+        }
+
+        PREFIX=""
+        if [[ "$WORKDIR" != "." ]]; then
+          validate_path "working-directory" "$WORKDIR"
+          PREFIX="${WORKDIR%/}/"
+        fi
+
+        case "$REPO_TYPE" in
+          python)
+            validate_path "python coverage" "$PYTHON_COVERAGE"
+            echo "arg=-Dsonar.python.coverage.reportPaths=${PREFIX}${PYTHON_COVERAGE}" >> "$GITHUB_OUTPUT"
+            ;;
+          go)
+            echo "arg=-Dsonar.go.coverage.reportPaths=${PREFIX}coverage.out" >> "$GITHUB_OUTPUT"
+            ;;
+          node|typescript|javascript)
+            echo "arg=-Dsonar.javascript.lcov.reportPaths=${PREFIX}coverage/lcov.info" >> "$GITHUB_OUTPUT"
+            ;;
+          *)
+            echo "::error::Unsupported repo type '$REPO_TYPE' for SonarQube coverage"
+            exit 1
+            ;;
+        esac
+
+    - name: Run SonarQube scan and wait for Quality Gate
+      id: scan
+      continue-on-error: true
+      uses: SonarSource/sonarqube-scan-action@v8.2.2
+      env:
+        SONAR_TOKEN: ${{ inputs.sonar-token }}
+        SONAR_HOST_URL: "https://sonarqube.dc-tech.work"
+        SONAR_ROOT_CERT: ${{ inputs.sonar-root-cert }}
+      with:
+        projectBaseDir: "."
+        args: >-
+          ${{ steps.coverage.outputs.arg }}
+          -Dsonar.projectKey=${{ inputs.project-key }}
+          -Dsonar.host.url=https://sonarqube.dc-tech.work
+          -Dsonar.qualitygate.wait=true
+          -Dsonar.qualitygate.timeout=300
+
+    - name: Read SonarQube coverage evidence
+      id: metrics
+      if: always() && steps.metadata.outcome == 'success'
+      shell: bash
+      env:
+        SONAR_TOKEN_VALUE: ${{ inputs.sonar-token }}
+        SONAR_PROJECT_VALUE: ${{ inputs.project-key }}
+        PR_NUMBER: ${{ github.event.pull_request.number }}
+      run: |
+        set -euo pipefail
+        HOST="https://sonarqube.dc-tech.work"
+
+        measure() {
+          local metric="$1"
+          shift
+          local payload
+          if ! payload="$(curl -fsS -u "${SONAR_TOKEN_VALUE}:" --get             --data-urlencode "component=${SONAR_PROJECT_VALUE}"             --data-urlencode "metricKeys=${metric}"             "$@"             "${HOST}/api/measures/component" 2>/dev/null)"; then
+            return 0
+          fi
+          printf '%s' "$payload" | jq -r '
+            .component.measures[0] as $m
+            | ($m.value // $m.period.value // $m.periods[0].value // empty)
+          ' 2>/dev/null || true
+        }
+
+        MAIN_COVERAGE="$(measure coverage --data-urlencode "branch=main")"
+        echo "main-coverage=$MAIN_COVERAGE" >> "$GITHUB_OUTPUT"
+
+        CURRENT=""
+        CHANGED=""
+        if [[ -n "${PR_NUMBER:-}" ]]; then
+          CURRENT="$(measure coverage --data-urlencode "pullRequest=${PR_NUMBER}")"
+          CHANGED="$(measure new_coverage --data-urlencode "pullRequest=${PR_NUMBER}")"
+        fi
+        echo "current-coverage=$CURRENT" >> "$GITHUB_OUTPUT"
+        echo "changed-lines-coverage=$CHANGED" >> "$GITHUB_OUTPUT"
+
+    - name: Enforce SonarQube Quality Gate result
+      if: always()
+      shell: bash
+      run: |
+        set -euo pipefail
+        if [[ "${{ steps.scan.outcome }}" != "success" ]]; then
+          echo "::error::SonarQube analysis or server-side Quality Gate failed."
+          exit 1
+        fi

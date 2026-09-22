@@ -46,7 +46,7 @@ runs:
   using: "composite"
   steps:
     - name: Setup Python environment
-      uses: didlawowo/workflow-ci/.github/actions/setup-python-env@v1.7.0
+      uses: $/.github/actions/setup-python-env
       with:
         python-version: ${{ inputs.python-version }}
         install-dev: "true"
@@ -57,7 +57,7 @@ runs:
       shell: bash
       working-directory: ${{ inputs.working-directory }}
       run: |
-        if uv run ruff check . --output-format=github; then
+        if uvx --from ruff==0.16.8 ruff check . --output-format=github; then
           echo "status=passed" >> "$GITHUB_OUTPUT"
         else
           echo "status=failed" >> "$GITHUB_OUTPUT"
@@ -69,7 +69,7 @@ runs:
       shell: bash
       working-directory: ${{ inputs.working-directory }}
       run: |
-        if uv run ruff format --check .; then
+        if uvx --from ruff==0.16.8 ruff format --check .; then
           echo "status=passed" >> "$GITHUB_OUTPUT"
         else
           echo "status=failed" >> "$GITHUB_OUTPUT"
@@ -96,9 +96,9 @@ runs:
       working-directory: ${{ inputs.working-directory }}
       run: |
         set +e
-        uv run bandit -r ${{ inputs.bandit-paths }} -f json -o bandit-report.json --skip ${{ inputs.bandit-skip-rules }}
+        uvx --from bandit==1.9.4 bandit -r ${{ inputs.bandit-paths }} -f json -o bandit-report.json --skip ${{ inputs.bandit-skip-rules }}
         STATUS=$?
-        uv run bandit -r ${{ inputs.bandit-paths }} --skip ${{ inputs.bandit-skip-rules }} || true
+        uvx --from bandit==1.9.4 bandit -r ${{ inputs.bandit-paths }} --skip ${{ inputs.bandit-skip-rules }} || true
         set -e
         echo "status=$([[ "$STATUS" -eq 0 ]] && echo passed || echo failed)" >> "$GITHUB_OUTPUT"
       continue-on-error: true
@@ -108,7 +108,8 @@ runs:
       if: inputs.run-trufflehog == 'true'
       uses: trufflesecurity/trufflehog@288a8a8643a2c5a36b81d231c550dccfa0beeb64 # main 2026-09-16
       with:
-        path: ${{ inputs.working-directory }}
+        # TruffleHog must scan from the repository root even for nested projects.
+        path: .
         base: ${{ github.event.before || github.sha }}
         head: ${{ github.sha }}
         extra_args: --only-verified
@@ -119,7 +120,7 @@ runs:
       shell: bash
       working-directory: ${{ inputs.working-directory }}
       run: |
-        if uv run safety check --json --output safety-report.json; then
+        if uvx --from safety==3.8.1 safety check --output json > safety-report.json; then
           echo "status=passed" >> "$GITHUB_OUTPUT"
         else
           echo "status=failed" >> "$GITHUB_OUTPUT"

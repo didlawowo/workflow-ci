@@ -9,6 +9,8 @@
 name: "Security - Comprehensive Scan"
 
 on:
+  push:
+    branches: [main]
   schedule:
     - cron: "0 2 * * *"
   workflow_dispatch:
@@ -45,6 +47,7 @@ jobs:
   filesystem-security:
     name: "Filesystem Security"
     runs-on: ${{ vars.RUNNER || 'ubuntu-latest' }}
+    timeout-minutes: 35
     permissions:
       contents: read
       security-events: write
@@ -70,7 +73,7 @@ jobs:
 
       - name: Trivy filesystem scan
         id: scan
-        uses: didlawowo/workflow-ci/.github/actions/trivy-filesystem-scan@v1.7.0
+        uses: didlawowo/workflow-ci/.github/actions/trivy-filesystem-scan@v1.8.0
         with:
           severity: ${{ steps.severity.outputs.level }}
           fail-on-critical: ${{ inputs.fail-on-issues || 'false' }}
@@ -81,6 +84,7 @@ jobs:
   code-security:
     name: "Code Security"
     runs-on: ${{ vars.RUNNER || 'ubuntu-latest' }}
+    timeout-minutes: 25
     permissions:
       contents: read
       security-events: write
@@ -94,7 +98,7 @@ jobs:
 
       - name: Security checks
         id: checks
-        uses: didlawowo/workflow-ci/.github/actions/python-quality-security@v1.7.0
+        uses: didlawowo/workflow-ci/.github/actions/python-quality-security@v1.8.0
         with:
           python-version: ${{ env.PYTHON_VERSION }}
           working-directory: ${{ env.PYTHON_WORKING_DIR }}
@@ -108,6 +112,7 @@ jobs:
     needs: [filesystem-security, code-security]
     if: always()
     runs-on: ${{ vars.RUNNER || 'ubuntu-latest' }}
+    timeout-minutes: 10
     permissions:
       contents: read
       issues: write

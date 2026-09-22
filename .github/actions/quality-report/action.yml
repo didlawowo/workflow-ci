@@ -18,6 +18,30 @@ inputs:
     description: "Trusted coverage percentage fallback when Cobertura XML is unavailable"
     required: false
     default: ""
+  base-coverage-percentage:
+    description: "Trusted coverage percentage measured on main/base"
+    required: false
+    default: ""
+  changed-lines-coverage:
+    description: "Trusted coverage percentage for changed/new lines"
+    required: false
+    default: ""
+  coverage-threshold:
+    description: "Coverage threshold enforced by the test action"
+    required: false
+    default: ""
+  quality-status:
+    description: "Trusted aggregate quality/lint outcome"
+    required: false
+    default: ""
+  security-issues:
+    description: "Trusted count of security issues"
+    required: false
+    default: ""
+  mutation-required:
+    description: "Whether mutation evidence is mandatory for this PR"
+    required: false
+    default: "false"
   tests-total:
     description: "Trusted test count fallback when JUnit is unavailable"
     required: false
@@ -32,6 +56,18 @@ inputs:
     default: ""
   test-status:
     description: "Trusted test command outcome fallback (success/failure)"
+    required: false
+    default: ""
+  sonar-required:
+    description: "Whether SonarQube evidence is mandatory for this repository"
+    required: false
+    default: "false"
+  sonar-status:
+    description: "Trusted SonarQube scan outcome (success/failure/disabled)"
+    required: false
+    default: "disabled"
+  sonar-project-url:
+    description: "Trusted SonarQube project dashboard URL"
     required: false
     default: ""
   base-sha:
@@ -91,6 +127,22 @@ runs:
         if [[ -n "${{ inputs.coverage-percentage }}" ]]; then
           ARGS+=(--coverage-percentage "${{ inputs.coverage-percentage }}")
         fi
+        if [[ -n "${{ inputs.base-coverage-percentage }}" ]]; then
+          ARGS+=(--base-coverage-percentage "${{ inputs.base-coverage-percentage }}")
+        fi
+        if [[ -n "${{ inputs.changed-lines-coverage }}" ]]; then
+          ARGS+=(--changed-lines-coverage "${{ inputs.changed-lines-coverage }}")
+        fi
+        if [[ -n "${{ inputs.coverage-threshold }}" ]]; then
+          ARGS+=(--coverage-threshold "${{ inputs.coverage-threshold }}")
+        fi
+        if [[ -n "${{ inputs.quality-status }}" ]]; then
+          ARGS+=(--quality-status "${{ inputs.quality-status }}")
+        fi
+        if [[ -n "${{ inputs.security-issues }}" ]]; then
+          ARGS+=(--security-issues "${{ inputs.security-issues }}")
+        fi
+        ARGS+=(--mutation-required "${{ inputs.mutation-required }}")
         if [[ -n "${{ inputs.tests-total }}" ]]; then
           ARGS+=(--tests-total "${{ inputs.tests-total }}")
         fi
@@ -102,6 +154,13 @@ runs:
         fi
         if [[ -n "${{ inputs.test-status }}" ]]; then
           ARGS+=(--test-status "${{ inputs.test-status }}")
+        fi
+        ARGS+=(--sonar-required "${{ inputs.sonar-required }}")
+        if [[ -n "${{ inputs.sonar-status }}" ]]; then
+          ARGS+=(--sonar-status "${{ inputs.sonar-status }}")
+        fi
+        if [[ -n "${{ inputs.sonar-project-url }}" ]]; then
+          ARGS+=(--sonar-url "${{ inputs.sonar-project-url }}")
         fi
         if [[ "${{ inputs.comment }}" == "true" ]]; then
           ARGS+=(--comment)

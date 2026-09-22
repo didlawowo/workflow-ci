@@ -34,6 +34,7 @@ SUSPICIOUS_NAMES = {
     "vitest.config.js",
     "vitest.config.ts",
     "stryker.conf.json",
+    "sonar-project.properties",
 }
 
 
@@ -186,6 +187,54 @@ def fallback_coverage(
     }
 
 
+def enrich_coverage(
+    coverage: dict[str, Any],
+    base_percentage: str | None,
+    changed_lines_percentage: str | None,
+    threshold: str | None,
+) -> dict[str, Any]:
+    enriched = dict(coverage)
+
+    def parse_optional(value: str | None) -> float | None:
+        if value in (None, ""):
+            return None
+        try:
+            return round(float(value), 1)
+        except ValueError:
+            return None
+
+    base = parse_optional(base_percentage)
+    changed = parse_optional(changed_lines_percentage)
+    minimum = parse_optional(threshold)
+    current = enriched.get("percentage")
+
+    enriched["base_percentage"] = base
+    enriched["delta"] = (
+        round(float(current) - base, 1)
+        if current is not None and base is not None
+        else None
+    )
+    enriched["changed_lines_percentage"] = changed
+    enriched["threshold"] = minimum
+    enriched["gate_passed"] = (
+        None
+        if current is None or minimum is None
+        else float(current) >= minimum
+    )
+    return enriched
+
+
+def trusted_signal(status: str | None, *, required: bool = True) -> dict[str, Any]:
+    normalized = str(status or "").strip().lower()
+    if normalized in {"success", "passed", "pass", "true", "0"}:
+        return {"available": True, "status": "success", "required": required}
+    if normalized in {"failure", "failed", "fail", "false", "error"}:
+        return {"available": True, "status": "failure", "required": required}
+    if normalized in {"disabled", "skipped", "not-required", "not_required"}:
+        return {"available": False, "status": normalized or "disabled", "required": required}
+    return {"available": False, "status": normalized or "unknown", "required": required}
+
+
 def parse_mutation(path: str | None) -> dict[str, Any]:
     if not path or not Path(path).is_file():
         return {
@@ -196,6 +245,9 @@ def parse_mutation(path: str | None) -> dict[str, Any]:
             "survived": None,
             "timeouts": None,
             "suspicious": None,
+            "not_covered": None,
+            "not_viable": None,
+            "no_targets": False,
             "score": None,
         }
 
@@ -218,6 +270,10 @@ def parse_mutation(path: str | None) -> dict[str, Any]:
     )
     timeouts = _mutation_value(data, ("timeouts", "timeout", "timed_out"))
     suspicious = _mutation_value(data, ("suspicious", "suspicious_mutants"))
+    not_covered = _mutation_value(
+        data, ("not_covered", "no_tests", "mutants_not_covered")
+    )
+    not_viable = _mutation_value(data, ("not_viable", "mutants_not_viable"))
     total = _mutation_value(
         data, ("total", "total_mutants", "mutants", "mutants_total")
     )
@@ -227,12 +283,19 @@ def parse_mutation(path: str | None) -> dict[str, Any]:
             score_raw = float(data[key])
             break
 
-    measured = [value for value in (killed, survived, timeouts, suspicious) if value is not None]
-    if total is None and len(measured) == 4:
-        total = sum(measured)
+    measured = [
+        value
+        for value in (killed, survived, timeouts, suspicious, not_covered)
+        if value is not None
+    ]
+    if total is None and len(measured) >= 4:
+        total = sum(measured) + (not_viable or 0)
     denominator = sum(
-        value or 0 for value in (killed, survived, timeouts, suspicious)
+        value or 0
+        for value in (killed, survived, timeouts, suspicious, not_covered)
     )
+    scope = data.get("scope")
+    no_targets = bool(isinstance(scope, dict) and scope.get("no_targets") is True)
     score = score_raw
     if score is None and killed is not None and denominator:
         score = killed / denominator * 100.0
@@ -247,6 +310,9 @@ def parse_mutation(path: str | None) -> dict[str, Any]:
         "survived": survived,
         "timeouts": timeouts,
         "suspicious": suspicious,
+        "not_covered": not_covered,
+        "not_viable": not_viable,
+        "no_targets": no_targets,
         "score": round(score, 1) if score is not None else None,
     }
 
@@ -275,6 +341,7 @@ def _is_non_production(path: str) -> bool:
         or lowered.startswith(".forgejo/")
         or lowered.startswith(".ci/")
         or lowered.endswith(".md")
+        or lowered == "sonar-project.properties"
     )
 
 
@@ -403,6 +470,136 @@ def ci_history(
     return result
 
 
+def ci_checks(
+    api_url: str | None,
+    repository: str | None,
+    head_sha: str | None,
+    token: str | None,
+) -> dict[str, Any]:
+    result = {
+        "available": False,
+        "build": {"available": False, "status": "not measured", "checks": []},
+        "e2e": {"available": False, "status": "not measured", "checks": []},
+    }
+    if not all((api_url, repository, head_sha, token)):
+        return result
+
+    url = f"{api_url}/repos/{repository}/commits/{head_sha}/check-runs?per_page=100"
+    try:
+        payload = _api_json(url, str(token))
+    except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError):
+        return result
+    if not isinstance(payload, dict):
+        return result
+
+    checks = payload.get("check_runs") or []
+    if not isinstance(checks, list):
+        return result
+
+    categories = {
+        "build": ("build", "docker", "container", "image"),
+        "e2e": ("e2e", "acceptance", "integration", "playwright"),
+    }
+
+    def summarize(items: list[dict[str, Any]]) -> dict[str, Any]:
+        if not items:
+            return {"available": False, "status": "not measured", "checks": []}
+        statuses = []
+        names = []
+        for item in items:
+            names.append(str(item.get("name") or "unnamed"))
+            if item.get("status") != "completed":
+                statuses.append("pending")
+            else:
+                conclusion = str(item.get("conclusion") or "unknown")
+                statuses.append(
+                    "success"
+                    if conclusion in {"success", "neutral", "skipped"}
+                    else "failure"
+                )
+        status = (
+            "failure"
+            if "failure" in statuses
+            else "pending"
+            if "pending" in statuses
+            else "success"
+        )
+        return {"available": True, "status": status, "checks": names}
+
+    for category, needles in categories.items():
+        matched = [
+            item
+            for item in checks
+            if isinstance(item, dict)
+            and any(needle in str(item.get("name") or "").lower() for needle in needles)
+            and "quality report" not in str(item.get("name") or "").lower()
+        ]
+        result[category] = summarize(matched)
+
+    result["available"] = any(result[key]["available"] for key in categories)
+    return result
+
+
+def aggregate_gate(report: dict[str, Any]) -> dict[str, Any]:
+    failures: list[str] = []
+    missing: list[str] = []
+
+    tests = report.get("tests") or {}
+    if not tests.get("available"):
+        missing.append("tests")
+    elif (tests.get("failed") or 0) > 0 or tests.get("status") == "failure":
+        failures.append("tests")
+
+    coverage = report.get("coverage") or {}
+    if not coverage.get("available"):
+        missing.append("coverage")
+    elif coverage.get("gate_passed") is False:
+        failures.append("coverage")
+
+    for key, label in (("quality", "quality"), ("security", "security")):
+        signal = report.get(key) or {}
+        if signal.get("required") and not signal.get("available"):
+            missing.append(label)
+        elif signal.get("status") == "failure":
+            failures.append(label)
+
+    sonar = report.get("sonar") or {}
+    if sonar.get("required") and not sonar.get("available"):
+        missing.append("sonar")
+    elif sonar.get("status") == "failure":
+        failures.append("sonar")
+
+    mutation = report.get("mutation") or {}
+    if mutation.get("required"):
+        if not mutation.get("available"):
+            missing.append("mutation")
+        elif not mutation.get("no_targets"):
+            bad = sum(
+                int(mutation.get(key) or 0)
+                for key in ("survived", "timeouts", "suspicious", "not_covered")
+            )
+            if bad:
+                failures.append("mutation")
+
+    if failures:
+        status = "FAIL"
+    elif missing:
+        status = "INCOMPLETE"
+    else:
+        status = "PASS"
+    return {
+        "status": status,
+        "failures": sorted(set(failures)),
+        "missing": sorted(set(missing)),
+    }
+
+
+def finalize_report(report: dict[str, Any]) -> dict[str, Any]:
+    finalized = dict(report)
+    finalized["gate"] = aggregate_gate(finalized)
+    return finalized
+
+
 def _state_marker(report: dict[str, Any]) -> str:
     raw = json.dumps(report, separators=(",", ":"), sort_keys=True).encode("utf-8")
     encoded = base64.urlsafe_b64encode(raw).decode("ascii")
@@ -452,7 +649,17 @@ def merge_reports(existing: dict[str, Any] | None, current: dict[str, Any]) -> d
     merged["schema_version"] = current.get("schema_version", existing.get("schema_version", 1))
     if current_identity is not None:
         merged["identity"] = current_identity
-    for section in ("tests", "coverage", "mutation", "diff", "history"):
+    for section in (
+        "tests",
+        "coverage",
+        "mutation",
+        "quality",
+        "security",
+        "sonar",
+        "checks",
+        "diff",
+        "history",
+    ):
         candidate = current.get(section)
         previous = existing.get(section)
         if isinstance(candidate, dict) and candidate.get("available"):
@@ -468,8 +675,13 @@ def render_markdown(report: dict[str, Any]) -> str:
     tests = report["tests"]
     coverage = report["coverage"]
     mutation = report["mutation"]
+    quality = report.get("quality", {"available": False, "status": "unknown"})
+    security = report.get("security", {"available": False, "status": "unknown"})
+    sonar = report.get("sonar", {"available": False, "status": "disabled", "url": None})
+    checks = report.get("checks", {})
     diff = report["diff"]
     history = report["history"]
+    gate = aggregate_gate(report)
 
     test_summary = "N/A"
     if tests["available"]:
@@ -482,28 +694,88 @@ def render_markdown(report: dict[str, Any]) -> str:
                 f"({tests['pass_rate']}%)"
             )
 
-    coverage_summary = (
-        f"{coverage['percentage']}%" if coverage["available"] else "N/A"
-    )
+    coverage_summary = "N/A"
+    if coverage["available"]:
+        coverage_summary = f"{coverage['percentage']}%"
+        details = []
+        if coverage.get("base_percentage") is not None:
+            delta = coverage.get("delta")
+            sign = "+" if isinstance(delta, (int, float)) and delta > 0 else ""
+            details.append(
+                f"main {coverage['base_percentage']}% · Δ {sign}{delta}%"
+            )
+        if coverage.get("changed_lines_percentage") is not None:
+            details.append(f"changed lines {coverage['changed_lines_percentage']}%")
+        if coverage.get("threshold") is not None:
+            status = "✅" if coverage.get("gate_passed") else "❌"
+            details.append(f"{status} threshold {coverage['threshold']}%")
+        if details:
+            coverage_summary += " · " + " · ".join(details)
     mutation_summary = "not measured"
     if mutation["available"]:
         mutation_summary = (
             f"{mutation['score'] if mutation['score'] is not None else 'N/A'}% · "
             f"{mutation['killed'] if mutation['killed'] is not None else '?'} killed · "
             f"{mutation['survived'] if mutation['survived'] is not None else '?'} survived · "
-            f"{mutation['timeouts'] if mutation['timeouts'] is not None else '?'} timeout"
+            f"{mutation['timeouts'] if mutation['timeouts'] is not None else '?'} timeout · "
+            f"{mutation['not_covered'] if mutation.get('not_covered') is not None else '?'} not covered"
         )
+    elif mutation.get("required"):
+        mutation_summary = "⚠️ required · evidence missing"
+
+    sonar_summary = "disabled"
+    if sonar.get("available"):
+        status = str(sonar.get("status") or "unknown")
+        if status == "success":
+            label = "✅ Quality Gate passed"
+        elif status == "failure":
+            label = "❌ Quality Gate failed"
+        else:
+            label = f"⚠️ {status}"
+        url = sonar.get("url")
+        sonar_summary = f"[{label}]({url})" if url else label
+
+    def signal_text(signal: dict[str, Any]) -> str:
+        if not signal.get("available"):
+            return "not measured"
+        return "✅ passed" if signal.get("status") == "success" else "❌ failed"
+
+    security_summary = signal_text(security)
+    if security.get("issues") is not None:
+        security_summary += f" · {security['issues']} issue(s)"
+
+    build = checks.get("build") or {}
+    e2e = checks.get("e2e") or {}
+    build_summary = build.get("status", "not measured")
+    e2e_summary = e2e.get("status", "not measured")
+
+    gate_icon = {"PASS": "✅", "FAIL": "❌", "INCOMPLETE": "⚠️"}[gate["status"]]
+    gate_details = []
+    if gate["failures"]:
+        gate_details.append("failed: " + ", ".join(gate["failures"]))
+    if gate["missing"]:
+        gate_details.append("missing: " + ", ".join(gate["missing"]))
+    gate_summary = f"{gate_icon} **{gate['status']}**"
+    if gate_details:
+        gate_summary += " · " + " · ".join(gate_details)
 
     lines = [
         COMMENT_MARKER,
-        _state_marker(report),
+        _state_marker(finalize_report(report)),
         "## CI Quality Report",
+        "",
+        f"**Aggregate gate:** {gate_summary}",
         "",
         "| Signal | Evidence |",
         "|---|---|",
         f"| Tests | {test_summary} |",
         f"| Coverage | {coverage_summary} |",
+        f"| Quality / lint | {signal_text(quality)} |",
+        f"| Security | {security_summary} |",
         f"| Mutation | {mutation_summary} |",
+        f"| SonarQube | {sonar_summary} |",
+        f"| Build / container | {build_summary} |",
+        f"| Acceptance / E2E | {e2e_summary} |",
     ]
     if diff["available"]:
         lines.append(
@@ -539,8 +811,8 @@ def render_markdown(report: dict[str, Any]) -> str:
     lines.extend(
         [
             "",
-            "<sub>Generated from machine-readable JUnit/Cobertura/mutation output and git/API metadata. "
-            "The PR author does not supply the displayed counters.</sub>",
+            "<sub>Generated from machine-readable JUnit/Cobertura/mutation output, SonarQube gate status "
+            "and git/API metadata. The PR author does not supply the displayed counters.</sub>",
         ]
     )
     return "\n".join(lines) + "\n"
@@ -564,7 +836,7 @@ def upsert_comment(
                 existing_report = _extract_state(str(comment.get("body", "")))
                 break
 
-    merged = merge_reports(existing_report, report)
+    merged = finalize_report(merge_reports(existing_report, report))
     markdown = render_markdown(merged)
     payload = json.dumps({"body": markdown}).encode("utf-8")
     if existing_id:
@@ -603,10 +875,19 @@ def main() -> int:
     parser.add_argument("--coverage", action="append", default=[])
     parser.add_argument("--mutation")
     parser.add_argument("--coverage-percentage")
+    parser.add_argument("--base-coverage-percentage")
+    parser.add_argument("--changed-lines-coverage")
+    parser.add_argument("--coverage-threshold")
+    parser.add_argument("--quality-status")
+    parser.add_argument("--security-issues")
+    parser.add_argument("--mutation-required", default="false")
+    parser.add_argument("--sonar-required", default="false")
     parser.add_argument("--tests-total")
     parser.add_argument("--tests-failed")
     parser.add_argument("--tests-skipped")
     parser.add_argument("--test-status")
+    parser.add_argument("--sonar-status")
+    parser.add_argument("--sonar-url")
     parser.add_argument("--base")
     parser.add_argument("--head")
     parser.add_argument("--output-json", default=".quality/quality-report.json")
@@ -624,10 +905,21 @@ def main() -> int:
         args.tests_skipped,
         args.test_status,
     )
-    coverage = fallback_coverage(
-        parse_coverage(args.coverage),
-        args.coverage_percentage,
+    coverage = enrich_coverage(
+        fallback_coverage(
+            parse_coverage(args.coverage),
+            args.coverage_percentage,
+        ),
+        args.base_coverage_percentage,
+        args.changed_lines_coverage,
+        args.coverage_threshold,
     )
+    security_issues = None
+    if args.security_issues not in (None, ""):
+        try:
+            security_issues = int(args.security_issues)
+        except ValueError:
+            security_issues = None
     report = {
         "schema_version": 1,
         "identity": {
@@ -638,7 +930,36 @@ def main() -> int:
         },
         "tests": tests,
         "coverage": coverage,
-        "mutation": parse_mutation(args.mutation),
+        "mutation": {
+            **parse_mutation(args.mutation),
+            "required": str(args.mutation_required).lower() == "true",
+        },
+        "quality": {
+            **trusted_signal(args.quality_status, required=True),
+        },
+        "security": {
+            **trusted_signal(
+                "success"
+                if security_issues == 0
+                else "failure"
+                if security_issues is not None
+                else None,
+                required=True,
+            ),
+            "issues": security_issues,
+        },
+        "sonar": {
+            "available": args.sonar_status not in (None, "", "disabled"),
+            "status": args.sonar_status or "disabled",
+            "url": args.sonar_url or None,
+            "required": str(args.sonar_required).lower() == "true",
+        },
+        "checks": ci_checks(
+            os.environ.get("GITHUB_API_URL"),
+            os.environ.get("GITHUB_REPOSITORY"),
+            args.head,
+            os.environ.get("GITHUB_TOKEN"),
+        ),
         "diff": diff_stats(args.base, args.head),
         "history": ci_history(
             os.environ.get("GITHUB_API_URL"),
@@ -648,6 +969,7 @@ def main() -> int:
             os.environ.get("GITHUB_TOKEN"),
         ),
     }
+    report = finalize_report(report)
     markdown = render_markdown(report)
 
     json_path = Path(args.output_json)

@@ -20,7 +20,7 @@ permissions:
 
 jobs:
   release:
-    uses: didlawowo/workflow-ci/.github/workflows/release.yml@v1.7.0
+    uses: didlawowo/workflow-ci/.github/workflows/release.yml@v1.8.0
     with:
       # Each line is `path:regex` with a single capture group around the version.
       # Examples — uncomment the lines that fit your project:
