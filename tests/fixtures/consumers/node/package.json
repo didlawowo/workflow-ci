@@ -4,6 +4,6 @@
   "private": true,
   "scripts": {
     "test": "node --test --test-reporter=junit --test-reporter-destination=coverage-reports/junit.xml",
-    "lint": "node --check src/index.js"
+    "lint": "node --check test/add.test.js"
   }
 }
