@@ -1,0 +1,2 @@
+# Exercise the v2 configuration seen in Keryx, without disabling any default checks.
+version: "2"

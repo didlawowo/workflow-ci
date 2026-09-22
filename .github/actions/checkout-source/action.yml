@@ -1,0 +1,35 @@
+name: Checkout source without submodule traversal
+description: Credential-free exact-commit checkout, including repositories with orphan gitlinks
+inputs:
+  repository:
+    default: ${{ github.repository }}
+    description: Repository to fetch
+  ref:
+    default: ${{ github.sha }}
+    description: Exact commit SHA (the prospective merge commit on pull_request)
+  token:
+    default: ${{ github.token }}
+    description: Read token used only for the fetch
+  persist-credentials:
+    default: 'false'
+    description: Must remain false
+  fetch-depth:
+    default: '0'
+    description: Must remain zero for complete base/head ancestry
+outputs:
+  sha:
+    value: ${{ steps.checkout.outputs.sha }}
+    description: Verified checkout commit
+runs:
+  using: composite
+  steps:
+    - name: Fetch exact source tree
+      id: checkout
+      shell: bash
+      env:
+        CHECKOUT_REPOSITORY: ${{ inputs.repository }}
+        CHECKOUT_REF: ${{ inputs.ref }}
+        CHECKOUT_TOKEN: ${{ inputs.token }}
+        CHECKOUT_PERSIST_CREDENTIALS: ${{ inputs.persist-credentials }}
+        CHECKOUT_FETCH_DEPTH: ${{ inputs.fetch-depth }}
+      run: bash "$GITHUB_ACTION_PATH/checkout.sh"

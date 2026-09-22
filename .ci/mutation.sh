@@ -97,13 +97,27 @@ else
   echo "::notice::No PR base/head scope supplied; running the full configured mutation scope."
 fi
 
+# Consumer dependencies belong in the isolated environment too. A provisioner
+# must not maintain a private `uv sync`/Mutmut runner merely to install them.
+if command -v uv >/dev/null 2>&1 && [[ -f pyproject.toml ]]; then
+  SYNC_FILE="$(mktemp)"
+  trap 'rm -f "$SYNC_FILE"' EXIT
+  "$PYTHON" "$SCRIPT_DIR/mutation_contract.py" > "$SYNC_FILE"
+  mapfile -d '' -t SYNC_ARGS < "$SYNC_FILE"
+  UV_PROJECT_ENVIRONMENT="$VIRTUAL_ENV" uv "${SYNC_ARGS[@]}"
+  rm -f "$SYNC_FILE"
+  trap - EXIT
+elif command -v uv >/dev/null 2>&1 && [[ -f requirements.txt ]]; then
+  uv pip install --python "$PYTHON" -r requirements.txt
+fi
+
 if command -v uv >/dev/null 2>&1; then
-  if ! uv pip install --python "$PYTHON" -q pytest mutmut; then
+  if ! uv pip install --python "$PYTHON" -q pytest pytest-cov 'mutmut>=3,<4'; then
     bootstrap_error "uv failed to install pytest/mutmut into the isolated environment."
     exit 1
   fi
 else
-  if ! "$PYTHON" -m pip install -q pytest mutmut; then
+  if ! "$PYTHON" -m pip install -q pytest pytest-cov 'mutmut>=3,<4'; then
     bootstrap_error "pip failed to install pytest/mutmut into the pre-provisioned environment."
     exit 1
   fi

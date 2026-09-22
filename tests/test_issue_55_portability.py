@@ -30,7 +30,15 @@ def test_python_actions_honor_nested_projects_and_explicit_evidence():
 
     assert "working-directory: ${{ inputs.working-directory }}" in quality
     # Secret scanning needs the git root; nested project tooling still honors working-directory.
-    assert "path: ." in quality
+    assert "path: ${{ github.workspace }}" in quality
+
+
+def test_trufflehog_scans_pr_base_to_head_not_merge_sha_to_itself():
+    quality = read(".github/actions/python-quality-security/action.yml")
+    assert "base: ${{ github.event.pull_request.base.sha ||" in quality
+    assert "head: ${{ github.event.pull_request.head.sha || github.sha }}" in quality
+    assert "github.event.before || github.sha" not in quality
+    assert "github.event.before != '0000000000000000000000000000000000000000'" in quality
 
 
 def test_node_actions_honor_nested_projects_and_selected_package_manager():

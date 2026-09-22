@@ -1,0 +1,42 @@
+name: Central mutation delegation self-test
+on:
+  pull_request:
+    paths:
+      - '.ci/**'
+      - '.forgejo/actions/mutation-policy/**'
+      - 'tests/*mutation*'
+      - '.github/workflows/mutation-delegation-selftest.yml'
+  push:
+    branches: [main]
+    paths:
+      - '.ci/**'
+      - '.forgejo/actions/mutation-policy/**'
+      - 'tests/*mutation*'
+      - '.github/workflows/mutation-delegation-selftest.yml'
+permissions:
+  contents: read
+concurrency:
+  group: mutation-delegation-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+jobs:
+  python-central-runner:
+    runs-on: ${{ vars.RUNNER || 'ubuntu-latest' }}
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@v10.1.0
+        with:
+          enable-cache: false
+      - name: Real dependency-bearing consumer without a local mutation script
+        run: bash tests/run_central_mutation_smoke.sh
+      - name: Real Forgejo adapter sandbox without a live forge dependency
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "$(id -u)" == "0" ]]; then
+            uv run --no-project --python 3.12 python tests/run_forgejo_mutation_smoke.py
+          else
+            sudo env "PATH=$PATH" uv run --no-project --python 3.12 python tests/run_forgejo_mutation_smoke.py
+          fi
