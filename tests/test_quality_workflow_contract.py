@@ -314,18 +314,20 @@ def test_issue_59_mutation_policy_uses_exact_tree_range_and_isolated_home():
     assert 'HOME="$HOME"' not in content
 
 
-def test_language_templates_use_single_pr_pipeline_with_concurrency():
+def test_language_templates_split_pr_fast_path_from_main_heavy_path():
     root = Path(__file__).resolve().parents[1]
     for language in ("python", "go", "node"):
         content = (root / "templates" / language / "ci-branch-pipeline.yml").read_text()
         header = content.split("\njobs:", 1)[0]
 
-        assert "\n  push:" not in header
+        assert "\n  push:\n    branches: [main]" in header
         assert "pull_request:" in header
         assert "workflow_dispatch:" in header
         assert "concurrency:" in header
         assert "group: ci-${{ github.workflow }}-${{ github.head_ref || github.ref_name }}" in header
         assert "cancel-in-progress: true" in header
+        assert "github.event_name != 'pull_request'" in content
+        assert "timeout-minutes:" in content
 
 
 def test_internal_workflow_ci_refs_follow_immutable_version_contract():
