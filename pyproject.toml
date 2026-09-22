@@ -1,3 +1,3 @@
 [tool.mutmut]
 source_paths = ["quality_report.py"]
-pytest_add_cli_args_test_selection = ["tests/test_quality_report.py"]
+pytest_add_cli_args_test_selection = ["tests/test_quality_report.py", "tests/test_mutation_report_fail_closed.py"]

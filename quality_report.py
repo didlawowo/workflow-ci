@@ -317,6 +317,21 @@ def parse_mutation(path: str | None) -> dict[str, Any]:
     }
 
 
+def mutation_evidence(
+    path: str | None, required: str, result: str | None = None
+) -> dict[str, Any]:
+    """Keep trusted execution/classification separate from optional evidence."""
+    evidence = parse_mutation(path)
+    policy = str(required or "").strip().lower()
+    evidence["required"] = policy == "true"
+    if result is not None:
+        evidence["execution_status"] = str(result or "").strip().lower() or "unknown"
+        evidence["policy_status"] = policy if policy in {"true", "false"} else "unknown"
+        # Only an explicit trusted false can make mutation optional.
+        evidence["required"] = policy != "false"
+    return evidence
+
+
 def _is_test_path(path: str) -> bool:
     lowered = path.lower()
     parts = lowered.split("/")
@@ -570,6 +585,13 @@ def aggregate_gate(report: dict[str, Any]) -> dict[str, Any]:
         failures.append("sonar")
 
     mutation = report.get("mutation") or {}
+    if "execution_status" in mutation:
+        if mutation["execution_status"] in {"failure", "cancelled"}:
+            failures.append("mutation-execution")
+        elif mutation["execution_status"] != "success":
+            missing.append("mutation-execution")
+        if mutation.get("policy_status") not in {"true", "false"}:
+            missing.append("mutation-policy")
     if mutation.get("required"):
         if not mutation.get("available"):
             missing.append("mutation")
@@ -662,7 +684,13 @@ def merge_reports(existing: dict[str, Any] | None, current: dict[str, Any]) -> d
     ):
         candidate = current.get(section)
         previous = existing.get(section)
-        if isinstance(candidate, dict) and candidate.get("available"):
+        if section == "mutation" and isinstance(candidate, dict) and "execution_status" in candidate:
+            # The latest authoritative result wins, even when evidence is absent.
+            merged[section] = candidate
+        elif section == "mutation" and isinstance(previous, dict) and "execution_status" in previous:
+            # A legacy/partial publisher cannot erase a trusted failure.
+            merged[section] = previous
+        elif isinstance(candidate, dict) and candidate.get("available"):
             merged[section] = candidate
         elif previous is not None:
             merged[section] = previous
@@ -723,6 +751,11 @@ def render_markdown(report: dict[str, Any]) -> str:
     elif mutation.get("required"):
         mutation_summary = "⚠️ required · evidence missing"
 
+    if "execution_status" in mutation:
+        mutation_summary += f" · execution: {mutation['execution_status']}"
+        if mutation.get("policy_status") == "unknown":
+            mutation_summary += " · policy: unknown"
+
     sonar_summary = "disabled"
     if sonar.get("available"):
         status = str(sonar.get("status") or "unknown")
@@ -743,6 +776,8 @@ def render_markdown(report: dict[str, Any]) -> str:
     security_summary = signal_text(security)
     if security.get("issues") is not None:
         security_summary += f" · {security['issues']} issue(s)"
+    if security.get("scan_errors"):
+        security_summary += f" · {security['scan_errors']} scanner execution error(s)"
 
     build = checks.get("build") or {}
     e2e = checks.get("e2e") or {}
@@ -880,6 +915,8 @@ def main() -> int:
     parser.add_argument("--coverage-threshold")
     parser.add_argument("--quality-status")
     parser.add_argument("--security-issues")
+    parser.add_argument("--security-scan-errors", default="0")
+    parser.add_argument("--mutation-result")
     parser.add_argument("--mutation-required", default="false")
     parser.add_argument("--sonar-required", default="false")
     parser.add_argument("--tests-total")
@@ -920,6 +957,10 @@ def main() -> int:
             security_issues = int(args.security_issues)
         except ValueError:
             security_issues = None
+    try:
+        scan_errors = int(args.security_scan_errors)
+    except (TypeError, ValueError):
+        scan_errors = None
     report = {
         "schema_version": 1,
         "identity": {
@@ -930,23 +971,21 @@ def main() -> int:
         },
         "tests": tests,
         "coverage": coverage,
-        "mutation": {
-            **parse_mutation(args.mutation),
-            "required": str(args.mutation_required).lower() == "true",
-        },
+        "mutation": mutation_evidence(args.mutation, args.mutation_required, args.mutation_result),
         "quality": {
             **trusted_signal(args.quality_status, required=True),
         },
         "security": {
             **trusted_signal(
                 "success"
-                if security_issues == 0
+                if security_issues == 0 and scan_errors == 0
                 else "failure"
                 if security_issues is not None
                 else None,
                 required=True,
             ),
             "issues": security_issues,
+            "scan_errors": scan_errors,
         },
         "sonar": {
             "available": args.sonar_status not in (None, "", "disabled"),

@@ -38,6 +38,9 @@ outputs:
   security-issues:
     description: "Number of security issues found"
     value: ${{ steps.summary.outputs.security-issues }}
+  security-scan-errors:
+    description: "Scanner execution errors; not secret findings"
+    value: ${{ steps.summary.outputs.security-scan-errors }}
   linting-status:
     description: "Linting status"
     value: ${{ steps.summary.outputs.linting-status }}
@@ -106,13 +109,8 @@ runs:
     - name: TruffleHog secret detection
       id: trufflehog
       if: inputs.run-trufflehog == 'true'
-      uses: trufflesecurity/trufflehog@288a8a8643a2c5a36b81d231c550dccfa0beeb64 # main 2026-09-16
-      with:
-        # Scan the git root, including for nested projects. PRs use their real delta.
-        path: ${{ github.workspace }}
-        base: ${{ github.event.pull_request.base.sha || (github.event.before != '0000000000000000000000000000000000000000' && github.event.before) || '' }}
-        head: ${{ github.event.pull_request.head.sha || github.sha }}
-        extra_args: --only-verified
+      shell: bash
+      run: bash "$GITHUB_ACTION_PATH/trufflehog.sh"
       continue-on-error: true
 
     - name: Safety dependency check
@@ -133,6 +131,7 @@ runs:
       working-directory: ${{ inputs.working-directory }}
       run: |
         SECURITY_ISSUES=0
+        SECURITY_SCAN_ERRORS=0
         QUALITY_PASSED=true
         LINTING_STATUS="passed"
 
@@ -154,8 +153,29 @@ runs:
         if [ "${{ inputs.run-mypy }}" = "true" ] && [ "${{ steps.mypy.outputs.status }}" != "passed" ]; then
           QUALITY_PASSED=false
         fi
-        if [ "${{ inputs.run-trufflehog }}" = "true" ] && [ "${{ steps.trufflehog.outcome }}" != "success" ]; then
-          SECURITY_ISSUES=$((SECURITY_ISSUES + 1))
+        if [ "${{ inputs.run-trufflehog }}" = "true" ]; then
+          SECRET_FINDINGS="${{ steps.trufflehog.outputs.findings }}"
+          if [[ "$SECRET_FINDINGS" =~ ^[0-9]+$ ]]; then
+            SECURITY_ISSUES=$((SECURITY_ISSUES + SECRET_FINDINGS))
+          fi
+          case "${{ steps.trufflehog.outputs.status }}" in
+            success)
+              if [[ "${{ steps.trufflehog.outcome }}" != success || "$SECRET_FINDINGS" != 0 ]]; then
+                QUALITY_PASSED=false
+                SECURITY_SCAN_ERRORS=$((SECURITY_SCAN_ERRORS + 1))
+              fi
+              ;;
+            findings)
+              QUALITY_PASSED=false
+              if [[ ! "$SECRET_FINDINGS" =~ ^[0-9]+$ || "$SECRET_FINDINGS" == 0 ]]; then
+                SECURITY_SCAN_ERRORS=$((SECURITY_SCAN_ERRORS + 1))
+              fi
+              ;;
+            *)
+              QUALITY_PASSED=false
+              SECURITY_SCAN_ERRORS=$((SECURITY_SCAN_ERRORS + 1))
+              ;;
+          esac
         fi
         if [ "${{ steps.safety.outputs.status }}" != "passed" ]; then
           SECURITY_ISSUES=$((SECURITY_ISSUES + 1))
@@ -164,6 +184,7 @@ runs:
         {
           echo "passed=${QUALITY_PASSED}"
           echo "security-issues=${SECURITY_ISSUES}"
+          echo "security-scan-errors=${SECURITY_SCAN_ERRORS}"
           echo "linting-status=${LINTING_STATUS}"
         } >> "$GITHUB_OUTPUT"
 
