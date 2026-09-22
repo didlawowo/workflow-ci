@@ -58,6 +58,7 @@ jobs:
     permissions:
       contents: read
       actions: read
+      pull-requests: write
       security-events: write
     steps:
       - uses: actions/checkout@v6
