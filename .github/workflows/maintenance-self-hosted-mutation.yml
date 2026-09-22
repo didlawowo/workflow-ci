@@ -25,6 +25,7 @@ jobs:
       - name: Run pinned reviewed preparation and regression commands
         run: |
           uv run --no-project --python 3.12 --with PyYAML==6.0.3 python - <<'PY'
+          import ast
           import subprocess
           from pathlib import Path
           import yaml
@@ -42,8 +43,7 @@ jobs:
               print('EXECUTING: ' + name, flush=True)
               subprocess.run(['bash', '-e', '-o', 'pipefail', '-c', steps[name]['run']], check=True)
               if name == 'Prepare minimal runner correction':
-                  # ARC scale sets are addressed by their actual names; a generic
-                  # self-hosted label is not sufficient when RUNNER is unset.
+                  # Use the actual ARC scale-set name when RUNNER is unset.
                   expression = "format('arc-runner-{0}', github.event.repository.name)"
                   for changed in (
                       '.github/workflows/mutation-policy.yml',
@@ -54,11 +54,27 @@ jobs:
                       path = Path(changed)
                       updated = path.read_text().replace("|| 'self-hosted'", '|| ' + expression)
                       if changed.endswith('test_mutation_self_hosted_routing.py'):
-                          updated = updated.replace(
-                              '|| ' + expression,
-                              '|| "\n            "' + expression,
-                          )
+                          for prefix in (
+                              'vars.UNTRUSTED_RUNNER || vars.RUNNER || ',
+                              'inputs.trusted-runner || vars.RUNNER || ',
+                              'inputs.runner || vars.RUNNER || ',
+                          ):
+                              old = '            "' + prefix + expression + '",'
+                              new = (
+                                  '            (\n'
+                                  '                "' + prefix + '"\n'
+                                  '                "' + expression + '"\n'
+                                  '            ),'
+                              )
+                              assert old in updated, prefix
+                              updated = updated.replace(old, new)
                       path.write_text(updated)
+                  new_test = Path('tests/test_mutation_self_hosted_routing.py')
+                  before_ast = ast.dump(ast.parse(new_test.read_text()), include_attributes=False)
+                  subprocess.run([
+                      'uvx', '--from', 'ruff==0.16.8', 'ruff', 'format', str(new_test)
+                  ], check=True)
+                  assert ast.dump(ast.parse(new_test.read_text()), include_attributes=False) == before_ast
                   doc = Path('docs/mutation-runners.md')
                   doc.write_text(doc.read_text().replace(
                       'then `self-hosted`', 'then the conventional `arc-runner-<repository>` scale set'
