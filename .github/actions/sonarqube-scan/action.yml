@@ -12,10 +12,17 @@ inputs:
   project-key:
     description: "Exact SonarQube project key"
     required: true
-  coverage-args:
-    description: "Trusted language-specific coverage argument"
+  repo-type:
+    description: "Repository language/type"
+    required: true
+  working-directory:
+    description: "Project directory relative to repository root"
     required: false
-    default: ""
+    default: "."
+  python-coverage-report-path:
+    description: "Python coverage XML path relative to working-directory"
+    required: false
+    default: "coverage-reports/coverage.xml"
 
 outputs:
   project-url:
@@ -58,6 +65,47 @@ runs:
         HOST="${SONAR_HOST_VALUE%/}"
         echo "project-url=${HOST}/dashboard?id=${SONAR_PROJECT_VALUE}" >> "$GITHUB_OUTPUT"
 
+    - name: Resolve trusted SonarQube coverage property
+      id: coverage
+      shell: bash
+      env:
+        REPO_TYPE: ${{ inputs.repo-type }}
+        WORKDIR: ${{ inputs.working-directory }}
+        PYTHON_COVERAGE: ${{ inputs.python-coverage-report-path }}
+      run: |
+        set -euo pipefail
+        validate_path() {
+          local label="$1"
+          local value="$2"
+          if [[ -z "$value" || "$value" =~ [[:space:]] || "$value" == /* || "$value" == *".."* || ! "$value" =~ ^[A-Za-z0-9._/-]+$ ]]; then
+            echo "::error::Invalid $label path for SonarQube: '$value'"
+            exit 1
+          fi
+        }
+
+        PREFIX=""
+        if [[ "$WORKDIR" != "." ]]; then
+          validate_path "working-directory" "$WORKDIR"
+          PREFIX="${WORKDIR%/}/"
+        fi
+
+        case "$REPO_TYPE" in
+          python)
+            validate_path "python coverage" "$PYTHON_COVERAGE"
+            echo "arg=-Dsonar.python.coverage.reportPaths=${PREFIX}${PYTHON_COVERAGE}" >> "$GITHUB_OUTPUT"
+            ;;
+          go)
+            echo "arg=-Dsonar.go.coverage.reportPaths=${PREFIX}coverage.out" >> "$GITHUB_OUTPUT"
+            ;;
+          node|typescript|javascript)
+            echo "arg=-Dsonar.javascript.lcov.reportPaths=${PREFIX}coverage/lcov.info" >> "$GITHUB_OUTPUT"
+            ;;
+          *)
+            echo "::error::Unsupported repo type '$REPO_TYPE' for SonarQube coverage"
+            exit 1
+            ;;
+        esac
+
     - name: Run SonarQube scan and wait for Quality Gate
       id: scan
       continue-on-error: true
@@ -69,7 +117,7 @@ runs:
       with:
         projectBaseDir: "."
         args: >-
-          ${{ inputs.coverage-args }}
+          ${{ steps.coverage.outputs.arg }}
           -Dsonar.projectKey=${{ inputs.project-key }}
           -Dsonar.host.url=https://sonarqube.dc-tech.work
           -Dsonar.qualitygate.wait=true
