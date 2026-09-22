@@ -2,6 +2,12 @@ name: Mutation testing policy
 
 on:
   workflow_call:
+    inputs:
+      trusted-runner:
+        description: "Trusted runner label for verification-only jobs"
+        required: false
+        type: string
+        default: ""
     outputs:
       required:
         description: "Whether mutation testing is mandatory for this PR"
@@ -9,6 +15,9 @@ on:
       artifact-name:
         description: "Trusted scoped mutation evidence artifact"
         value: ${{ jobs.mutation-verify.outputs.artifact-name }}
+      report-file:
+        description: "Mutation report filename inside the trusted artifact"
+        value: ${{ jobs.mutation-verify.outputs.report-file }}
   pull_request:
     types: [opened, synchronize, reopened, labeled, unlabeled, edited]
 
@@ -245,6 +254,13 @@ jobs:
           print("Mutation configuration matches the protected base.")
           PY
 
+      - name: Setup Go for central Gremlins runner
+        if: steps.policy.outputs.required == 'true' && steps.runner.outputs.source == 'workflow-ci-go'
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: pr/go.mod
+          cache: false
+
       - name: Prepare isolated Python mutation environment
         id: mutation-python
         if: steps.policy.outputs.required == 'true'
@@ -365,10 +381,11 @@ jobs:
       actions: read
       issues: read
       pull-requests: read
-    runs-on: ${{ vars.UNTRUSTED_RUNNER || 'ubuntu-latest' }}
+    runs-on: ${{ inputs.trusted-runner || vars.RUNNER || 'ubuntu-latest' }}
     timeout-minutes: 10
     outputs:
       artifact-name: ${{ steps.trusted-output.outputs.artifact-name }}
+      report-file: ${{ steps.trusted-output.outputs.report-file }}
     steps:
       - name: Fetch central workflow implementation without submodule traversal
         env:
@@ -904,8 +921,10 @@ jobs:
         run: |
           if [[ "${{ steps.policy.outputs.required }}" == "true" && "${{ steps.validate.outcome }}" == "success" ]]; then
             echo "artifact-name=scoped-mutation-evidence-${{ github.run_id }}" >> "$GITHUB_OUTPUT"
+            echo "report-file=$(basename "${{ steps.validate.outputs.path }}")" >> "$GITHUB_OUTPUT"
           else
             echo "artifact-name=" >> "$GITHUB_OUTPUT"
+            echo "report-file=" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Confirm mutation testing is not required
