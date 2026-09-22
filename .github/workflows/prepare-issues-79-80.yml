@@ -17,32 +17,48 @@ jobs:
       - uses: astral-sh/setup-uv@v3
         with:
           enable-cache: false
-      - name: Materialize reviewed patch and regression tests
+      - name: Materialize reviewed patch and update migrated contracts
         run: |
           uv run --no-project --with pyyaml python - <<'PY'
-          import base64, gzip, hashlib, json, subprocess
-          from pathlib import Path
+          import subprocess
           import yaml
-          original = subprocess.check_output(['git', 'show', 'aae636ffae052b5ed03e05c49ddab9cabd4382cb:.github/workflows/prepare-issues-79-80.yml'], text=True)
-          payload = yaml.safe_load(original)['jobs']['prepare']['steps'][2]['env']['PATCH_DATA']
-          raw = gzip.decompress(base64.b64decode(payload))
-          assert hashlib.sha256(raw).hexdigest() == '2725ba18c783e2cf7835633563c95ee697c06d809fcd7b2e57180c80387cd4d9'
-          for name, content in json.loads(raw).items():
-              path = Path(name)
-              assert not path.is_absolute() and '..' not in path.parts
-              path.parent.mkdir(parents=True, exist_ok=True)
-              path.write_text(content)
+          previous = subprocess.check_output(['git', 'show', '250e6e09393d7f31bc513e9f567bbeeb0799e623:.github/workflows/prepare-issues-79-80.yml'], text=True)
+          command = yaml.safe_load(previous)['jobs']['prepare']['steps'][2]['run']
+          subprocess.run(['bash', '-e', '-c', command], check=True)
           PY
-          python3 .maintenance/prepare-issues.py
           python3 - <<'PY'
           from pathlib import Path
-          for name in ('tests/test_mutation_report_fail_closed.py', 'tests/test_secret_scan.py'):
-              p = Path(name)
-              p.write_text(p.read_text().replace('capture_output=True', 'check=False, capture_output=True'))
-          p = Path('.github/workflows/quality-report-selftest.yml')
+          p = Path('tests/test_issue_55_portability.py')
           text = p.read_text()
-          assert text.count('python -m pip install pytest pytest-cov') == 1
-          p.write_text(text.replace('python -m pip install pytest pytest-cov', 'python -m pip install pytest pytest-cov pyyaml'))
+          expr = '$' + '{{ github.workspace }}'
+          old = '    assert "path: ' + expr + '" in quality'
+          new = '    scanner = read(".github/actions/python-quality-security/trufflehog.sh")\n    assert "trufflehog.sh" in quality\n    assert \'git -C "${GITHUB_WORKSPACE:?}" rev-parse --show-toplevel\' in scanner'
+          assert old in text
+          text = text.replace(old, new)
+          start = text.index('def test_trufflehog_scans_pr_base_to_head_not_merge_sha_to_itself():')
+          end = text.index('\ndef test_node_actions_', start)
+          replacement = '''def test_trufflehog_scans_pr_base_to_head_not_merge_sha_to_itself():
+              quality = read(".github/actions/python-quality-security/action.yml")
+              scanner = read(".github/actions/python-quality-security/trufflehog.sh")
+              assert "trufflehog.sh" in quality
+              assert ".pull_request.base.sha" in scanner
+              assert ".pull_request.head.sha" in scanner
+              assert "--since-commit" in scanner
+              assert "0000000000000000000000000000000000000000" in scanner
+              assert '--branch "$HEAD"' in scanner
+              assert "github.event.before || github.sha" not in quality
+          '''
+          # Dedent the body from this YAML block's Python indentation.
+          import textwrap
+          lines = replacement.splitlines()
+          replacement = lines[0] + '\n' + textwrap.indent(textwrap.dedent('\n'.join(lines[1:])), '    ') + '\n\n'
+          p.write_text(text[:start] + replacement + text[end:])
+          p = Path('tests/test_quality_workflow_contract.py')
+          text = p.read_text()
+          old = "mutation-required: " + '$' + "{{ needs.mutation.outputs.required == 'true' }}"
+          new = "mutation-required: " + '$' + "{{ needs.mutation.outputs.required || 'unknown' }}"
+          assert text.count(old) == 1
+          p.write_text(text.replace(old, new))
           PY
       - name: Format and lint new tests
         run: |
@@ -78,6 +94,7 @@ jobs:
               '.github/actions/python-quality-security/action.yml',
               '.github/actions/python-quality-security/trufflehog.sh',
               'tests/test_mutation_report_fail_closed.py', 'tests/test_secret_scan.py',
+              'tests/test_issue_55_portability.py', 'tests/test_quality_workflow_contract.py',
               'docs/issues-79-80.md', '.github/workflows/quality-report-selftest.yml',
           ]
           tree = []
