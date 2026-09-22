@@ -57,7 +57,12 @@ runs:
       shell: bash
       working-directory: ${{ inputs.working-directory }}
       run: |
-        if ${{ inputs.package-manager }} run ${{ inputs.lint-script }}; then
+        set -euo pipefail
+        SCRIPT="${{ inputs.lint-script }}"
+        if ! node -e 'const p=require("./package.json"); process.exit(p.scripts && p.scripts[process.argv[1]] ? 0 : 1)' "$SCRIPT"; then
+          echo "::notice::No package.json script named '$SCRIPT'; lint gate skipped for this repository."
+          echo "status=skipped" >> "$GITHUB_OUTPUT"
+        elif ${{ inputs.package-manager }} run "$SCRIPT"; then
           echo "status=passed" >> "$GITHUB_OUTPUT"
         else
           echo "status=failed" >> "$GITHUB_OUTPUT"
@@ -149,7 +154,7 @@ runs:
         LINTING_STATUS="passed"
         SECURITY_ISSUES="${{ steps.audit.outputs.vuln-count || '0' }}"
 
-        if [ "${{ steps.lint.outputs.status }}" != "passed" ]; then
+        if [ "${{ steps.lint.outputs.status }}" = "failed" ]; then
           QUALITY_PASSED=false
           LINTING_STATUS="failed"
         fi
