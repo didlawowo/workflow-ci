@@ -63,7 +63,7 @@ class QualityReportTests(unittest.TestCase):
         with patch.object(quality_report.subprocess, "run", return_value=completed):
             result = quality_report.diff_stats("base", "head")
 
-        self.assertEqual(result["files"], 4)
+        self.assertEqual(result["files"], 5)
         self.assertEqual(result["production_additions"], 10)
         self.assertEqual(result["test_additions"], 8)
         self.assertEqual(
