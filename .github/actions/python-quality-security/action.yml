@@ -108,10 +108,10 @@ runs:
       if: inputs.run-trufflehog == 'true'
       uses: trufflesecurity/trufflehog@288a8a8643a2c5a36b81d231c550dccfa0beeb64 # main 2026-09-16
       with:
-        # TruffleHog must scan from the repository root even for nested projects.
-        path: .
-        base: ${{ github.event.before || github.sha }}
-        head: ${{ github.sha }}
+        # Scan the git root, including for nested projects. PRs use their real delta.
+        path: ${{ github.workspace }}
+        base: ${{ github.event.pull_request.base.sha || (github.event.before != '0000000000000000000000000000000000000000' && github.event.before) || '' }}
+        head: ${{ github.event.pull_request.head.sha || github.sha }}
         extra_args: --only-verified
       continue-on-error: true
 
