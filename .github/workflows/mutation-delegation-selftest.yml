@@ -31,3 +31,12 @@ jobs:
           enable-cache: false
       - name: Real dependency-bearing consumer without a local mutation script
         run: bash tests/run_central_mutation_smoke.sh
+      - name: Real Forgejo adapter sandbox without a live forge dependency
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "$(id -u)" == "0" ]]; then
+            uv run --no-project --python 3.12 python tests/run_forgejo_mutation_smoke.py
+          else
+            sudo env "PATH=$PATH" uv run --no-project --python 3.12 python tests/run_forgejo_mutation_smoke.py
+          fi
