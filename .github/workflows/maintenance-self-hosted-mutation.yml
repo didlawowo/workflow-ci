@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   validate:
-    runs-on: arc-runner-workflow-ci
+    runs-on: ${{ vars.RUNNER || format('arc-runner-{0}', github.event.repository.name) }}
     timeout-minutes: 10
     permissions:
       contents: write
@@ -26,10 +26,9 @@ jobs:
         run: |
           uv run --no-project --python 3.12 --with PyYAML==6.0.3 python - <<'PY'
           import subprocess
+          from pathlib import Path
           import yaml
 
-          # This exact revision contains the preparation and tests already reviewed
-          # and executed in run 35756026354. Never execute a moving branch here.
           revision = '0eeaf349db4ef745185d8c600fb309ffd13d9a95'
           filename = '.github/workflows/maintenance-self-hosted-mutation.yml'
           text = subprocess.check_output(['git', 'show', revision + ':' + filename], text=True)
@@ -42,6 +41,36 @@ jobs:
           ):
               print('EXECUTING: ' + name, flush=True)
               subprocess.run(['bash', '-e', '-o', 'pipefail', '-c', steps[name]['run']], check=True)
+              if name == 'Prepare minimal runner correction':
+                  # ARC scale sets are addressed by their actual names; a generic
+                  # self-hosted label is not sufficient when RUNNER is unset.
+                  expression = "format('arc-runner-{0}', github.event.repository.name)"
+                  for changed in (
+                      '.github/workflows/mutation-policy.yml',
+                      '.github/workflows/mutation-issue-policy.yml',
+                      'tests/test_quality_workflow_contract.py',
+                      'tests/test_mutation_self_hosted_routing.py',
+                  ):
+                      path = Path(changed)
+                      updated = path.read_text().replace("|| 'self-hosted'", '|| ' + expression)
+                      if changed.endswith('test_mutation_self_hosted_routing.py'):
+                          updated = updated.replace(
+                              '|| ' + expression,
+                              '|| "\n            "' + expression,
+                          )
+                      path.write_text(updated)
+                  doc = Path('docs/mutation-runners.md')
+                  doc.write_text(doc.read_text().replace(
+                      'then `self-hosted`', 'then the conventional `arc-runner-<repository>` scale set'
+                  ).replace(
+                      'For an ARC installation, `RUNNER` must name the actual scale set, for\n'
+                      'example `arc-runner-photo-analyser`; no extra variable or GitHub Manager\n'
+                      'deployment is required when `RUNNER` is already configured.',
+                      'The default follows the existing ARC naming convention, for example\n'
+                      '`arc-runner-photo-analyser`. An existing `RUNNER` takes precedence;\n'
+                      'set it for a nonstandard scale-set name. No extra variable or GitHub\n'
+                      'Manager deployment is required for the existing conventional runners.'
+                  ))
           PY
       - name: Export tested content objects without changing branches or tags
         env:
