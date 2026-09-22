@@ -2,6 +2,12 @@ name: Mutation issue policy
 
 on:
   workflow_call:
+    inputs:
+      runner:
+        description: "Trusted runner label for mutation policy maintenance jobs"
+        required: false
+        type: string
+        default: ""
   issues:
     types: [labeled, unlabeled]
 
@@ -19,7 +25,7 @@ jobs:
     permissions:
       contents: read
       issues: write
-    runs-on: ${{ vars.RUNNER || 'ubuntu-latest' }}
+    runs-on: ${{ inputs.runner || vars.RUNNER || 'ubuntu-latest' }}
     timeout-minutes: 5
     steps:
       - name: Install uv for policy helpers
@@ -52,7 +58,7 @@ jobs:
       issues: read
       pull-requests: read
       actions: write
-    runs-on: ${{ vars.RUNNER || 'ubuntu-latest' }}
+    runs-on: ${{ inputs.runner || vars.RUNNER || 'ubuntu-latest' }}
     timeout-minutes: 5
     steps:
       - name: Install uv for policy helpers
