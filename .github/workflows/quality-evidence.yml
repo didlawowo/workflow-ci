@@ -79,6 +79,7 @@ jobs:
   mutation:
     name: "Mutation quality gate"
     with:
+      scope-key: ${{ format('{0}-{1}', inputs.repo-type, inputs.working-directory) }}
       trusted-runner: ${{ inputs.runner }}
     permissions:
       contents: read
