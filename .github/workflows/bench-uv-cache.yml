@@ -51,7 +51,7 @@ jobs:
           echo "UV_CACHE_DIR=$dir" >> "$GITHUB_ENV"
 
       - name: Setup uv (default — cache enabled)
-        uses: astral-sh/setup-uv@v3
+        uses: astral-sh/setup-uv@v10.1.0
         with:
           version: latest
 
@@ -116,7 +116,7 @@ jobs:
           echo "UV_CACHE_DIR=$dir" >> "$GITHUB_ENV"
 
       - name: Setup uv (default)
-        uses: astral-sh/setup-uv@v3
+        uses: astral-sh/setup-uv@v10.1.0
         with:
           version: latest
 
@@ -181,7 +181,7 @@ jobs:
           echo "UV_CACHE_DIR=$dir" >> "$GITHUB_ENV"
 
       - name: Setup uv (cache disabled, explicit path)
-        uses: astral-sh/setup-uv@v3
+        uses: astral-sh/setup-uv@v10.1.0
         with:
           version: latest
           enable-cache: false

@@ -174,7 +174,6 @@ def test_prepare_removes_stale_report_without_error_on_first_use(tmp_path, conte
         "Prepare Trivy report",
         "Run Trivy vulnerability scanner",
         "Analyze scan results",
-        "Upload Trivy scan results",
         "Upload scan artifacts",
     ],
 )
@@ -194,6 +193,16 @@ def test_required_steps_cannot_swallow_failures(name):
 def test_scan_steps_are_gated_but_not_always_successful(name):
     assert "      if: inputs.scan == 'true'\n" in STEPS[name]
     assert "always()" not in STEPS[name]
+
+
+def test_sarif_publication_is_best_effort_but_visible():
+    upload = STEPS["Upload Trivy scan results"]
+    assert "      id: upload-sarif\n" in upload
+    assert "      continue-on-error: true\n" in upload
+
+    warning = STEPS["Warn when SARIF publication failed"]
+    assert "steps.upload-sarif.outcome == 'failure'" in warning
+    assert "::warning title=Code Scanning upload failed::" in warning
 
 
 def test_validate_before_upload_and_keep_evidence_after_failure():
@@ -224,3 +233,64 @@ def test_vulnerability_policy_and_non_security_fallbacks_are_unchanged():
     hub_login = STEPS["Login to Docker Hub (authenticated base image pulls)"]
     assert "continue-on-error: true" in hub_login
     assert "ignore-error=true" in STEPS["Build and push Docker image"]
+
+
+@pytest.mark.parametrize(
+    "template",
+    [
+        "templates/go/ci-branch-pipeline.yml",
+        "templates/go/cd-production.yml",
+        "templates/node/ci-branch-pipeline.yml",
+        "templates/python/ci-branch-pipeline.yml",
+        "templates/python/cd-production.yml",
+    ],
+)
+def test_templates_grant_actions_read_when_they_publish_sarif(template):
+    text = (ROOT / template).read_text(encoding="utf-8")
+    assert "docker-build-push@" in text
+    assert "actions: read" in text
+
+
+def test_trivy_summary_is_written_to_step_summary_and_pr_comment_is_best_effort():
+    summary = STEPS["Build Trivy Markdown summary"]
+    assert "GITHUB_STEP_SUMMARY" in summary
+    assert "Top findings" in summary
+    assert "Showing 20 of" in summary
+    assert "workflow-ci:trivy-report:" in summary
+
+    comment = STEPS["Publish Trivy summary on pull request"]
+    assert "continue-on-error: true" in comment
+    assert "github.event_name == 'pull_request'" in comment
+    assert "issues.listComments" in comment
+    assert "issues.updateComment" in comment
+    assert "issues.createComment" in comment
+
+    warning = STEPS["Warn when PR scan comment failed"]
+    assert "steps.trivy-pr-comment.outcome == 'failure'" in warning
+    assert "::warning title=Trivy PR comment failed::" in warning
+
+
+@pytest.mark.parametrize(
+    "template",
+    [
+        "templates/go/ci-branch-pipeline.yml",
+        "templates/go/cd-production.yml",
+        "templates/node/ci-branch-pipeline.yml",
+        "templates/python/ci-branch-pipeline.yml",
+        "templates/python/cd-production.yml",
+    ],
+)
+def test_templates_allow_best_effort_trivy_pr_comment(template):
+    text = (ROOT / template).read_text(encoding="utf-8")
+    assert "pull-requests: write" in text
+
+
+def test_docker_actions_use_node24_capable_majors():
+    assert "docker/login-action@v4" in TEXT
+    assert "docker/setup-qemu-action@v4" in TEXT
+    assert "docker/setup-buildx-action@v4" in TEXT
+    assert "docker/build-push-action@v7" in TEXT
+    assert "docker/login-action@v3" not in TEXT
+    assert "docker/setup-qemu-action@v3" not in TEXT
+    assert "docker/setup-buildx-action@v3" not in TEXT
+    assert "docker/build-push-action@v6" not in TEXT

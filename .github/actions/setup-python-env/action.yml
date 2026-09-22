@@ -28,7 +28,7 @@ runs:
     # Sans chemin fourni, setup-uv choisit un répertoire adapté au runner et
     # utilise le cache GitHub. Ne pas imposer /home/runner sur un runner hébergé.
     - name: Install uv
-      uses: astral-sh/setup-uv@v3
+      uses: astral-sh/setup-uv@v10.1.0
       with:
         version: "latest"
         enable-cache: ${{ env.UV_CACHE_DIR == '' }}
