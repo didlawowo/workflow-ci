@@ -283,3 +283,14 @@ def test_trivy_summary_is_written_to_step_summary_and_pr_comment_is_best_effort(
 def test_templates_allow_best_effort_trivy_pr_comment(template):
     text = (ROOT / template).read_text(encoding="utf-8")
     assert "pull-requests: write" in text
+
+
+def test_docker_actions_use_node24_capable_majors():
+    assert "docker/login-action@v4" in TEXT
+    assert "docker/setup-qemu-action@v4" in TEXT
+    assert "docker/setup-buildx-action@v4" in TEXT
+    assert "docker/build-push-action@v7" in TEXT
+    assert "docker/login-action@v3" not in TEXT
+    assert "docker/setup-qemu-action@v3" not in TEXT
+    assert "docker/setup-buildx-action@v3" not in TEXT
+    assert "docker/build-push-action@v6" not in TEXT
