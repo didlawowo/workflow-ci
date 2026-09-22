@@ -174,7 +174,6 @@ def test_prepare_removes_stale_report_without_error_on_first_use(tmp_path, conte
         "Prepare Trivy report",
         "Run Trivy vulnerability scanner",
         "Analyze scan results",
-        "Upload Trivy scan results",
         "Upload scan artifacts",
     ],
 )
@@ -194,6 +193,16 @@ def test_required_steps_cannot_swallow_failures(name):
 def test_scan_steps_are_gated_but_not_always_successful(name):
     assert "      if: inputs.scan == 'true'\n" in STEPS[name]
     assert "always()" not in STEPS[name]
+
+
+def test_sarif_publication_is_best_effort_but_visible():
+    upload = STEPS["Upload Trivy scan results"]
+    assert "      id: upload-sarif\n" in upload
+    assert "      continue-on-error: true\n" in upload
+
+    warning = STEPS["Warn when SARIF publication failed"]
+    assert "steps.upload-sarif.outcome == 'failure'" in warning
+    assert "::warning title=Code Scanning upload failed::" in warning
 
 
 def test_validate_before_upload_and_keep_evidence_after_failure():
@@ -224,3 +233,19 @@ def test_vulnerability_policy_and_non_security_fallbacks_are_unchanged():
     hub_login = STEPS["Login to Docker Hub (authenticated base image pulls)"]
     assert "continue-on-error: true" in hub_login
     assert "ignore-error=true" in STEPS["Build and push Docker image"]
+
+
+@pytest.mark.parametrize(
+    "template",
+    [
+        "templates/go/ci-branch-pipeline.yml",
+        "templates/go/cd-production.yml",
+        "templates/node/ci-branch-pipeline.yml",
+        "templates/python/ci-branch-pipeline.yml",
+        "templates/python/cd-production.yml",
+    ],
+)
+def test_templates_grant_actions_read_when_they_publish_sarif(template):
+    text = (ROOT / template).read_text(encoding="utf-8")
+    assert "docker-build-push@" in text
+    assert "actions: read" in text
