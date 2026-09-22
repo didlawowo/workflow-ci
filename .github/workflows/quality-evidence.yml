@@ -51,26 +51,6 @@ on:
         required: false
         type: string
         default: "coverage-reports/coverage.xml"
-      sonar-enabled:
-        description: "Run SonarQube analysis and enforce its server-side Quality Gate"
-        required: false
-        type: boolean
-        default: true
-      sonar-host-url:
-        description: "SonarQube Server URL"
-        required: false
-        type: string
-        default: "https://sonarqube.dc-tech.work"
-      sonar-project-key:
-        description: "SonarQube project key for the caller repository"
-        required: false
-        type: string
-        default: ""
-      sonar-extra-args:
-        description: "Optional additional SonarScanner arguments"
-        required: false
-        type: string
-        default: ""
       comment:
         description: "Publish/update the quality report comment on the pull request"
         required: false
@@ -78,7 +58,7 @@ on:
         default: true
     secrets:
       SONAR_TOKEN:
-        description: "Token allowed to analyze the SonarQube project"
+        description: "Token allowed to analyze the SonarQube project. Project key comes from protected vars.SONAR_PROJECT_KEY."
         required: false
       SONAR_ROOT_CERT:
         description: "Optional PEM root certificate for an internal SonarQube CA"
@@ -103,7 +83,7 @@ jobs:
       tests-failed: ${{ steps.python-tests.outputs.tests-failed || steps.go-tests.outputs.tests-failed || steps.node-tests.outputs.tests-failed }}
       tests-skipped: ${{ steps.python-tests.outputs.tests-skipped || steps.go-tests.outputs.tests-skipped || steps.node-tests.outputs.tests-skipped }}
       test-status: ${{ inputs.repo-type == 'python' && steps.python-tests.outcome || inputs.repo-type == 'go' && steps.go-tests.outcome || steps.node-tests.outcome }}
-      sonar-status: ${{ inputs.sonar-enabled && steps.sonarqube.outcome || 'disabled' }}
+      sonar-status: ${{ github.repository == 'didlawowo/workflow-ci' && 'disabled' || steps.sonarqube.outcome }}
       sonar-project-url: ${{ steps.sonarqube.outputs.project-url }}
     steps:
       - uses: actions/checkout@v7
@@ -155,21 +135,39 @@ jobs:
           working-directory: ${{ inputs.working-directory }}
           upload-coverage: "false"
 
+      - name: Protect SonarQube analysis policy
+        if: github.repository != 'didlawowo/workflow-ci' && github.event_name == 'pull_request'
+        shell: bash
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          if git diff --name-only "$BASE_SHA...$HEAD_SHA" -- sonar-project.properties | grep -q .; then
+            echo "::error::sonar-project.properties is protected quality policy and cannot be changed by the same PR it evaluates."
+            exit 1
+          fi
+
       - name: Resolve SonarQube coverage argument
         id: sonar-coverage
-        if: inputs.sonar-enabled
+        if: github.repository != 'didlawowo/workflow-ci'
         shell: bash
         run: |
           set -euo pipefail
+          WORKDIR="${{ inputs.working-directory }}"
+          PREFIX=""
+          if [[ "$WORKDIR" != "." ]]; then
+            PREFIX="${WORKDIR%/}/"
+          fi
           case "${{ inputs.repo-type }}" in
             python)
-              echo "value=-Dsonar.python.coverage.reportPaths=${{ inputs.python-coverage-report-path }}" >> "$GITHUB_OUTPUT"
+              echo "value=-Dsonar.python.coverage.reportPaths=${PREFIX}${{ inputs.python-coverage-report-path }}" >> "$GITHUB_OUTPUT"
               ;;
             go)
-              echo "value=-Dsonar.go.coverage.reportPaths=coverage.out" >> "$GITHUB_OUTPUT"
+              echo "value=-Dsonar.go.coverage.reportPaths=${PREFIX}coverage.out" >> "$GITHUB_OUTPUT"
               ;;
             node|typescript|javascript)
-              echo "value=-Dsonar.javascript.lcov.reportPaths=coverage/lcov.info" >> "$GITHUB_OUTPUT"
+              echo "value=-Dsonar.javascript.lcov.reportPaths=${PREFIX}coverage/lcov.info" >> "$GITHUB_OUTPUT"
               ;;
             *)
               echo "value=" >> "$GITHUB_OUTPUT"
@@ -178,17 +176,14 @@ jobs:
 
       - name: Verify SonarQube Quality Gate
         id: sonarqube
-        if: inputs.sonar-enabled
+        if: github.repository != 'didlawowo/workflow-ci'
         continue-on-error: true
         uses: $/.github/actions/sonarqube-scan
         with:
           sonar-token: ${{ secrets.SONAR_TOKEN }}
-          sonar-host-url: ${{ inputs.sonar-host-url }}
           sonar-root-cert: ${{ secrets.SONAR_ROOT_CERT }}
-          project-key: ${{ inputs.sonar-project-key }}
-          project-base-dir: ${{ inputs.working-directory }}
+          project-key: ${{ vars.SONAR_PROJECT_KEY }}
           coverage-args: ${{ steps.sonar-coverage.outputs.value }}
-          extra-args: ${{ inputs.sonar-extra-args }}
 
       - name: Enforce independent verification
         if: always()
@@ -215,9 +210,9 @@ jobs:
               ;;
           esac
 
-          if [[ "${{ inputs.sonar-enabled }}" == "true" ]]; then
+          if [[ "${{ github.repository }}" != "didlawowo/workflow-ci" ]]; then
             if [[ "${{ steps.sonarqube.outcome }}" != "success" ]]; then
-              echo "::error::SonarQube Quality Gate failed or analysis could not complete."
+              echo "::error::SonarQube Quality Gate failed, is not configured, or analysis could not complete."
               FAILED=1
             fi
           fi
