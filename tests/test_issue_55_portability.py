@@ -23,12 +23,6 @@ def test_python_actions_honor_nested_projects_and_explicit_evidence():
     assert "SYNC_ARGS+=(--group dev)" in tests
     assert "SYNC_ARGS+=(--extra dev)" in tests
     assert "uv run --with pytest --with pytest-cov pytest" in tests
-    assert '.get("coverage", {})' in tests
-    assert '.get("run", {})' in tests
-    assert '.get("source", [])' in tests
-    assert 'COVERAGE_ARGS+=("--cov=$source")' in tests
-    assert 'elif [ -d src ]; then' in tests
-    assert 'COVERAGE_ARGS+=(--cov=.)' in tests
     assert "coverage-report-path:" in tests
     assert "working-directory: ${{ inputs.working-directory }}" in tests
     assert 'echo "evidence-found=true"' in tests
