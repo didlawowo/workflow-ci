@@ -34,13 +34,13 @@ jobs:
     if: >-
       github.event_name == 'pull_request' &&
       (github.event.action != 'edited' || github.event.changes.body != null)
-    # PR code and its tests are untrusted. Keep this job read-only and, unless
-    # explicitly overridden, off self-hosted/ARC runners.
+    # Use a dedicated execution runner when configured; otherwise inherit
+    # the repository runner. Keep PR execution read-only and isolated.
     permissions:
       contents: read
       issues: read
       pull-requests: read
-    runs-on: ${{ vars.UNTRUSTED_RUNNER || 'ubuntu-latest' }}
+    runs-on: ${{ vars.UNTRUSTED_RUNNER || vars.RUNNER || format('arc-runner-{0}', github.event.repository.name) }}
     timeout-minutes: 45
     outputs:
       required: ${{ steps.policy.outputs.required }}
@@ -386,7 +386,7 @@ jobs:
       actions: read
       issues: read
       pull-requests: read
-    runs-on: ${{ inputs.trusted-runner || vars.RUNNER || 'ubuntu-latest' }}
+    runs-on: ${{ inputs.trusted-runner || vars.RUNNER || format('arc-runner-{0}', github.event.repository.name) }}
     timeout-minutes: 10
     outputs:
       artifact-name: ${{ steps.trusted-output.outputs.artifact-name }}

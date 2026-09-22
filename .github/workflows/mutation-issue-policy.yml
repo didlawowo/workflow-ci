@@ -25,7 +25,7 @@ jobs:
     permissions:
       contents: read
       issues: write
-    runs-on: ${{ inputs.runner || vars.RUNNER || 'ubuntu-latest' }}
+    runs-on: ${{ inputs.runner || vars.RUNNER || format('arc-runner-{0}', github.event.repository.name) }}
     timeout-minutes: 5
     steps:
       - name: Install uv for policy helpers
@@ -58,7 +58,7 @@ jobs:
       issues: read
       pull-requests: read
       actions: write
-    runs-on: ${{ inputs.runner || vars.RUNNER || 'ubuntu-latest' }}
+    runs-on: ${{ inputs.runner || vars.RUNNER || format('arc-runner-{0}', github.event.repository.name) }}
     timeout-minutes: 5
     steps:
       - name: Install uv for policy helpers
