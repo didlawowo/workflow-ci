@@ -21,6 +21,9 @@ outputs:
   project-url:
     description: "SonarQube project dashboard URL"
     value: ${{ steps.metadata.outputs.project-url }}
+  current-coverage:
+    description: "Coverage percentage for the current pull request analysis"
+    value: ${{ steps.metrics.outputs.current-coverage }}
   main-coverage:
     description: "Coverage percentage currently stored for main"
     value: ${{ steps.metrics.outputs.main-coverage }}
@@ -100,10 +103,13 @@ runs:
         MAIN_COVERAGE="$(measure coverage --data-urlencode "branch=main")"
         echo "main-coverage=$MAIN_COVERAGE" >> "$GITHUB_OUTPUT"
 
+        CURRENT=""
         CHANGED=""
         if [[ -n "${PR_NUMBER:-}" ]]; then
+          CURRENT="$(measure coverage --data-urlencode "pullRequest=${PR_NUMBER}")"
           CHANGED="$(measure new_coverage --data-urlencode "pullRequest=${PR_NUMBER}")"
         fi
+        echo "current-coverage=$CURRENT" >> "$GITHUB_OUTPUT"
         echo "changed-lines-coverage=$CHANGED" >> "$GITHUB_OUTPUT"
 
     - name: Enforce SonarQube Quality Gate result
