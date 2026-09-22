@@ -1,0 +1,87 @@
+name: Validate fixes for issues 79 and 80
+on:
+  push:
+    branches: [maintenance/prepare-issues-79-80]
+permissions:
+  contents: write
+jobs:
+  prepare:
+    runs-on: ${{ vars.RUNNER || 'arc-runner-workflow-ci' }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 896a421f6d4d49800008c61bd58c0e23f476b325
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: false
+      - name: Materialize reviewed patch and regression tests
+        env:
+          PATCH_DATA: >-
+            H4sIAAAAAAAC/9U9DXvbttF/BbGzSXJEyW7TxpEfdfUSt8maOJntdHsfy2NoEZJZU6RKUnY81+9vf+8DAMEvfaTZu819GlskcDjcHe4Dd4Dut3ozL4gyGXnRWPbniZx7iXSCNF3ItDe/2xqIrUkSz8Tcy67C4FIEs3mcZOI9fBxF+J8vJwJ6hd5YtrFRV8Sh3xWRvO0MRpGAn0kQSjGkLtSiw48z+SmDx/i2l0jPd/FBW7300lTCMPioN44XUdYGqB0xHIq9rsjHOR/s7150y806+bi92yTIJIOmVhpVg2SHp3EbJ9eTML4FjFq9aZBdLS77+lna/3XhhUF258ibwJdAqN7dLGyNIm+cBXFkd+EneQcYDsilHqte/Ewm2E+1c/kZEBzeq2d1YOd32VUcORp6KscLmN9dBT5NUaPfZXLgz2hLmJ/ZIvOwF+D46yJIpD8Qj+/vgSbST3v6ZS9eZPNFlvZ0I2RBK0sWsiUeHkZbXxb2b7+J1iK6juLbiMADY7ZWDpAuwqwWPL+qAN3qLCVRi39p0qqlwAOkmZzjqrCZYGZR6oHjcvtpvH7bKPblytYPD63/NoSBla0qJ027dOxFjkySONkIcasbsXl3AwY30oylKADFNpfwT5Q5NzIJJsG4KLRrMeXLD1IkZN0wFVpuOpZNVZgVUHNbHIoZoBBEU+ElWTABfQNLMM2AT0EYinkS+4uxFJ6YeEHojMM4hdXMOg20bJyJUHo38D5CpS3eH56e9tbhkSMibyYH4iWs3TD2fAGKByTDN8tfaIWMZPmd/XXfAJSVUS/6veMrEFbDcRxlQbSQTqzINUD4hEpnk9m9X1yGQXplkNP6vwa3RQoC1PoioILJQHjhrXeXgs0tj0BGUc+AjUsXx6rq9Srhy6q5RmJ9mY6TYI6tBqAMzspcMcaYQRwIOZvDLMA7Aa/gBtZBmnmR74VxJIELM3AHgssAJwrmojpaboMmXpjKWnwmHlkR6F+FULuyVs/qFFpHYOXlJ+jPwkZduwAQnCwvk4I8KyAvcMmMAm5L5MNCS3//XHZrQNRzsFPhdo2OOTz58fTJsO04FRgwFiqaICJFUn1NSrn1L4DZoA0N1FqdVgDcoPWaYQcTcX4unKgRP3I6EIK4uDgQ2ZWMGnV23eyp+0rYTdhNAl67VzKcs4fZaqGHrmG4WhO0uTN60gNYTon4TRzDcupaEgZPu0L7V3kTAIq/RlFHON8JPxhn59TyMLq7UB4/LaOtn6ScG01kVkF/HIJzb8xPaTHEtHxgORhPm2ExXP0QUIBOqXT1tOy4Yh6HwRi9Z8CqbcQlTgirTg+eBvN2pwfqRSY63NCAz0dbusdo6wKHUcCG0JuUu8IkmCjKiCAlA4ckGeQMsQCambugtbJFyoAZOYLQhBq/UK6r7QhbwBm/AmSFMmCo/4rEvca+CxBZc2w9CAm/60fYFu+i8A7ttfw0ByBBZhhJvQUsFjHzrmWuszXnerV41lL10TDHhnslMlskllWm0AxEOFdPOngCc4Ry7QYpBHdp5s51dEmiSqJ5Gcch2yehlsOTDTp1asYsLTgz96HydXpTmbVHW/o58BR5eP8wMkJjghNumZOlUzXrm4Av6wIYqk7yUBZ090GzgtNNGqSXBQpdvUWiZGqM2wdhiDN5GDTqOyFUp7TnzdEZtWbjmJGatZsMVyNHQpUuxmOZwudluCiP9vNQqfKytBQ7pBaa1t7n4cVD1CO1QrjWEGcFJYDB0b+ClsBVP/BBOXdJz3dAIfjCPFTDeDfAU+8ylDhOvR9OcMHSsjQjg3IZJpirxmySZdN4GT23xdmVFKGHS154CwgpweDD6BCQKA18C6N3QetIcD3BXud2BpS7d5lCyNRbxi+ZTKV/ruaH+s2gtUyO16QHOL03QbxI1yGHbrucGocQjU298V1/jrEc2No5Rw2gINFlBamViZdiNJfrfFq1mxFBI7OMBr9b1tYQ6xSsUuKmi9nMS9AtGG35QYowfHaPu19OdRovS4/2ZCgm0HW02N29fJb7QANxn2uxUasy2Kh18VDr/q+peUikjFlfqmtqMM4RZsADkXsIozpndhWF19Q92hVvoN69fo8k4/0QIpSgv9tpp56dXw5yVU50P8UHDCFcDiG0fP5OZGyIhFFaH1QaHDu1nhJ7+uAwJz3P910vmS5moNQAZStEUhNn41Km4ma9N+1sxV5oJlUIO6QIdhOApUhJdW6mCX8Eib0f2ZuT6fhKzjz3RiYpqeSB2OvWESVL7hqZnDMOwAeAHyCaR5uu9b5ugvLTWM4z0T67m8sjbNUVP3vhgv/urDcoBWl1OwgbzXnNtWtbsEEBNP7s7JTCNSKG/tTpLlFQthtDXnqxr6vf5lGTFat1LTweuq3ViFfD5MJoXVE/ePU5il+nu0T07B9Lk7hqoxcmsdukzVZ0I8NZEAUFazUyoy29jAdl0N1l2KzoV2xa0JIDG1MtcCP0CUhGKWeoNjE7dpaQtrM/tVvWpiV6K5NJKE1STH2+iqffI1TwpdeH2LC3C6EkoQbgcCN7CbhzajeAQS9ysquGnCKtZnAgSg0H4tJLr2oXRLKI+C1uD/34+uzVhz+7hy/OXr87dt8fnr2y5tsDCGVzYMYGaGGAs5s67DHUOO1feMvzgGIhAArx/fL9zRvUcnYKSBnJVVmKCqiaKTYQg39Oj158OHl99j/u69PTD0enw8bVV9ew8u70xeGxe3Ry8u5EQaoZu2Fvsbj3Bzx3cr7ytmKu38SF+OMfTRcmmCUFQLNxPJPcqxgXi1Vbk+VpPm63S4/EE7HXsVMHk6D1ZSa1GrWTozP3h9fHL18f/3g6bJ49jabljcZpBMrbugCqBB1R+1/xj/Nd5/nFk8ert3TXpFxplE6nEeAkaHw19mj/bunsWf6ZxsEytJVodJY0sai0jrgpiJiZraXrIzRWaxAUf/764fANEhBTh0cvh03Jj1o+2IvRZob13MhyM8AlfMCfg4Nlu15KBJePsPEcmRuPVkttEweGG3DgP4icO1+Yjl94aktwl6k3Xpq5aTZQ0Hl8FaMOL4Zcw8f3JfXy0BwIbwxkLRiWKbYBWVR7MO7IPMFgqHU4n4cB7izF4wXWCkyCT+C+TuJEbD97Th7s9v5uMQ29opxJ1yU4KSik4BP7ENrggLvrZBBL6aKiLwCjvjZJJ+KPIpjLWFYLDXizjXNfjfVNpdx8faOiu1jfRkY3gyVVVG8/nB2S/3hydPrhzdmyKqql1VgWnL9+eH1y9HK9cq+lMF+++9vxm3eHLwu4sc1prs6wbVATaHKjf1sycgpOqiMXsZgHc4lbn0va0p7yaATatURLfCaMDVwCgY14CQJTkWAE0ZLOgqKSjoVGiWxFNFg1NQMjVdlZ1WqnwxqgNRhwaDR4q6W8lNsNUp3MaB1AUBBkYm85cKUfqYRrqyu21q1/LIQ+WLO6/ai/SJP+ZRD1YQ3wIom2xXtVQSK4Akr6EN+Fd7yrBlgeCD9IMWxYYBGNcRzbe/tfdzg/XY5sehCrorgcFeQlWsy89FrsPns2ik6BqR9Oh9R8FBmnFXOab9+9PBrqvdWI1eXfX58N90bR2dv31ARwAFTaHXGPBEvGw8d/wj+yxJuDrsHW+LFQk6Aiw3cfzt5/OBs4hUIETpCjCp6IFruGwz+gdOq58qdZ7Ev+C5nmjM3HFvkRNCPcsdx6bDkTKMEwIf7LTAY+fvedFbAyWsx/8AHgX8T8n9gC5ky4oruSzISTTITjmBf5PG0UwIMhypamqCyUEdAzlo9XEG3kHERWgRZqk2DmGHcQEEiuSux7uBcwCZIZNC1GsD1TlkCSnc+IPgOWyRhbPIwiYhezUvHs5N27M3AxQLyF88Jm29/enfx0+v7wxdHgT8i5RN44tHcGpEiv4lsni+ehvJEhLJAx1cggJBwGCMPw7C5BCr28EKwmVSKnQRYnd7RFxml8JvZ9eT2f8jz1stA1IWCgZTa+cnw5x5T5rlnUBwIm+efD0yOS2VdHhy+HZkKnrw5RCCMTrKjnRz8fHZ+5x4dvj1hGA2LdfBGGtK0GCu03+4ObeclUZqpeg8Z63P7lV1DUiWj17JY9WOwS1IDXqg6H+yREWAWHUW2AcyXBoGg4FTAGBig0Qjy9qiKHMC8luAJS9PtU5bEZUgnwEOYtEBXsiK+AVq2eN8ECcoD5GF+twJDXDKKloq41f5R4GMbms91BIyG2xVsvAlXcx81jfxHaZT4kPCkuSTEBooIIeeMrzAkJWFsohaA5SdtHjJ2amY5aPGdy6Pxwcf909+Hxb4Un3z59wDBci1lF5Emz32mQ/7gHd2AWZExdW08qcth6o0CnDTAhxfSI6OS+ePf27euzpXhhOwsv8dV3fV/e9CMgU8dWYnmw3bBkYBnbArtTUoKivKzfn6AhpJJJGDpPbh/wuqZSylBmklr1SeY0s0wgkOs6re2EFhBKLbPbi6uBaoTiZH4Fv1AMcMM0C+bgsSbgqckIj18AUUR6HcypaAjLkewVZNFT61b8f1scof0H4k5SrH/xA4AyRTXFyAagp6g2GbU3lROBuYtBjysnCMRR1ZOiiPYapAI31u5LEjG0BJWXxiOBbKbct0OkJZWL+WzExOprOoKqzHlkVhbOi7wBXCujCOsChyRBeIZl0O/3UXv3AfplAsCvLDwcB82Y+oW71fa+qONEsbOYYwId/kZXx9GOD3z+JY2j1YuC0IJRp8SbvLIyQL9bSZLp2eGpoPfyuD27zoDOwuFSzpMPx8dHJ+7Z0dv3A6efzeYPttf2d/ohANviFEIoEUMENsbqhGDmTWVf5QSFxzpFFxeA8zYPogjms5inGSgZqqfFaEO8jFECEJ78BKYPxB5iDpB2gOlcSi9BifnL6btjlKE084FkmOIP4ylJ1WKO8QTA1TEhunq5i7Y7ivx4fA3iC+EE0BL9lRttjgfErkESI39uBX1C7xzoN70aJ70g7jfnKgaqUAVphtQ+/x5rAVT375Q71OeoLO0hD0PSIfoNT6UH84DHIKI5zug6kqJCywL0aIFj0O6dI68xrCXxji9/keNMVaH0ftbCAu8o0Gg1jZ+rsFxytKpAiTB+L9u1VLRCGU2zqyaAndxhMBMY2N4muwu7g92OUB62FePAG3DZB2CleAFb/ZxpJrRh086LAmD8fWPj8pBF2SrtOuf+5ED8IT0w4YSw/OgD0i8b+M3aFNrOrZ4UmhkMiFA00j4VL1rZRkzmuagAXD56oQ7ucensiZwCcVMKz2JAFFaT3mgZmFMdKjZXipP08kx6dlWnKsMFEeITgMgo8yFOzZ/p4nKexBT0mkd38PeyU4TqI0R3MDHz8c6bhdbb4lE5fIFrTefgXBdVpetiEi6NwxvZ7vTwKGOUped7F4WjitC7bXLPg0Lh6b0dlgakLfBQAWa0t9AeuuAO4sfRVgo6ysFHo62Hwm4ScUh1scqVBgJkRnIJYBByNnu32FNzZ1nnKSgHd46nI339uAikLputGjwwFb5nMvcmwacM6zeJLCbfDYqZymI1YfBvoLF+LPrWGLRYdRCEb+3Tlviu5y9m87QNk7kOQjXpvd0uJaKSG7DbTAZ8kAUzCUKY8oNizrjuB0Gkc7AQWGGmgYC+d4mKNuA480Ie+EGfDFXcxmoCVThuE2bmJdcoO8DhLAn+qUvlsRIBdVTXZP0Nh7pgYUBt4qgK9fN8Bu1SqSz++wNGX/jhh8PXb0DbdZubq4rRjfroelMtNbU9rJLd9dAqdTCILR0Fvbt5pYsZ6PUxOHjv3xydHVV6fkYXU6dWR4Ql/UxatEKIdTtZI286nsZz4zHLE8R8x/IeVWIW+1zA7w4rBDIxeWEiuAOuKjO07Exbqw19TiQ/PtIV+eoQenlopWJVtpcOQFcLcPJa3EkOko8uFA+saByKJ8hL8L0pGENSovhPu2wNOudAsfwsxdBgbp36UJvXy6u7DQsUGlbRun0UAkIw5N6y5tUTHsPimY3lqqustBDR86pK6nRrVjhPjF/VSF7nwpYVcGTR2rrKozAMdFX+JnUhACTTtURqtIBwcY3iztoiYi8KC2Ot9RWGGwBuEDAFj0uea2QYn6sPKV80oIYuiqYqmbZtNnFXNS6+2ECoGW5RlKn6gxd77gupMzBUBO5yTbhrasFdrgV3qRbc0gRKcAzRP49lTNlcySth/HxW2TKglmFnE02wPg8rOkJbvhJh8+0GV9XRA7wsuUPC6kXx30DNJSvqX0/ZWpHNT/+6hdO/bU29TXT/2sQ1UrUCzfV1cVenLbuWdlWeY6PpLrhUaDy08W5yDwqP1+tgGQfyFJp6VPApt673ZJd2afIyC0ObTgUTZKXW3enCS/x21SsxJDcFT0pmfC/zYIVg0NlLvYl0sVW7TTEmBj3rXQqDxzitKlC1TihtDcBxDBCeX+JLFB007qxtDQh+Ss2NzqeZQOcIIXKNRIqeBwPFImB1/AArD8zpj/UKEHSGQO/8+pQr1gE8Fuq1AR/KnhILnDH+JozQk1mgZbroYpnB0Aqdd3bitAfPggRLpkdb5dQ4BGOaMYWXKutNrxW/7NC2nNqGdoabKsIFXeLNMap1eUNjSPJeUAptM9ceh4GY3aRKqA66Y1rIihpHM90Fysw9VB+pKvJ2rXs1wjv2k5UJTY0vZPYQ2//x0qYpuo7ABb4RtyUXZmgZy0+ZbSrLK2+12CqyWA99jnsqpTruitet+hjsoFMwMYrdVOFsNba+BU4xJSvHTxSQDe4m2mwU60x1wzgrr1gqjlgRmaZbY5RAyYREPI60KbxnkuO2G++TJbRFhgtd1XDYjx9WWkyQk8Qz2ytdX2ZYX2GZyfPacz8lI1Zqk0dCViB1kW9hdO0DgAOR+1PdlYMWzGPjoMqoXeQReGnI3NMqDNl0YGq0tVeZwN7Ss2IV2zkOAxe37EiDISNwEbkeeEz5niAG8sgOExXjUS1kiPFaSdrK24VMn8JmoR6goenMN3KZTFGVnad3YFFoHryjgFt3RllWLlGjoBUJRpuxjtoCJKrsFor/2LDodnpntst3p+QgHO3u1bBY79o6sBjGIPe0gYuvnj/tPasdzFQvWUBz36vmTF0BH6axw9RkQvCjTs1QqrEmt+6gPwOVdoilSvljqRSs4euBuCHdfN2FP0A95+a8F2RyBvoQdTXugFz36JxLiuqpDetVZaoZWV2Ii07zw0pHA1kN9vvWH1ryBo4F/F9r1vnavxoL32jgu9YrTpNxPzp0AgjRljUajlSRtMa4qjGoyznvx2sz2rhtpPqAVdnZudevHnZ21KFixYzGSxB5jS1vSoeWmxQEdiU2V/el9Dx0R6X1leBd8Nmx9ToVznVRz71KzooLqOj0YyFHdURLW1JqF+YWCko497GduE3wIoREgNuFh8UFp8Upd5FSmhJvHbuW4iXnY1+8ef3vTFZtkpM6fXHy+j22rrh9G9U72vEx9KfAFhY2rqdSestaceMrOb5WywmNC3RUGuaF1hIIp6MAXdirTV9UsySfhH0ruSR0Zqsafx5rZY/ve7NrPzD38uB08CkiFkQGxV+Nx2c3oDq9qTLreD6YnUj8eIasWquPnCkHgzN538tPHqqMXhCB1Ae5N0sQaAYeeuFW4gvMe5DAcKOodkTPVxam14AQVlToec74DywtMa2pzmRY6GTqjLg5l4asgSjIUxz5TZgWUfEULpzzVM2pRmh9XJQYclOcR5cg5OKLC95yN1iS8V6OzEVmqr9BJlGV+3IIKn3u3aHKHvJuRHrlDXHDxha5rnC7GlMSN75+No7DtCyNl4FxUei9kkb5KQDlFV/bxkaVfwwVIOzNjzQA/mQTHAzA9qP7oivDderiibozy9JXXVBU3VXqiPRMbp7PWy/fvfjp6MR9cfjmTeui05CQRRRgVd+c7w0u0LDhZzCIoA24QwHiD4c/HblYKNO6yJtiiQk3bYEb4HgOam2H1Tu5GzJpqdZYRNHGQx8VoFjU0SIEePIFyoKGmsV+ezd+9s035pYuFIS6jDS9KXiYedsGGlADbdXrHVd+qiGOvTAst2BUHXxlBmYfqrwHwgWZA3QC7kliHgb3NkHwPd36gY3LtcD66DtKc8nNM43z4kBsba+ZUhONCQLMqdSx2p2+OqQGVx5WQuHKaRhTF3MPCm4ovLeKvfRbYwy6tJVjpFS/RxpW5mZkD1upld7Vz7m8XPUGbaB9TBVbL9vJwi5sfTsXm3qZ5P3Q/kowztphEMleOgfzDPp0iLD3OuQ74wvynSueJDfH92nuVnKcY3mgSI+C/4k+Hj0kbYQ+uEmCFtxFKoOoXZGgZ1TWUsVZvOZB+eSfjVOsoNHlrTCe4V9vGsaXbYpYtAuyk2cElIbX23tMK74eYWWsz04PB/db8VxGOhZL76LxFawSaKYiZT/I9MvQu5QUtRW3ghNyMnGXzgtdNDUU2FIND2a1OAsRJy5XZ1dsDuOirYhrW6uCFaEFRJdpGPQHQl+YCvJG0PFZdRWhfNvlu6rsh209/amKjfDJQ2567Vf45OGhIPdFouMqqLOp5aGNZUUDCh4MiMqOeLpbDESUlJSiqmpclFYTJCZorm+NB05MWy42LbbEuZzTJRt8TQMGO1wLi7uET8Qe9WVnYkU3u3LV7kyELy6k2qpajqdYokutCxW2drvCZjKtX9wW5gm4WCxdYtBqwduU2az37m2RZMgguHiWwEjT57P8s5i4nBsrNMY1wFH6IpK3RiBIRWDMpHbbMBHiaBKMtsxmvh+kQCbdQx9iKGkSrMh2VRk8UTV1IRaIr6Wr9tcq5EasLAbWOZ/qTMiQN3ZoqaF6x55MPns6rOcJRqGNmqK+xlMqQDwCmn6AT611Ly5XWTl9czEok2xzeWO3oyhr9Ne/TNqobH6rsh6LwqWNX2XpbqJcVkgkIt3VjgrrwG5+4Um+bb1rpU/t/cRda8t3b//rrmgBGX82GmWA+4QPfKcpxpk5YNoCzrt+9U0+gMp7VMCvbLHLYTcFvkJvOBZal7FdDXDZfKxeeyvoQDvodR1rtrZZbbseOHZo+tUelCZeRXqJhbmzqZiY3+EwqF8QbrP2rV1x9w8qhi2MN1S/O2tYVfWhtmEuGtTUfCxkQuuXG6VB2+rekKLxzjcb7deK+tXNRfJElxygZAtZ8EVLplInUMGdIx8OzXGqfDaXg69my+ku99fW8r1ytfr/5IGtUoiP1vW4FFcqig65yzFDsaaGj4m6tC8IjMA7knG1qJvCfHccysosirssDZ6KglwOndVjjWE1VjM7kmOs9NHpj18XgdR7UnwQdbiHH2nv0EvdRRK0OxzgqREwwqNZ2UHcepzSIOy5dZas6H8X83ib2OW4w73Fo7pudiVN3ZnaQl9VfcARsdqi5i1D871CzaUGNel8lUYGRqbFGoOG6oE8liyn8rGjqTSh7x5a/wK0Vh0kK7dffxuV+X6jij/RnFxR81XJdqqlwMQHKKi0z7kU59lzZ3+3N/PpcgLxIo7SxQyTGmO86BFLnvgKlIFQN/mpW1D2d5HRfwbpw/2Cgfi4//xb7+lXe5Nv/af+0+f7eEx3f/zt3qX/zf54V3719eTps28vv/7qm4+ijV/s1emNIrz9+P0Jp1QwM6VPA9Gu4vazfRqIMi8LyhcnMA88E8Tv9/fErQRf1QuR/XejiMtLe+IMD8mT8FtfzHEZw/Kmm3tVpi1VOR1Ehr4+Jp/w1JvjobpRtL0tzA0S6nrK9vaz55RfQOTzyhGQsFsv8VPxsbae4qMoVOOIeCI+6sz7RxiKLrW3joHqgpLStRWYzMwvvv9IvsZHuu4+NfVUo8gcjRI/UN64byrXrIw7kAhT8gf6oFVfVb71Vd1B3hS8Fn0Yq4hOFzfh9CycS0znqnb2NdX5oQF9rlZ9yw4SEMLN8fUdnfvFla0rstGKh3UlYkSArOHSbLyRh5UneNfhwidRUde6U0/cUvIic3CyJ07zb2vhKmPNZdzOShEeSof5JhfM78M09WXUmF+nLVwCWri+e5ZLDanaUXSob3UwX1NkCprUVxVhyUqWglfiB940ipE0Cp0DzCQGkb4QWxW6RGQ7xLXECqXsysv0ZMVlCA4I3gMh3ud1MCT8pYUE+lQsAA4uQF9LvHXHAkj7/q6Rdi2UOu+Jyy4V6uw2n8qmlYn8YXeGTrG26bgzPKP1KU5fHQq8cMTaOxMf2XH62OmJI7UHoQ8UY6gH7FtA3MeN+hSn9cSxvBXcBu/yjGblA/+o48F1yU9k0/wlMiyTkXUkO5FjiTzzSvcBjCIVXPNxbPFWCTdMmAM3Bqm9CN2YTj2r046acubIsHXdh8oK0yFiAlS8+UV9EwVySCsxhHeY5mtAHzXWB4317h6+W4CmScI7xJdHwJtIBeL8kZfOR32ZsVqJJpntoxKr3V/6SF4J3XqeEmu7hLd1Mw0855Op+1+PIsKTcubm/CqJh9qd6AfRJPHAHVqMcWtbX1sjTrzbmgPRowgHVGeIiSqsS7QG9tlWSExB4dXVmN9OqZ0vua6C7tpX+Wr9VYcCby5J9RcdGTT1N78AG2yM6+7YGUU/xjT0MbpRKjsOS1uF9LgdYzOd6MUvsRoNlQtdRIGMuGNDSPwwBsyPpbrtxffxWyE1LrDiY+iKp8dD6LUAFtPpcF7LCDRIlAzpdX0ChMAMbd8ydfjqOBZ6409k3pTuRgLVxhSNYkSUXQIsQgWm4grD0Uk1wpCevrYBVjaMZWoiryS5X9QOZ4rpKJhzEpMl4unheHxjCMoyTA/HxNKuSLx43VUHthOJR9n/IrMTsA2J2H76tL/99BsRR6z1AAZIDR5goBlcWSpN3Oz19nu7+RQ0OUcRmY/MEJrFQymFMWraRDrkRP4SXwrS9x7zlnwO4ghZ64A0RQaabDHlScNgkRwDnAO+XSIJpqS7lWoiO+qhPtP3+JAbB8iCH4Hc33r4Pz8Y7rf8dAAA
+        run: |
+          python3 - <<'PY'
+          import base64, gzip, hashlib, json, os
+          from pathlib import Path
+          raw = gzip.decompress(base64.b64decode(os.environ['PATCH_DATA']))
+          assert hashlib.sha256(raw).hexdigest() == '2725ba18c783e2cf7835633563c95ee697c06d809fcd7b2e57180c80387cd4d9'
+          for name, content in json.loads(raw).items():
+              path = Path(name)
+              assert not path.is_absolute() and '..' not in path.parts
+              path.parent.mkdir(parents=True, exist_ok=True)
+              path.write_text(content)
+          PY
+          python3 .maintenance/prepare-issues.py
+      - name: Format and lint new tests
+        run: |
+          uvx --from ruff==0.16.8 ruff format tests/test_mutation_report_fail_closed.py tests/test_secret_scan.py
+          uvx --from ruff==0.16.8 ruff check tests/test_mutation_report_fail_closed.py tests/test_secret_scan.py
+          bash -n .github/actions/python-quality-security/trufflehog.sh
+      - name: Full regression suite
+        run: uv run --no-project --with pytest --with pyyaml python -m pytest -q tests
+      - name: Real TruffleHog Docker smoke
+        run: |
+          set -euo pipefail
+          SCRIPT="$GITHUB_WORKSPACE/.github/actions/python-quality-security/trufflehog.sh"
+          WORK=$(mktemp -d)
+          trap 'rm -rf "$WORK"' EXIT
+          git -C "$WORK" init -q
+          git -C "$WORK" config user.name Test
+          git -C "$WORK" config user.email test@example.invalid
+          echo 'public fixture' > "$WORK/sample.txt"
+          git -C "$WORK" add .
+          git -C "$WORK" commit -qm fixture
+          SHA=$(git -C "$WORK" rev-parse HEAD)
+          GITHUB_WORKSPACE="$WORK" GITHUB_SHA="$SHA" GITHUB_EVENT_NAME=workflow_dispatch bash "$SCRIPT"
+      - name: Publish validated Git tree only
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 - <<'PY'
+          import hashlib, json, os, urllib.request
+          from pathlib import Path
+          paths = [
+              'quality_report.py', '.github/workflows/quality-evidence.yml',
+              '.github/actions/quality-report/action.yml',
+              '.github/actions/python-quality-security/action.yml',
+              '.github/actions/python-quality-security/trufflehog.sh',
+              'tests/test_mutation_report_fail_closed.py', 'tests/test_secret_scan.py',
+              'docs/issues-79-80.md',
+          ]
+          tree = []
+          for path in paths:
+              raw = Path(path).read_bytes()
+              digest = hashlib.sha1(b'blob ' + str(len(raw)).encode() + b'\0' + raw).hexdigest()
+              print('VALIDATED_BLOB', path, digest)
+              tree.append({'path': path, 'mode': '100644', 'type': 'blob', 'content': raw.decode()})
+          request = urllib.request.Request(
+              'https://api.github.com/repos/didlawowo/workflow-ci/git/trees',
+              data=json.dumps({'base_tree': '412c29d1d0861e2910aeb7f34168f873f20eae9e', 'tree': tree}).encode(),
+              headers={'Authorization': 'Bearer ' + os.environ['GH_TOKEN'], 'Accept': 'application/vnd.github+json'},
+              method='POST',
+          )
+          with urllib.request.urlopen(request, timeout=30) as response:
+              print('VALIDATED_TREE=' + json.load(response)['sha'])
+          PY
