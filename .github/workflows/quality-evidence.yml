@@ -20,6 +20,11 @@ on:
         required: false
         type: string
         default: "."
+      coverage-threshold:
+        description: "Optional minimum total coverage. Defaults: Python 30, Go 15, Node 0."
+        required: false
+        type: string
+        default: ""
       python-version:
         required: false
         type: string
@@ -85,11 +90,33 @@ jobs:
       test-status: ${{ inputs.repo-type == 'python' && steps.python-tests.outcome || inputs.repo-type == 'go' && steps.go-tests.outcome || steps.node-tests.outcome }}
       sonar-status: ${{ github.repository == 'didlawowo/workflow-ci' && 'disabled' || steps.sonarqube.outcome }}
       sonar-project-url: ${{ steps.sonarqube.outputs.project-url }}
+      sonar-current-coverage: ${{ steps.sonarqube.outputs.current-coverage }}
+      sonar-main-coverage: ${{ steps.sonarqube.outputs.main-coverage }}
+      sonar-changed-lines-coverage: ${{ steps.sonarqube.outputs.changed-lines-coverage }}
+      quality-status: ${{ steps.python-quality.outputs.quality-passed || steps.go-quality.outputs.quality-passed || steps.node-quality.outputs.quality-passed }}
+      security-issues: ${{ steps.python-quality.outputs.security-issues || steps.go-quality.outputs.security-issues || steps.node-quality.outputs.security-issues }}
+      coverage-threshold: ${{ steps.threshold.outputs.value }}
     steps:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
           persist-credentials: false
+
+      - name: Resolve coverage threshold
+        id: threshold
+        shell: bash
+        run: |
+          set -euo pipefail
+          VALUE="${{ inputs.coverage-threshold }}"
+          if [[ -z "$VALUE" ]]; then
+            case "${{ inputs.repo-type }}" in
+              python) VALUE="30" ;;
+              go) VALUE="15" ;;
+              node|typescript|javascript) VALUE="0" ;;
+              *) VALUE="0" ;;
+            esac
+          fi
+          echo "value=$VALUE" >> "$GITHUB_OUTPUT"
 
       - name: Verify Python tests
         id: python-tests
@@ -104,14 +131,7 @@ jobs:
           coverage-report-path: ${{ inputs.python-coverage-report-path }}
           upload-coverage: "false"
           fail-on-coverage: "true"
-
-      - name: Verify Python lint
-        id: python-lint
-        if: inputs.repo-type == 'python'
-        continue-on-error: true
-        shell: bash
-        working-directory: ${{ inputs.working-directory }}
-        run: uv run --with ruff ruff check . --output-format=github
+          coverage-threshold: ${{ steps.threshold.outputs.value }}
 
       - name: Verify Go tests
         id: go-tests
@@ -123,6 +143,7 @@ jobs:
           working-directory: ${{ inputs.working-directory }}
           upload-coverage: "false"
           fail-on-coverage: "true"
+          coverage-threshold: ${{ steps.threshold.outputs.value }}
 
       - name: Verify Node tests
         id: node-tests
@@ -134,6 +155,34 @@ jobs:
           package-manager: ${{ inputs.package-manager }}
           working-directory: ${{ inputs.working-directory }}
           upload-coverage: "false"
+
+      - name: Verify Python quality and security
+        id: python-quality
+        if: inputs.repo-type == 'python'
+        continue-on-error: true
+        uses: $/.github/actions/python-quality-security
+        with:
+          python-version: ${{ inputs.python-version }}
+          working-directory: ${{ inputs.working-directory }}
+
+      - name: Verify Go quality and security
+        id: go-quality
+        if: inputs.repo-type == 'go'
+        continue-on-error: true
+        uses: $/.github/actions/go-quality-security
+        with:
+          go-version: ${{ inputs.go-version }}
+          working-directory: ${{ inputs.working-directory }}
+
+      - name: Verify Node quality and security
+        id: node-quality
+        if: inputs.repo-type == 'node' || inputs.repo-type == 'typescript' || inputs.repo-type == 'javascript'
+        continue-on-error: true
+        uses: $/.github/actions/node-quality-security
+        with:
+          node-version: ${{ inputs.node-version }}
+          package-manager: ${{ inputs.package-manager }}
+          working-directory: ${{ inputs.working-directory }}
 
       - name: Protect SonarQube analysis policy
         if: github.repository != 'didlawowo/workflow-ci' && github.event_name == 'pull_request'
@@ -196,13 +245,18 @@ jobs:
           case "$TYPE" in
             python)
               test "${{ steps.python-tests.outcome }}" = "success" || FAILED=1
-              test "${{ steps.python-lint.outcome }}" = "success" || FAILED=1
+              test "${{ steps.python-quality.outputs.quality-passed }}" = "true" || FAILED=1
+              test "${{ steps.python-quality.outputs.security-issues }}" = "0" || FAILED=1
               ;;
             go)
               test "${{ steps.go-tests.outcome }}" = "success" || FAILED=1
+              test "${{ steps.go-quality.outputs.quality-passed }}" = "true" || FAILED=1
+              test "${{ steps.go-quality.outputs.security-issues }}" = "0" || FAILED=1
               ;;
             node|typescript|javascript)
               test "${{ steps.node-tests.outcome }}" = "success" || FAILED=1
+              test "${{ steps.node-quality.outputs.quality-passed }}" = "true" || FAILED=1
+              test "${{ steps.node-quality.outputs.security-issues }}" = "0" || FAILED=1
               ;;
             *)
               echo "::error::Unsupported repo type '$TYPE' for independent verification"
@@ -223,6 +277,9 @@ jobs:
     name: "Publish trusted quality evidence"
     if: always()
     needs: [independent-verification]
+    concurrency:
+      group: quality-report-${{ github.repository }}-${{ github.event.pull_request.number || github.ref_name }}
+      cancel-in-progress: false
     runs-on: ${{ inputs.runner }}
     permissions:
       contents: read
@@ -245,11 +302,18 @@ jobs:
           # job and let the trusted reporter render them.
           junit-glob: "${{ runner.temp }}/quality-evidence/no-junit.xml"
           coverage-glob: "${{ runner.temp }}/quality-evidence/no-coverage.xml"
-          coverage-percentage: ${{ needs.independent-verification.outputs.coverage-percentage }}
+          coverage-percentage: ${{ needs.independent-verification.outputs.coverage-percentage || needs.independent-verification.outputs.sonar-current-coverage }}
+          base-coverage-percentage: ${{ needs.independent-verification.outputs.sonar-main-coverage }}
+          changed-lines-coverage: ${{ needs.independent-verification.outputs.sonar-changed-lines-coverage }}
+          coverage-threshold: ${{ needs.independent-verification.outputs.coverage-threshold }}
+          quality-status: ${{ needs.independent-verification.outputs.quality-status }}
+          security-issues: ${{ needs.independent-verification.outputs.security-issues }}
+          mutation-required: "false"
           tests-total: ${{ needs.independent-verification.outputs.tests-total }}
           tests-failed: ${{ needs.independent-verification.outputs.tests-failed }}
           tests-skipped: ${{ needs.independent-verification.outputs.tests-skipped }}
           test-status: ${{ needs.independent-verification.outputs.test-status }}
+          sonar-required: ${{ github.repository != 'didlawowo/workflow-ci' }}
           sonar-status: ${{ needs.independent-verification.outputs.sonar-status }}
           sonar-project-url: ${{ needs.independent-verification.outputs.sonar-project-url }}
           base-sha: ${{ github.event.pull_request.base.sha }}
