@@ -2,6 +2,13 @@ name: Mutation testing policy
 
 on:
   workflow_call:
+    outputs:
+      required:
+        description: "Whether mutation testing is mandatory for this PR"
+        value: ${{ jobs.mutation-run.outputs.required }}
+      artifact-name:
+        description: "Trusted scoped mutation evidence artifact"
+        value: ${{ jobs.mutation-verify.outputs.artifact-name }}
   issues:
     types: [labeled, unlabeled]
   pull_request:
@@ -30,35 +37,13 @@ jobs:
       - name: Install uv for policy helpers
         uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
 
-      - name: Fetch trusted policy without submodule traversal
-        env:
-          MUTATION_FETCH_REPOSITORY: ${{ github.repository }}
-          MUTATION_FETCH_SHA: ${{ github.sha }}
-          MUTATION_FETCH_TOKEN: ${{ github.token }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          DEST="$GITHUB_WORKSPACE/.policy"
-          rm -rf "$DEST"
-          mkdir -p "$DEST"
-          git -C "$DEST" init -q
-
-          ASKPASS="${RUNNER_TEMP:-/tmp}/mutation-git-askpass-notify.sh"
-          trap 'rm -f "$ASKPASS"' EXIT
-          cat > "$ASKPASS" <<'SH'
-          #!/usr/bin/env bash
-          case "$1" in
-            *Username*) printf '%s\n' 'x-access-token' ;;
-            *Password*) printf '%s\n' "$MUTATION_FETCH_TOKEN" ;;
-            *) printf '\n' ;;
-          esac
-          SH
-          chmod 700 "$ASKPASS"
-
-          URL="${GITHUB_SERVER_URL}/${MUTATION_FETCH_REPOSITORY}.git"
-          GIT_ASKPASS="$ASKPASS" GIT_TERMINAL_PROMPT=0 \
-            git -C "$DEST" fetch --no-tags "$URL" "$MUTATION_FETCH_SHA"
-          git -C "$DEST" checkout -q --detach "$MUTATION_FETCH_SHA"
+      - name: Checkout central workflow implementation
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: .workflow-ci
+          persist-credentials: false
 
       - name: Explain mandatory mutation testing
         env:
@@ -67,7 +52,7 @@ jobs:
           POLICY_REPOSITORY: ${{ github.repository }}
           POLICY_TOKEN: ${{ github.token }}
           POLICY_EVENT_PATH: ${{ github.event_path }}
-        run: uv run --no-project --python 3.12 python .policy/.github/scripts/mutation_policy.py notify
+        run: uv run --no-project --python 3.12 python .workflow-ci/.github/scripts/mutation_policy.py notify
 
   refresh-linked-prs:
     if: >-
@@ -85,35 +70,13 @@ jobs:
       - name: Install uv for policy helpers
         uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
 
-      - name: Fetch trusted policy without submodule traversal
-        env:
-          MUTATION_FETCH_REPOSITORY: ${{ github.repository }}
-          MUTATION_FETCH_SHA: ${{ github.sha }}
-          MUTATION_FETCH_TOKEN: ${{ github.token }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          DEST="$GITHUB_WORKSPACE/.policy"
-          rm -rf "$DEST"
-          mkdir -p "$DEST"
-          git -C "$DEST" init -q
-
-          ASKPASS="${RUNNER_TEMP:-/tmp}/mutation-git-askpass-refresh.sh"
-          trap 'rm -f "$ASKPASS"' EXIT
-          cat > "$ASKPASS" <<'SH'
-          #!/usr/bin/env bash
-          case "$1" in
-            *Username*) printf '%s\n' 'x-access-token' ;;
-            *Password*) printf '%s\n' "$MUTATION_FETCH_TOKEN" ;;
-            *) printf '\n' ;;
-          esac
-          SH
-          chmod 700 "$ASKPASS"
-
-          URL="${GITHUB_SERVER_URL}/${MUTATION_FETCH_REPOSITORY}.git"
-          GIT_ASKPASS="$ASKPASS" GIT_TERMINAL_PROMPT=0 \
-            git -C "$DEST" fetch --no-tags "$URL" "$MUTATION_FETCH_SHA"
-          git -C "$DEST" checkout -q --detach "$MUTATION_FETCH_SHA"
+      - name: Checkout central workflow implementation
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: .workflow-ci
+          persist-credentials: false
 
       - name: Recompute linked pull request mutation policy
         env:
@@ -122,7 +85,7 @@ jobs:
           POLICY_REPOSITORY: ${{ github.repository }}
           POLICY_TOKEN: ${{ github.token }}
           POLICY_EVENT_PATH: ${{ github.event_path }}
-        run: uv run --no-project --python 3.12 python .policy/.github/scripts/mutation_policy.py refresh
+        run: uv run --no-project --python 3.12 python .workflow-ci/.github/scripts/mutation_policy.py refresh
 
   mutation-run:
     if: >-
@@ -140,6 +103,14 @@ jobs:
       required: ${{ steps.policy.outputs.required }}
       labels: ${{ steps.policy.outputs.labels }}
     steps:
+      - name: Checkout central workflow implementation
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: .workflow-ci
+          persist-credentials: false
+
       - name: Fetch trusted base policy without submodule traversal
         env:
           MUTATION_FETCH_REPOSITORY: ${{ github.repository }}
@@ -188,7 +159,7 @@ jobs:
           POLICY_REPOSITORY: ${{ github.repository }}
           POLICY_TOKEN: ${{ github.token }}
           POLICY_EVENT_PATH: ${{ github.event_path }}
-        run: uv run --no-project --python 3.12 python .policy/.github/scripts/mutation_policy.py classify
+        run: uv run --no-project --python 3.12 python .workflow-ci/.github/scripts/mutation_policy.py classify
 
       - name: Fetch pull request code without submodule traversal
         if: steps.policy.outputs.required == 'true'
@@ -265,19 +236,29 @@ jobs:
 
           echo "Mutation checkout ready for exact scope $MUTATION_BASE_SHA...$MUTATION_HEAD_SHA."
 
-      - name: Verify trusted mutation runner exists
+      - name: Resolve trusted mutation runner
+        id: runner
         if: steps.policy.outputs.required == 'true'
         shell: bash
         run: |
           set -euo pipefail
-          SCRIPT="$GITHUB_WORKSPACE/.policy/.ci/mutation.sh"
-          if [[ ! -f "$SCRIPT" ]]; then
-            echo "::error::.ci/mutation.sh must already exist on the protected base branch."
-            echo "::error::A pull request cannot introduce or replace its own mandatory mutation runner."
-            exit 1
-          fi
-          if ! grep -Eiq 'mutmut[[:space:]]+run|gremlins[[:space:]]+unleash|stryker([^[:alnum:]]+[^[:space:]]+)*[[:space:]]+run|cargo[[:space:]]+mutants|pitest|infection' "$SCRIPT"; then
-            echo "::error::Trusted .ci/mutation.sh does not invoke a supported real mutation engine."
+          CUSTOM="$GITHUB_WORKSPACE/.policy/.ci/mutation.sh"
+          if [[ -f "$CUSTOM" ]]; then
+            if ! grep -Eiq 'mutmut[[:space:]]+run|gremlins[[:space:]]+unleash|stryker([^[:alnum:]]+[^[:space:]]+)*[[:space:]]+run|cargo[[:space:]]+mutants|pitest|infection' "$CUSTOM"; then
+              echo "::error::Protected .ci/mutation.sh does not invoke a supported real mutation engine."
+              exit 1
+            fi
+            echo "path=$CUSTOM" >> "$GITHUB_OUTPUT"
+            echo "source=consumer-base" >> "$GITHUB_OUTPUT"
+          elif [[ -f "$GITHUB_WORKSPACE/pr/go.mod" ]]; then
+            echo "path=$GITHUB_WORKSPACE/.workflow-ci/.ci/mutation-go.sh" >> "$GITHUB_OUTPUT"
+            echo "source=workflow-ci-go" >> "$GITHUB_OUTPUT"
+          elif [[ -f "$GITHUB_WORKSPACE/pr/pyproject.toml" || -f "$GITHUB_WORKSPACE/pr/setup.cfg" ]] || find "$GITHUB_WORKSPACE/pr" -type f -name '*.py' -not -path '*/.venv/*' -print -quit | grep -q .; then
+            echo "path=$GITHUB_WORKSPACE/.workflow-ci/.ci/mutation.sh" >> "$GITHUB_OUTPUT"
+            echo "source=workflow-ci-python" >> "$GITHUB_OUTPUT"
+          else
+            echo "::error::No central mutation runner is available for this repository type."
+            echo "::error::Add a protected-base .ci/mutation.sh for an unsupported language."
             exit 1
           fi
 
@@ -334,7 +315,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          SCRIPT="$GITHUB_WORKSPACE/.policy/.ci/mutation.sh"
+          SCRIPT="${{ steps.runner.outputs.path }}"
           if grep -Eiq 'mutmut[[:space:]]+run' "$SCRIPT"; then
             VENV="${RUNNER_TEMP:-/tmp}/mutation-venv"
             PYTHON_VERSION="${MUTATION_PYTHON_VERSION:-3.12}"
@@ -383,7 +364,7 @@ jobs:
             MUTATION_POLICY_LABELS="$MUTATION_POLICY_LABELS" \
             MUTATION_BASE_SHA="$MUTATION_BASE_SHA" \
             MUTATION_HEAD_SHA="$MUTATION_HEAD_SHA" \
-            bash "$GITHUB_WORKSPACE/.policy/.ci/mutation.sh"
+            bash "${{ steps.runner.outputs.path }}"
 
       - name: Capture mutmut diagnostics
         if: always() && steps.policy.outputs.required == 'true' && steps.mutation-python.outputs.venv != ''
@@ -450,7 +431,17 @@ jobs:
       pull-requests: read
     runs-on: ${{ vars.UNTRUSTED_RUNNER || 'ubuntu-latest' }}
     timeout-minutes: 10
+    outputs:
+      artifact-name: ${{ steps.trusted-output.outputs.artifact-name }}
     steps:
+      - name: Checkout central workflow implementation
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: .workflow-ci
+          persist-credentials: false
+
       - name: Fetch trusted base policy without submodule traversal
         env:
           MUTATION_FETCH_REPOSITORY: ${{ github.repository }}
@@ -499,7 +490,7 @@ jobs:
           POLICY_REPOSITORY: ${{ github.repository }}
           POLICY_TOKEN: ${{ github.token }}
           POLICY_EVENT_PATH: ${{ github.event_path }}
-        run: uv run --no-project --python 3.12 python .policy/.github/scripts/mutation_policy.py classify
+        run: uv run --no-project --python 3.12 python .workflow-ci/.github/scripts/mutation_policy.py classify
 
       - name: Require successful mutation execution
         if: steps.policy.outputs.required == 'true'
@@ -962,6 +953,17 @@ jobs:
           retention-days: 14
           if-no-files-found: error
           include-hidden-files: true
+
+      - name: Expose trusted mutation evidence
+        id: trusted-output
+        if: always()
+        shell: bash
+        run: |
+          if [[ "${{ steps.policy.outputs.required }}" == "true" && "${{ steps.validate.outcome }}" == "success" ]]; then
+            echo "artifact-name=scoped-mutation-evidence-${{ github.run_id }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "artifact-name=" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Confirm mutation testing is not required
         if: steps.policy.outputs.required != 'true'
