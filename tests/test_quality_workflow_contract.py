@@ -100,6 +100,8 @@ def test_mutation_policy_separates_untrusted_execution_from_trusted_verification
     assert "Resolve trusted mutation runner" in content
     assert ".workflow-ci/.ci/mutation-go.sh" in content
     assert ".workflow-ci/.ci/mutation.sh" in content
+    assert "Setup Go for central Gremlins runner" in content
+    assert "go-version-file: pr/go.mod" in content
     assert 'bash "${{ steps.runner.outputs.path }}"' in content
     assert "job.workflow_repository" in content
     assert "job.workflow_sha" in content
@@ -161,6 +163,11 @@ def test_trusted_quality_enforces_ruff_and_sonarqube_quality_gate():
     assert "-Dsonar.host.url=https://sonarqube.dc-tech.work" in sonar
     assert "-Dsonar.qualitygate.wait=true" in sonar
     assert "-Dsonar.qualitygate.timeout=300" in sonar
+    assert "coverage-args:" not in sonar
+    assert "repo-type:" in sonar
+    assert "working-directory:" in sonar
+    assert "python-coverage-report-path:" in sonar
+    assert "Invalid $label path for SonarQube" in sonar
     assert "extra-args:" not in sonar
     assert "wait-for-quality-gate:" not in sonar
 
@@ -193,7 +200,7 @@ def test_mutation_verify_is_read_only_and_scoped_to_changed_functions():
     verify = content.split("  mutation-verify:", 1)[1]
     assert "issues: write" not in verify
     assert "pull-requests: write" not in verify
-    assert "vars.UNTRUSTED_RUNNER || 'ubuntu-latest'" in verify
+    assert "inputs.trusted-runner || vars.RUNNER || 'ubuntu-latest'" in verify
     assert "git\", \"-C\", str(repo), \"diff\", \"--unified=0\"" in verify
     assert "mutation gate failed for changed functions" in verify
     assert "scoped-mutation-evidence-" in verify
@@ -394,6 +401,7 @@ def test_issue_56_reacts_to_issue_label_add_and_remove():
     assert "refresh-linked-prs:" in workflow
     assert "actions: write" in workflow
     assert "mutation_policy.py refresh" in workflow
+    assert "inputs.runner || vars.RUNNER || 'ubuntu-latest'" in workflow
     assert "job.workflow_repository" in workflow
     assert "job.workflow_sha" in workflow
     notify = workflow.split("  notify:", 1)[1].split("  refresh-linked-prs:", 1)[0]
@@ -455,7 +463,8 @@ def test_quality_evidence_separates_read_only_execution_from_privileged_publicat
 
     assert "needs: [independent-verification, mutation]" in publisher
     assert "Download trusted mutation evidence" in publisher
-    assert "scoped-mutation.json" in publisher
+    assert "needs.mutation.outputs.report-file" in publisher
+    assert "format('.mutation-evidence/{0}', needs.mutation.outputs.report-file)" in publisher
     assert "mutation-required: ${{ needs.mutation.outputs.required == 'true' }}" in publisher
     assert "issues: write" not in publisher
     assert "pull-requests: write" in publisher
