@@ -13,7 +13,26 @@ from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
 MUTATION_REQUIRED_LABELS = ("complexity:high", "priority:high")
+DEPENDABOT_LOGIN = "dependabot[bot]"
 COMMENT_MARKER = "<!-- github-manager:mutation-policy:v1 -->"
+
+_DEPENDENCY_ONLY_FILENAMES = {
+    "go.mod",
+    "go.sum",
+    "package.json",
+    "package-lock.json",
+    "pnpm-lock.yaml",
+    "yarn.lock",
+    "pyproject.toml",
+    "uv.lock",
+    "poetry.lock",
+    "Pipfile",
+    "Pipfile.lock",
+}
+_DEPENDENCY_ONLY_PATTERNS = (
+    re.compile(r"^requirements(?:[-_.][^/]+)?\.txt$"),
+    re.compile(r"^\.github/(?:dependabot\.ya?ml|workflows/[^/]+\.ya?ml)$"),
+)
 
 _LINKED_ISSUE_RE = re.compile(
     r"(?i)\b(?:close[sd]?|fix(?:es|ed)?|resolve[sd]?|refs?)\s*:?\s*#(\d+)\b"
@@ -76,6 +95,55 @@ def mutation_reasons(
         labels.update(label_names(issue.get("labels")))
 
     return tuple(label for label in MUTATION_REQUIRED_LABELS if label in labels)
+
+
+def _is_dependency_only_path(path: str) -> bool:
+    normalized = path.strip("/")
+    if not normalized:
+        return False
+    if Path(normalized).name in _DEPENDENCY_ONLY_FILENAMES:
+        return True
+    return any(pattern.fullmatch(normalized) for pattern in _DEPENDENCY_ONLY_PATTERNS)
+
+
+def _dependabot_dependency_only(event: dict) -> bool:
+    """Return True only for Dependabot PRs changing dependency metadata/workflows."""
+    pull_request = event.get("pull_request") or {}
+    user = pull_request.get("user") or {}
+    sender = event.get("sender") or {}
+    login = str(user.get("login") or sender.get("login") or "")
+    if login != DEPENDABOT_LOGIN:
+        return False
+
+    # An explicit high-risk PR label always overrides the automation exemption.
+    direct_labels = label_names(pull_request.get("labels"))
+    if direct_labels.intersection(MUTATION_REQUIRED_LABELS):
+        return False
+
+    number = pull_request.get("number") or event.get("number")
+    if not isinstance(number, int):
+        return False
+
+    changed_count = pull_request.get("changed_files")
+    if isinstance(changed_count, int) and changed_count > 100:
+        return False
+
+    payload = _api_request("GET", f"pulls/{number}/files?per_page=100") or []
+    if not isinstance(payload, list) or not payload:
+        return False
+
+    filenames = [
+        str(item.get("filename") or "")
+        for item in payload
+        if isinstance(item, dict)
+    ]
+    if not filenames or len(filenames) != len(payload):
+        return False
+    if isinstance(changed_count, int) and changed_count != len(filenames):
+        # Fail closed if pagination/truncation hides part of the PR.
+        return False
+
+    return all(_is_dependency_only_path(path) for path in filenames)
 
 
 def _api_request(method: str, path: str, payload: dict | None = None) -> object:
@@ -151,10 +219,14 @@ def notify(event: dict) -> int:
 
 def classify(event: dict) -> int:
     """Expose whether the PR must run mutation testing."""
-    reasons = mutation_reasons(
-        event,
-        lambda number: _api_request("GET", f"issues/{number}") or {},
-    )
+    if _dependabot_dependency_only(event):
+        reasons = ()
+        print("Mutation testing skipped for dependency-only Dependabot PR")
+    else:
+        reasons = mutation_reasons(
+            event,
+            lambda number: _api_request("GET", f"issues/{number}") or {},
+        )
     required = bool(reasons)
     _write_output("required", "true" if required else "false")
     _write_output("labels", ",".join(reasons))
@@ -196,10 +268,15 @@ def _is_mutation_policy_run(run: dict, pr_number: int, head_sha: str) -> bool:
     valid_workflow_paths = (
         ".github/workflows/mutation-policy.yml",
         ".forgejo/workflows/mutation-policy.yml",
+        # Managed consumers call the reusable mutation gate through this wrapper.
+        ".github/workflows/trusted-quality-evidence.yml",
     )
     if path and not path.endswith(valid_workflow_paths):
         return False
-    if not path and name and name != "Mutation testing policy":
+    if not path and name and name not in {
+        "Mutation testing policy",
+        "Trusted quality evidence",
+    }:
         return False
 
     pull_requests = run.get("pull_requests")
