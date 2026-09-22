@@ -104,6 +104,7 @@ jobs:
     permissions:
       contents: read
       actions: read
+      pull-requests: write
       security-events: write
     outputs:
       quality-passed: ${{ steps.checks.outputs.quality-passed }}
@@ -150,6 +151,7 @@ jobs:
     permissions:
       contents: read
       actions: read
+      pull-requests: write
       security-events: write
       packages: write
 
