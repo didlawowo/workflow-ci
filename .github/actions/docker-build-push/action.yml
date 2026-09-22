@@ -432,6 +432,90 @@ runs:
     # or token permissions must not turn an otherwise valid security scan red.
     # Callers should still grant contents:read, actions:read and
     # security-events:write so publication succeeds whenever GitHub supports it.
+    - name: Build Trivy Markdown summary
+      id: trivy-summary
+      if: inputs.scan == 'true'
+      shell: bash
+      env:
+        SARIF_FILE: ${{ steps.meta.outputs.sarif-file }}
+        IMAGE_NAME: ${{ steps.meta.outputs.full-name }}
+      run: |
+        set -euo pipefail
+        SUMMARY_FILE="${RUNNER_TEMP}/trivy-${{ steps.meta.outputs.target-name }}-summary.md"
+        TOTAL="${{ steps.scan-results.outputs.vuln-count }}"
+
+        jq -r --arg image "$IMAGE_NAME" --arg total "$TOTAL" '
+          def results: [.runs[].results[]?];
+          def count_level($level): [results[] | select((.level // "warning") == $level)] | length;
+          def icon($level):
+            if $level == "error" then "🔴"
+            elif $level == "warning" then "🟠"
+            elif $level == "note" then "🟡"
+            else "⚪" end;
+          "<!-- workflow-ci:trivy-report:" + $image + " -->\n" +
+          "## 🛡️ Trivy image scan\n\n" +
+          "**Image:** `" + $image + "`  \n" +
+          "**Findings:** " + $total + "\n\n" +
+          "| SARIF level | Count |\n|---|---:|\n" +
+          "| 🔴 error | " + (count_level("error")|tostring) + " |\n" +
+          "| 🟠 warning | " + (count_level("warning")|tostring) + " |\n" +
+          "| 🟡 note | " + (count_level("note")|tostring) + " |\n\n" +
+          (if (results|length) == 0 then
+             "✅ No Trivy findings in the configured severity scope.\n"
+           else
+             "### Top findings\n\n| Rule | Level | Finding |\n|---|---|---|\n" +
+             ([results[:20][] |
+               "| `" + (.ruleId // "unknown") + "` | " +
+               icon(.level // "warning") + " " + (.level // "warning") + " | " +
+               ((.message.text // "No description") | gsub("[\r\n|]"; " ")) + " |"
+             ] | join("\n")) +
+             (if (results|length) > 20 then
+                "\n\n_Showing 20 of " + ((results|length)|tostring) + " findings. See the SARIF artifact for the full report._\n"
+              else "\n" end)
+           end)
+        ' "$SARIF_FILE" > "$SUMMARY_FILE"
+
+        cat "$SUMMARY_FILE" >> "$GITHUB_STEP_SUMMARY"
+        echo "file=$SUMMARY_FILE" >> "$GITHUB_OUTPUT"
+
+    - name: Publish Trivy summary on pull request
+      id: trivy-pr-comment
+      if: inputs.scan == 'true' && github.event_name == 'pull_request'
+      continue-on-error: true
+      uses: actions/github-script@v8
+      env:
+        TRIVY_SUMMARY_FILE: ${{ steps.trivy-summary.outputs.file }}
+        TRIVY_COMMENT_MARKER: '<!-- workflow-ci:trivy-report:${{ steps.meta.outputs.full-name }} -->'
+      with:
+        github-token: ${{ github.token }}
+        script: |
+          const fs = require('fs');
+          const body = fs.readFileSync(process.env.TRIVY_SUMMARY_FILE, 'utf8');
+          const marker = process.env.TRIVY_COMMENT_MARKER;
+          const { owner, repo } = context.repo;
+          const issue_number = context.issue.number;
+          const comments = await github.paginate(github.rest.issues.listComments, {
+            owner, repo, issue_number, per_page: 100
+          });
+          const existing = comments.find(comment =>
+            comment.user?.type === 'Bot' && comment.body?.includes(marker)
+          );
+          if (existing) {
+            await github.rest.issues.updateComment({
+              owner, repo, comment_id: existing.id, body
+            });
+          } else {
+            await github.rest.issues.createComment({
+              owner, repo, issue_number, body
+            });
+          }
+
+    - name: Warn when PR scan comment failed
+      if: inputs.scan == 'true' && github.event_name == 'pull_request' && steps.trivy-pr-comment.outcome == 'failure'
+      shell: bash
+      run: |
+        echo "::warning title=Trivy PR comment failed::The scan summary is available in the workflow summary and SARIF artifact, but the PR comment could not be created or updated. Grant pull-requests: write if PR comments are desired."
+
     - name: Upload Trivy scan results
       id: upload-sarif
       if: inputs.scan == 'true'
