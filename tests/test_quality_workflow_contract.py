@@ -122,9 +122,13 @@ def test_trusted_quality_enforces_ruff_and_sonarqube_quality_gate():
     workflow = WORKFLOW.read_text()
     sonar = (root / ".github" / "actions" / "sonarqube-scan" / "action.yml").read_text()
 
-    assert "Verify Python lint" in workflow
-    assert "uv run --with ruff ruff check . --output-format=github" in workflow
-    assert 'test "${{ steps.python-lint.outcome }}" = "success"' in workflow
+    assert "Verify Python quality and security" in workflow
+    assert "uses: $/.github/actions/python-quality-security" in workflow
+    python_quality = (
+        root / ".github" / "actions" / "python-quality-security" / "action.yml"
+    ).read_text()
+    assert "Run Ruff linting" in python_quality
+    assert "uvx --from ruff==0.16.8 ruff check ." in python_quality
 
     assert "sonar-enabled:" not in workflow
     assert "sonar-project-key:" not in workflow
@@ -135,7 +139,8 @@ def test_trusted_quality_enforces_ruff_and_sonarqube_quality_gate():
     assert "steps.sonarqube.outcome" in workflow
     assert "SonarQube Quality Gate failed, is not configured, or analysis could not complete" in workflow
     assert "sonar-project.properties is protected quality policy" in workflow
-    assert "github.repository != 'didlawowo/workflow-ci'" in workflow
+    assert "vars.SONAR_ENABLED == 'true'" in workflow
+    assert "github.repository != 'didlawowo/workflow-ci'" not in workflow
 
     assert "SonarSource/sonarqube-scan-action@v8.2.2" in sonar
     assert "-Dsonar.projectKey=${{ inputs.project-key }}" in sonar
@@ -154,8 +159,11 @@ def test_language_templates_make_quality_failures_blocking():
 
         assert gate_index > quality_index
         assert content.count("- name: Enforce quality and security gate") == 1
+        assert "push:\n    branches: [main]" in content
+        assert "cancel-in-progress: true" in content
         assert (
-            "if: always() && needs.tests.result == 'success' && "
+            "if: always() && github.event_name != 'pull_request' && "
+            "needs.tests.result == 'success' && "
             "needs.quality-security.result == 'success'"
         ) in content
 
