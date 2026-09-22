@@ -106,16 +106,20 @@ jobs:
     with:
       repo-type: python
       runner: ${{ vars.RUNNER }}
-      sonar-project-key: ${{ vars.SONAR_PROJECT_KEY }}
     secrets:
       SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
       SONAR_ROOT_CERT: ${{ secrets.SONAR_ROOT_CERT }} # optional
 ```
 
-`SONAR_TOKEN` must be able to analyze the configured project. `SONAR_PROJECT_KEY` is a
-repository variable because project keys are not assumed from repository names. Quality Gate
-thresholds stay in SonarQube, so tightening coverage/security/duplication rules does not require
-another workflow-ci release.
+`SONAR_TOKEN` must be able to analyze the configured project. `SONAR_PROJECT_KEY` is read
+directly from the caller repository variable by the reusable workflow; it is deliberately not a
+workflow input, so a pull request cannot redirect analysis to another SonarQube project. The
+SonarQube host, full-repository scan base and blocking Quality Gate wait are also fixed by
+workflow-ci. A pull request that changes `sonar-project.properties` is rejected by trusted
+quality evidence; such policy changes must be reviewed separately on the protected base branch.
+
+Quality Gate thresholds stay in SonarQube, so tightening coverage/security/duplication rules does
+not require another workflow-ci release.
 
 Same-repository action composition uses GitHub's `$/...` self-reference. This resolves internal
 actions to the exact commit of the tagged workflow and prevents stale cross-version pins.
