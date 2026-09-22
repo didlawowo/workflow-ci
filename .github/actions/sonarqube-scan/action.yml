@@ -1,0 +1,86 @@
+name: "SonarQube Quality Gate"
+description: "Run SonarQube analysis against the central server and block on the server-side Quality Gate"
+
+inputs:
+  sonar-token:
+    description: "SonarQube analysis token"
+    required: true
+  sonar-host-url:
+    description: "SonarQube Server URL"
+    required: false
+    default: "https://sonarqube.dc-tech.work"
+  sonar-root-cert:
+    description: "Optional PEM root certificate for the SonarQube TLS chain"
+    required: false
+    default: ""
+  project-key:
+    description: "Exact SonarQube project key"
+    required: true
+  project-base-dir:
+    description: "Project base directory for analysis"
+    required: false
+    default: "."
+  coverage-args:
+    description: "Trusted language-specific coverage argument"
+    required: false
+    default: ""
+  extra-args:
+    description: "Additional scanner arguments"
+    required: false
+    default: ""
+  wait-for-quality-gate:
+    description: "Wait for the server-side Quality Gate"
+    required: false
+    default: "true"
+  quality-gate-timeout:
+    description: "Quality Gate wait timeout in seconds"
+    required: false
+    default: "300"
+
+outputs:
+  project-url:
+    description: "SonarQube project dashboard URL"
+    value: ${{ steps.metadata.outputs.project-url }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Validate SonarQube configuration
+      id: metadata
+      shell: bash
+      env:
+        SONAR_TOKEN_VALUE: ${{ inputs.sonar-token }}
+        SONAR_HOST_VALUE: ${{ inputs.sonar-host-url }}
+        SONAR_PROJECT_VALUE: ${{ inputs.project-key }}
+      run: |
+        set -euo pipefail
+        if [[ -z "$SONAR_TOKEN_VALUE" ]]; then
+          echo "::error::SONAR_TOKEN is required when SonarQube quality gating is enabled."
+          exit 1
+        fi
+        if [[ -z "$SONAR_PROJECT_VALUE" ]]; then
+          echo "::error::sonar-project-key is required when SonarQube quality gating is enabled."
+          exit 1
+        fi
+        if [[ "$SONAR_HOST_VALUE" != https://* && "$SONAR_HOST_VALUE" != http://* ]]; then
+          echo "::error::Invalid SonarQube host URL: $SONAR_HOST_VALUE"
+          exit 1
+        fi
+        HOST="${SONAR_HOST_VALUE%/}"
+        echo "project-url=${HOST}/dashboard?id=${SONAR_PROJECT_VALUE}" >> "$GITHUB_OUTPUT"
+
+    - name: Run SonarQube scan and wait for Quality Gate
+      uses: SonarSource/sonarqube-scan-action@v8.2.2
+      env:
+        SONAR_TOKEN: ${{ inputs.sonar-token }}
+        SONAR_HOST_URL: ${{ inputs.sonar-host-url }}
+        SONAR_ROOT_CERT: ${{ inputs.sonar-root-cert }}
+      with:
+        projectBaseDir: ${{ inputs.project-base-dir }}
+        args: >-
+          ${{ inputs.extra-args }}
+          ${{ inputs.coverage-args }}
+          -Dsonar.projectKey=${{ inputs.project-key }}
+          -Dsonar.host.url=${{ inputs.sonar-host-url }}
+          -Dsonar.qualitygate.wait=${{ inputs.wait-for-quality-gate }}
+          -Dsonar.qualitygate.timeout=${{ inputs.quality-gate-timeout }}

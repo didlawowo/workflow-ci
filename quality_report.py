@@ -34,6 +34,7 @@ SUSPICIOUS_NAMES = {
     "vitest.config.js",
     "vitest.config.ts",
     "stryker.conf.json",
+    "sonar-project.properties",
 }
 
 
@@ -452,7 +453,7 @@ def merge_reports(existing: dict[str, Any] | None, current: dict[str, Any]) -> d
     merged["schema_version"] = current.get("schema_version", existing.get("schema_version", 1))
     if current_identity is not None:
         merged["identity"] = current_identity
-    for section in ("tests", "coverage", "mutation", "diff", "history"):
+    for section in ("tests", "coverage", "mutation", "sonar", "diff", "history"):
         candidate = current.get(section)
         previous = existing.get(section)
         if isinstance(candidate, dict) and candidate.get("available"):
@@ -468,6 +469,7 @@ def render_markdown(report: dict[str, Any]) -> str:
     tests = report["tests"]
     coverage = report["coverage"]
     mutation = report["mutation"]
+    sonar = report.get("sonar", {"available": False, "status": "disabled", "url": None})
     diff = report["diff"]
     history = report["history"]
 
@@ -494,6 +496,18 @@ def render_markdown(report: dict[str, Any]) -> str:
             f"{mutation['timeouts'] if mutation['timeouts'] is not None else '?'} timeout"
         )
 
+    sonar_summary = "disabled"
+    if sonar.get("available"):
+        status = str(sonar.get("status") or "unknown")
+        if status == "success":
+            label = "✅ Quality Gate passed"
+        elif status == "failure":
+            label = "❌ Quality Gate failed"
+        else:
+            label = f"⚠️ {status}"
+        url = sonar.get("url")
+        sonar_summary = f"[{label}]({url})" if url else label
+
     lines = [
         COMMENT_MARKER,
         _state_marker(report),
@@ -504,6 +518,7 @@ def render_markdown(report: dict[str, Any]) -> str:
         f"| Tests | {test_summary} |",
         f"| Coverage | {coverage_summary} |",
         f"| Mutation | {mutation_summary} |",
+        f"| SonarQube | {sonar_summary} |",
     ]
     if diff["available"]:
         lines.append(
@@ -539,8 +554,8 @@ def render_markdown(report: dict[str, Any]) -> str:
     lines.extend(
         [
             "",
-            "<sub>Generated from machine-readable JUnit/Cobertura/mutation output and git/API metadata. "
-            "The PR author does not supply the displayed counters.</sub>",
+            "<sub>Generated from machine-readable JUnit/Cobertura/mutation output, SonarQube gate status "
+            "and git/API metadata. The PR author does not supply the displayed counters.</sub>",
         ]
     )
     return "\n".join(lines) + "\n"
@@ -607,6 +622,8 @@ def main() -> int:
     parser.add_argument("--tests-failed")
     parser.add_argument("--tests-skipped")
     parser.add_argument("--test-status")
+    parser.add_argument("--sonar-status")
+    parser.add_argument("--sonar-url")
     parser.add_argument("--base")
     parser.add_argument("--head")
     parser.add_argument("--output-json", default=".quality/quality-report.json")
@@ -639,6 +656,11 @@ def main() -> int:
         "tests": tests,
         "coverage": coverage,
         "mutation": parse_mutation(args.mutation),
+        "sonar": {
+            "available": args.sonar_status not in (None, "", "disabled"),
+            "status": args.sonar_status or "disabled",
+            "url": args.sonar_url or None,
+        },
         "diff": diff_stats(args.base, args.head),
         "history": ci_history(
             os.environ.get("GITHUB_API_URL"),

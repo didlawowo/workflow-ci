@@ -34,6 +34,14 @@ inputs:
     description: "Trusted test command outcome fallback (success/failure)"
     required: false
     default: ""
+  sonar-status:
+    description: "Trusted SonarQube scan outcome (success/failure/disabled)"
+    required: false
+    default: "disabled"
+  sonar-project-url:
+    description: "Trusted SonarQube project dashboard URL"
+    required: false
+    default: ""
   base-sha:
     description: "Base commit SHA"
     required: false
@@ -102,6 +110,12 @@ runs:
         fi
         if [[ -n "${{ inputs.test-status }}" ]]; then
           ARGS+=(--test-status "${{ inputs.test-status }}")
+        fi
+        if [[ -n "${{ inputs.sonar-status }}" ]]; then
+          ARGS+=(--sonar-status "${{ inputs.sonar-status }}")
+        fi
+        if [[ -n "${{ inputs.sonar-project-url }}" ]]; then
+          ARGS+=(--sonar-url "${{ inputs.sonar-project-url }}")
         fi
         if [[ "${{ inputs.comment }}" == "true" ]]; then
           ARGS+=(--comment)

@@ -25,31 +25,35 @@ def test_quality_evidence_cancels_stale_caller_revisions():
     assert "cancel-in-progress: true" in header
 
 
-def test_quality_evidence_requires_explicit_runner_and_pinned_actions():
+def test_quality_evidence_requires_explicit_runner_and_same_commit_actions():
     content = WORKFLOW.read_text()
 
     assert "runner:" in content
     assert "runs-on: ${{ inputs.runner }}" in content
     assert "workflow-ci-ref:" in content
-    assert 'default: "v1.7.0"' in content
-    assert "repository: didlawowo/workflow-ci" in content
-    assert "ref: ${{ inputs.workflow-ci-ref }}" in content
+    assert 'default: ""' in content
+    assert "repository: didlawowo/workflow-ci" not in content
+    assert "uses: $/.github/actions/run-python-tests" in content
+    assert "uses: $/.github/actions/run-go-tests" in content
+    assert "uses: $/.github/actions/run-node-tests" in content
     assert "ubuntu-latest" not in content
     assert "@main" not in content
 
 
-def test_quality_evidence_dependency_chain_has_no_workflow_ci_main_refs():
+def test_quality_evidence_dependency_chain_uses_same_commit_self_refs():
     root = Path(__file__).resolve().parents[1]
-    paths = [
-        root / ".github" / "actions" / "run-python-tests" / "action.yml",
-        root / ".github" / "actions" / "run-go-tests" / "action.yml",
-        root / ".github" / "actions" / "run-node-tests" / "action.yml",
-    ]
-    for path in paths:
-        content = path.read_text()
+    go_tests = (root / ".github" / "actions" / "run-go-tests" / "action.yml").read_text()
+    node_tests = (root / ".github" / "actions" / "run-node-tests" / "action.yml").read_text()
+    python_quality = (root / ".github" / "actions" / "python-quality-security" / "action.yml").read_text()
+    go_quality = (root / ".github" / "actions" / "go-quality-security" / "action.yml").read_text()
+    node_quality = (root / ".github" / "actions" / "node-quality-security" / "action.yml").read_text()
+
+    for content in (go_tests, node_tests, python_quality, go_quality, node_quality):
         assert "@main" not in content
-        if "didlawowo/workflow-ci/" in content:
-            assert "@v1.7.0" in content
+        assert "didlawowo/workflow-ci/.github/actions/" not in content
+
+    assert "uses: $/.github/actions/setup-go-env" in go_tests
+    assert "uses: $/.github/actions/setup-node-env" in node_tests
 
 
 def test_mutation_policy_cancels_only_relevant_pr_and_issue_events():
@@ -111,6 +115,29 @@ def test_mutation_policy_requires_machine_readable_evidence_and_zero_survivors()
     assert "mutation evidence contains no measured mutants" in content
     assert "if survived or timeouts or suspicious:" in content
 
+
+
+def test_trusted_quality_enforces_ruff_and_sonarqube_quality_gate():
+    root = Path(__file__).resolve().parents[1]
+    workflow = WORKFLOW.read_text()
+    sonar = (root / ".github" / "actions" / "sonarqube-scan" / "action.yml").read_text()
+
+    assert "Verify Python lint" in workflow
+    assert "uv run --with ruff ruff check . --output-format=github" in workflow
+    assert 'test "${{ steps.python-lint.outcome }}" = "success"' in workflow
+
+    assert "sonar-enabled:" in workflow
+    assert 'default: "https://sonarqube.dc-tech.work"' in workflow
+    assert "SONAR_TOKEN:" in workflow
+    assert "uses: $/.github/actions/sonarqube-scan" in workflow
+    assert "steps.sonarqube.outcome" in workflow
+    assert "SonarQube Quality Gate failed or analysis could not complete" in workflow
+
+    assert "SonarSource/sonarqube-scan-action@v8.2.2" in sonar
+    assert "-Dsonar.projectKey=${{ inputs.project-key }}" in sonar
+    assert "-Dsonar.host.url=${{ inputs.sonar-host-url }}" in sonar
+    assert "-Dsonar.qualitygate.wait=${{ inputs.wait-for-quality-gate }}" in sonar
+    assert "-Dsonar.qualitygate.timeout=${{ inputs.quality-gate-timeout }}" in sonar
 
 def test_language_templates_make_quality_failures_blocking():
     root = Path(__file__).resolve().parents[1]
@@ -290,7 +317,7 @@ def test_language_templates_use_single_pr_pipeline_with_concurrency():
 def test_internal_workflow_ci_refs_follow_immutable_version_contract():
     root = Path(__file__).resolve().parents[1]
     version = (root / ".workflow-ci-version").read_text().strip()
-    assert version == "v1.7.0"
+    assert version == "v1.8.0"
 
     scan_roots = (
         root / ".github" / "actions",
@@ -315,7 +342,7 @@ def test_internal_workflow_ci_refs_follow_immutable_version_contract():
 
     release = (root / ".github" / "workflows" / "release.yml").read_text()
     assert 'workflow-ci-ref:' in release
-    assert 'default: "v1.7.0"' in release
+    assert 'default: "v1.8.0"' in release
 
 
 def test_internal_ref_sync_helper_is_present_and_checkable():
@@ -388,14 +415,16 @@ def test_quality_evidence_separates_read_only_execution_from_privileged_publicat
 
     assert "issues: write" not in execution
     assert "pull-requests: write" not in execution
-    assert execution.count("persist-credentials: false") >= 2
-    assert "uses: ./.workflow-ci/.github/actions/quality-report" not in execution
+    assert execution.count("persist-credentials: false") >= 1
+    assert "uses: $/.github/actions/quality-report" not in execution
+    assert "repository: didlawowo/workflow-ci" not in execution
 
     assert "needs: [independent-verification]" in publisher
     assert "issues: write" not in publisher
     assert "pull-requests: write" in publisher
-    assert publisher.count("persist-credentials: false") >= 2
-    assert "uses: ./.workflow-ci/.github/actions/quality-report" in publisher
+    assert publisher.count("persist-credentials: false") >= 1
+    assert "uses: $/.github/actions/quality-report" in publisher
+    assert "repository: didlawowo/workflow-ci" not in publisher
     assert 'junit-glob: "${{ runner.temp }}/quality-evidence/no-junit.xml"' in publisher
     assert 'coverage-glob: "${{ runner.temp }}/quality-evidence/no-coverage.xml"' in publisher
 
@@ -407,6 +436,7 @@ def test_consumer_selftest_grants_reusable_publisher_pr_write_permission():
     ).read_text()
 
     assert content.count("pull-requests: write") == 3
+    assert content.count("sonar-enabled: false") == 3
     assert "pull-requests: read" not in content
 
 

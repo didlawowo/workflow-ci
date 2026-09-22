@@ -57,6 +57,7 @@ class QualityReportTests(unittest.TestCase):
             "8\t0\ttests/test_service.py\n"
             "2\t1\t.github/workflows/ci.yml\n"
             "3\t0\t.ci/mutation.sh\n"
+            "1\t0\tsonar-project.properties\n"
         )
         completed = type("Result", (), {"stdout": diff})()
         with patch.object(quality_report.subprocess, "run", return_value=completed):
@@ -67,7 +68,7 @@ class QualityReportTests(unittest.TestCase):
         self.assertEqual(result["test_additions"], 8)
         self.assertEqual(
             result["suspicious_files"],
-            [".github/workflows/ci.yml", ".ci/mutation.sh"],
+            [".github/workflows/ci.yml", ".ci/mutation.sh", "sonar-project.properties"],
         )
 
 
@@ -203,6 +204,7 @@ class QualityReportTests(unittest.TestCase):
             "mutation": {"available": True, "marker": "old-mutation"},
             "diff": {"available": True, "marker": "old-diff"},
             "history": {"available": True, "marker": "old-history"},
+            "sonar": {"available": True, "marker": "old-sonar"},
         }
         current = {
             "schema_version": 2,
@@ -212,6 +214,7 @@ class QualityReportTests(unittest.TestCase):
             "mutation": {"available": True, "marker": "new-mutation"},
             "diff": {"available": True, "marker": "new-diff"},
             "history": {"available": True, "marker": "new-history"},
+            "sonar": {"available": True, "marker": "new-sonar"},
         }
 
         merged = quality_report.merge_reports(existing, current)
@@ -226,11 +229,12 @@ class QualityReportTests(unittest.TestCase):
                 "mutation",
                 "diff",
                 "history",
+                "sonar",
             },
         )
         self.assertEqual(merged["schema_version"], 2)
         self.assertEqual(merged["identity"], current["identity"])
-        for section in ("tests", "coverage", "mutation", "diff", "history"):
+        for section in ("tests", "coverage", "mutation", "sonar", "diff", "history"):
             self.assertEqual(merged[section], current[section])
 
     def test_merge_reports_schema_version_fallback_contract(self):
@@ -335,6 +339,11 @@ class QualityReportTests(unittest.TestCase):
                 "reruns": 1,
                 "current_run_attempt": 1,
             },
+            "sonar": {
+                "available": True,
+                "status": "success",
+                "url": "https://sonarqube.dc-tech.work/dashboard?id=example",
+            },
         }
         markdown = quality_report.render_markdown(report)
 
@@ -343,6 +352,9 @@ class QualityReportTests(unittest.TestCase):
         self.assertIn("90.0%", markdown)
         self.assertIn(".ci/mutation.sh", markdown)
         self.assertIn("2 failed", markdown)
+        self.assertIn("SonarQube", markdown)
+        self.assertIn("Quality Gate passed", markdown)
+        self.assertIn("https://sonarqube.dc-tech.work/dashboard?id=example", markdown)
 
 
 if __name__ == "__main__":

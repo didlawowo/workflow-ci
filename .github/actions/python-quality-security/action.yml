@@ -46,7 +46,7 @@ runs:
   using: "composite"
   steps:
     - name: Setup Python environment
-      uses: didlawowo/workflow-ci/.github/actions/setup-python-env@v1.7.0
+      uses: $/.github/actions/setup-python-env
       with:
         python-version: ${{ inputs.python-version }}
         install-dev: "true"

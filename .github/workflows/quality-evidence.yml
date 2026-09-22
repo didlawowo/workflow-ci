@@ -12,10 +12,10 @@ on:
         required: true
         type: string
       workflow-ci-ref:
-        description: "Pinned workflow-ci ref used for composite actions"
+        description: "Deprecated compatibility input; internal actions resolve to the called workflow commit via $/"
         required: false
         type: string
-        default: "v1.7.0"
+        default: ""
       working-directory:
         required: false
         type: string
@@ -51,11 +51,38 @@ on:
         required: false
         type: string
         default: "coverage-reports/coverage.xml"
+      sonar-enabled:
+        description: "Run SonarQube analysis and enforce its server-side Quality Gate"
+        required: false
+        type: boolean
+        default: true
+      sonar-host-url:
+        description: "SonarQube Server URL"
+        required: false
+        type: string
+        default: "https://sonarqube.dc-tech.work"
+      sonar-project-key:
+        description: "SonarQube project key for the caller repository"
+        required: false
+        type: string
+        default: ""
+      sonar-extra-args:
+        description: "Optional additional SonarScanner arguments"
+        required: false
+        type: string
+        default: ""
       comment:
         description: "Publish/update the quality report comment on the pull request"
         required: false
         type: boolean
         default: true
+    secrets:
+      SONAR_TOKEN:
+        description: "Token allowed to analyze the SonarQube project"
+        required: false
+      SONAR_ROOT_CERT:
+        description: "Optional PEM root certificate for an internal SonarQube CA"
+        required: false
 
 concurrency:
   # A newer revision of the same caller PR supersedes stale evidence work.
@@ -76,25 +103,19 @@ jobs:
       tests-failed: ${{ steps.python-tests.outputs.tests-failed || steps.go-tests.outputs.tests-failed || steps.node-tests.outputs.tests-failed }}
       tests-skipped: ${{ steps.python-tests.outputs.tests-skipped || steps.go-tests.outputs.tests-skipped || steps.node-tests.outputs.tests-skipped }}
       test-status: ${{ inputs.repo-type == 'python' && steps.python-tests.outcome || inputs.repo-type == 'go' && steps.go-tests.outcome || steps.node-tests.outcome }}
+      sonar-status: ${{ inputs.sonar-enabled && steps.sonarqube.outcome || 'disabled' }}
+      sonar-project-url: ${{ steps.sonarqube.outputs.project-url }}
     steps:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
           persist-credentials: false
 
-      - name: Checkout pinned workflow-ci actions
-        uses: actions/checkout@v7
-        with:
-          repository: didlawowo/workflow-ci
-          ref: ${{ inputs.workflow-ci-ref }}
-          path: .workflow-ci
-          persist-credentials: false
-
       - name: Verify Python tests
         id: python-tests
         if: inputs.repo-type == 'python'
         continue-on-error: true
-        uses: ./.workflow-ci/.github/actions/run-python-tests
+        uses: $/.github/actions/run-python-tests
         with:
           python-version: ${{ inputs.python-version }}
           working-directory: ${{ inputs.working-directory }}
@@ -104,11 +125,19 @@ jobs:
           upload-coverage: "false"
           fail-on-coverage: "true"
 
+      - name: Verify Python lint
+        id: python-lint
+        if: inputs.repo-type == 'python'
+        continue-on-error: true
+        shell: bash
+        working-directory: ${{ inputs.working-directory }}
+        run: uv run --with ruff ruff check . --output-format=github
+
       - name: Verify Go tests
         id: go-tests
         if: inputs.repo-type == 'go'
         continue-on-error: true
-        uses: ./.workflow-ci/.github/actions/run-go-tests
+        uses: $/.github/actions/run-go-tests
         with:
           go-version: ${{ inputs.go-version }}
           working-directory: ${{ inputs.working-directory }}
@@ -119,12 +148,47 @@ jobs:
         id: node-tests
         if: inputs.repo-type == 'node' || inputs.repo-type == 'typescript' || inputs.repo-type == 'javascript'
         continue-on-error: true
-        uses: ./.workflow-ci/.github/actions/run-node-tests
+        uses: $/.github/actions/run-node-tests
         with:
           node-version: ${{ inputs.node-version }}
           package-manager: ${{ inputs.package-manager }}
           working-directory: ${{ inputs.working-directory }}
           upload-coverage: "false"
+
+      - name: Resolve SonarQube coverage argument
+        id: sonar-coverage
+        if: inputs.sonar-enabled
+        shell: bash
+        run: |
+          set -euo pipefail
+          case "${{ inputs.repo-type }}" in
+            python)
+              echo "value=-Dsonar.python.coverage.reportPaths=${{ inputs.python-coverage-report-path }}" >> "$GITHUB_OUTPUT"
+              ;;
+            go)
+              echo "value=-Dsonar.go.coverage.reportPaths=coverage.out" >> "$GITHUB_OUTPUT"
+              ;;
+            node|typescript|javascript)
+              echo "value=-Dsonar.javascript.lcov.reportPaths=coverage/lcov.info" >> "$GITHUB_OUTPUT"
+              ;;
+            *)
+              echo "value=" >> "$GITHUB_OUTPUT"
+              ;;
+          esac
+
+      - name: Verify SonarQube Quality Gate
+        id: sonarqube
+        if: inputs.sonar-enabled
+        continue-on-error: true
+        uses: $/.github/actions/sonarqube-scan
+        with:
+          sonar-token: ${{ secrets.SONAR_TOKEN }}
+          sonar-host-url: ${{ inputs.sonar-host-url }}
+          sonar-root-cert: ${{ secrets.SONAR_ROOT_CERT }}
+          project-key: ${{ inputs.sonar-project-key }}
+          project-base-dir: ${{ inputs.working-directory }}
+          coverage-args: ${{ steps.sonar-coverage.outputs.value }}
+          extra-args: ${{ inputs.sonar-extra-args }}
 
       - name: Enforce independent verification
         if: always()
@@ -132,21 +196,33 @@ jobs:
         run: |
           set -euo pipefail
           TYPE="${{ inputs.repo-type }}"
+          FAILED=0
+
           case "$TYPE" in
             python)
-              test "${{ steps.python-tests.outcome }}" = "success"
+              test "${{ steps.python-tests.outcome }}" = "success" || FAILED=1
+              test "${{ steps.python-lint.outcome }}" = "success" || FAILED=1
               ;;
             go)
-              test "${{ steps.go-tests.outcome }}" = "success"
+              test "${{ steps.go-tests.outcome }}" = "success" || FAILED=1
               ;;
             node|typescript|javascript)
-              test "${{ steps.node-tests.outcome }}" = "success"
+              test "${{ steps.node-tests.outcome }}" = "success" || FAILED=1
               ;;
             *)
               echo "::error::Unsupported repo type '$TYPE' for independent verification"
-              exit 1
+              FAILED=1
               ;;
           esac
+
+          if [[ "${{ inputs.sonar-enabled }}" == "true" ]]; then
+            if [[ "${{ steps.sonarqube.outcome }}" != "success" ]]; then
+              echo "::error::SonarQube Quality Gate failed or analysis could not complete."
+              FAILED=1
+            fi
+          fi
+
+          exit "$FAILED"
 
   publish-evidence:
     name: "Publish trusted quality evidence"
@@ -166,16 +242,8 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
-      - name: Checkout pinned workflow-ci reporter
-        uses: actions/checkout@v7
-        with:
-          repository: didlawowo/workflow-ci
-          ref: ${{ inputs.workflow-ci-ref }}
-          path: .workflow-ci
-          persist-credentials: false
-
       - name: Publish trusted quality evidence
-        uses: ./.workflow-ci/.github/actions/quality-report
+        uses: $/.github/actions/quality-report
         with:
           # Never parse report files from the PR checkout in the privileged
           # publisher. Only consume outputs produced by the read-only execution
@@ -187,6 +255,8 @@ jobs:
           tests-failed: ${{ needs.independent-verification.outputs.tests-failed }}
           tests-skipped: ${{ needs.independent-verification.outputs.tests-skipped }}
           test-status: ${{ needs.independent-verification.outputs.test-status }}
+          sonar-status: ${{ needs.independent-verification.outputs.sonar-status }}
+          sonar-project-url: ${{ needs.independent-verification.outputs.sonar-project-url }}
           base-sha: ${{ github.event.pull_request.base.sha }}
           head-sha: ${{ github.event.pull_request.head.sha }}
           github-token: ${{ github.token }}

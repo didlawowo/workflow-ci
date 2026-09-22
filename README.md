@@ -43,7 +43,7 @@ Reference actions from your workflows:
 steps:
   - uses: actions/checkout@v6
 
-  - uses: didlawowo/workflow-ci/.github/actions/docker-build-push@v1.7.0
+  - uses: didlawowo/workflow-ci/.github/actions/docker-build-push@v1.8.0
     with:
       image-name: myuser/myapp
       image-tag: v1.0.0
@@ -91,6 +91,35 @@ Sinon, poser le label après le run initial ne déclenche aucun build → l'imag
 `pr-<n>` n'existe pas → `ImagePullBackOff` sur le pod preview. Les templates
 `ci-branch-pipeline.yml` incluent déjà ce type par défaut.
 
+## SonarQube Quality Gate
+
+The reusable `quality-evidence.yml` workflow runs the official SonarQube scanner against
+`https://sonarqube.dc-tech.work` and waits for the server-side Quality Gate. A failed gate
+fails the trusted quality job; the PR quality report also links to the SonarQube project.
+
+Consumers keep the release pin at the workflow boundary:
+
+```yaml
+jobs:
+  trusted-quality:
+    uses: didlawowo/workflow-ci/.github/workflows/quality-evidence.yml@v1.8.0
+    with:
+      repo-type: python
+      runner: ${{ vars.RUNNER }}
+      sonar-project-key: ${{ vars.SONAR_PROJECT_KEY }}
+    secrets:
+      SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+      SONAR_ROOT_CERT: ${{ secrets.SONAR_ROOT_CERT }} # optional
+```
+
+`SONAR_TOKEN` must be able to analyze the configured project. `SONAR_PROJECT_KEY` is a
+repository variable because project keys are not assumed from repository names. Quality Gate
+thresholds stay in SonarQube, so tightening coverage/security/duplication rules does not require
+another workflow-ci release.
+
+Same-repository action composition uses GitHub's `$/...` self-reference. This resolves internal
+actions to the exact commit of the tagged workflow and prevents stale cross-version pins.
+
 ## Secrets Required
 
 | Secret                 | Used by           |
@@ -100,3 +129,11 @@ Sinon, poser le label après le run initial ne déclenche aucun build → l'imag
 | `CODECOV_TOKEN`        | test actions      |
 | `ANTHROPIC_API_KEY`    | security-review   |
 | `RELEASE_PLEASE_TOKEN` | cd-production     |
+| `SONAR_TOKEN`          | quality-evidence  |
+| `SONAR_ROOT_CERT`      | quality-evidence (optional internal CA) |
+
+## Repository variables for quality evidence
+
+| Variable | Value |
+| --- | --- |
+| `SONAR_PROJECT_KEY` | Exact SonarQube project key imported for the repository |

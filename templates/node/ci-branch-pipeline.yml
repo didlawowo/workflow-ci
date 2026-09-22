@@ -44,7 +44,7 @@ jobs:
 
       - name: Run tests
         id: test
-        uses: didlawowo/workflow-ci/.github/actions/run-node-tests@v1.7.0
+        uses: didlawowo/workflow-ci/.github/actions/run-node-tests@v1.8.0
         with:
           node-version: ${{ env.NODE_VERSION }}
           package-manager: ${{ env.PACKAGE_MANAGER }}
@@ -67,7 +67,7 @@ jobs:
 
       - name: Run quality & security checks
         id: checks
-        uses: didlawowo/workflow-ci/.github/actions/node-quality-security@v1.7.0
+        uses: didlawowo/workflow-ci/.github/actions/node-quality-security@v1.8.0
         with:
           node-version: ${{ env.NODE_VERSION }}
           package-manager: ${{ env.PACKAGE_MANAGER }}
@@ -110,7 +110,7 @@ jobs:
           echo "branch-tag=${BRANCH}-${SHA}" >> "$GITHUB_OUTPUT"
 
       - name: Build and push
-        uses: didlawowo/workflow-ci/.github/actions/docker-build-push@v1.7.0
+        uses: didlawowo/workflow-ci/.github/actions/docker-build-push@v1.8.0
         with:
           image-name: ${{ env.IMAGE_NAME }}
           image-tag: ${{ steps.tag.outputs.branch-tag }}
