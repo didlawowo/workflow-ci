@@ -56,23 +56,19 @@ def test_quality_evidence_dependency_chain_uses_same_commit_self_refs():
     assert "uses: $/.github/actions/setup-node-env" in node_tests
 
 
-def test_mutation_policy_cancels_only_relevant_pr_and_issue_events():
+def test_mutation_policy_cancels_only_relevant_pr_events():
     root = Path(__file__).resolve().parents[1]
     content = (root / ".github" / "workflows" / "mutation-policy.yml").read_text()
     header = content.split("\njobs:", 1)[0]
 
+    assert "workflow_call:" in header
     assert "types: [opened, synchronize, reopened, labeled, unlabeled, edited]" in header
+    assert "issues:" not in header
     assert "concurrency:" in header
-    assert "group: mutation-policy-${{ github.repository }}-${{ github.event_name }}-" in header
-    assert "github.event.action != 'edited' || github.event.changes.body != null" in header
-    assert "github.event.label.name == 'complexity:high'" in header
-    assert "github.event.label.name == 'priority:high'" in header
-    assert "github.run_id" in header
+    assert "group: mutation-policy-${{ github.repository }}-" in header
+    assert "github.event.pull_request.number || github.run_id" in header
     assert "cancel-in-progress: true" in header
-
-    # Title-only edits and unrelated issue labels use the run-id fallback, so
-    # they cannot cancel a real gate and then skip all mutation work.
-    assert content.count("github.event.changes.body != null") >= 3
+    assert content.count("github.event.changes.body != null") >= 2
 
 
 def test_forgejo_filters_irrelevant_edits_and_isolates_noop_concurrency():
@@ -101,9 +97,27 @@ def test_mutation_policy_separates_untrusted_execution_from_trusted_verification
     assert "Fetch trusted base policy without submodule traversal" in content
     assert "Fetch pull request code without submodule traversal" in content
     assert "vars.UNTRUSTED_RUNNER || 'ubuntu-latest'" in content
-    assert 'bash "$GITHUB_WORKSPACE/.policy/.ci/mutation.sh"' in content
+    assert "Resolve trusted mutation runner" in content
+    assert ".workflow-ci/.ci/mutation-go.sh" in content
+    assert ".workflow-ci/.ci/mutation.sh" in content
+    assert 'bash "${{ steps.runner.outputs.path }}"' in content
+    assert "job.workflow_repository" in content
+    assert "job.workflow_sha" in content
     assert "needs: [mutation-run]" in content
     assert "actions/download-artifact@v6" in content
+
+
+def test_central_go_mutation_runner_is_pinned_and_strict():
+    root = Path(__file__).resolve().parents[1]
+    runner = (root / ".ci" / "mutation-go.sh").read_text()
+
+    assert 'GREMLINS_VERSION="0.6.0"' in runner
+    assert '--diff "$BASE_SHA"' in runner
+    assert "--output .quality/gremlins-raw.json" in runner
+    assert '"survived": survived' in runner
+    assert "not_covered" in runner
+    assert "timeouts" in runner
+    assert "sha256sum -c -" in runner
 
 
 def test_mutation_policy_requires_machine_readable_evidence_and_zero_survivors():
@@ -372,12 +386,16 @@ def test_internal_ref_sync_helper_is_present_and_checkable():
 
 def test_issue_56_reacts_to_issue_label_add_and_remove():
     root = Path(__file__).resolve().parents[1]
-    workflow = (root / ".github" / "workflows" / "mutation-policy.yml").read_text()
+    workflow = (
+        root / ".github" / "workflows" / "mutation-issue-policy.yml"
+    ).read_text()
 
     assert "types: [labeled, unlabeled]" in workflow
     assert "refresh-linked-prs:" in workflow
     assert "actions: write" in workflow
     assert "mutation_policy.py refresh" in workflow
+    assert "job.workflow_repository" in workflow
+    assert "job.workflow_sha" in workflow
     notify = workflow.split("  notify:", 1)[1].split("  refresh-linked-prs:", 1)[0]
     assert "github.event.action == 'labeled'" in notify
 
@@ -435,7 +453,10 @@ def test_quality_evidence_separates_read_only_execution_from_privileged_publicat
     assert "uses: $/.github/actions/quality-report" not in execution
     assert "repository: didlawowo/workflow-ci" not in execution
 
-    assert "needs: [independent-verification]" in publisher
+    assert "needs: [independent-verification, mutation]" in publisher
+    assert "Download trusted mutation evidence" in publisher
+    assert "scoped-mutation.json" in publisher
+    assert "mutation-required: ${{ needs.mutation.outputs.required == 'true' }}" in publisher
     assert "issues: write" not in publisher
     assert "pull-requests: write" in publisher
     assert publisher.count("persist-credentials: false") >= 1
