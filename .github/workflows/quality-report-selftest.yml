@@ -3,6 +3,8 @@ name: Quality reporter self-test
 on:
   pull_request:
     paths:
+      - ".github/actions/docker-build-push/**"
+      - ".github/workflows/quality-report-selftest.yml"
       - ".github/actions/quality-report/**"
       - ".github/actions/run-python-tests/**"
       - ".github/actions/python-quality-security/**"
@@ -25,6 +27,8 @@ on:
   push:
     branches: [main]
     paths:
+      - ".github/actions/docker-build-push/**"
+      - ".github/workflows/quality-report-selftest.yml"
       - ".github/actions/quality-report/**"
       - ".github/actions/run-python-tests/**"
       - ".github/actions/python-quality-security/**"
@@ -97,5 +101,5 @@ jobs:
       - name: Mutation testing
         env:
           MUTATION_BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          MUTATION_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          MUTATION_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
         run: bash .ci/mutation.sh
