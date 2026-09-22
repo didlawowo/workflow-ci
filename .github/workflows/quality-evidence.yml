@@ -113,6 +113,7 @@ jobs:
       sonar-changed-lines-coverage: ${{ steps.sonarqube.outputs.changed-lines-coverage }}
       quality-status: ${{ steps.python-quality.outputs.quality-passed || steps.go-quality.outputs.quality-passed || steps.node-quality.outputs.quality-passed }}
       security-issues: ${{ steps.python-quality.outputs.security-issues || steps.go-quality.outputs.security-issues || steps.node-quality.outputs.security-issues }}
+      security-scan-errors: ${{ steps.python-quality.outputs.security-scan-errors || '0' }}
       coverage-threshold: ${{ steps.threshold.outputs.value }}
     steps:
       - uses: $/.github/actions/checkout-source
@@ -292,6 +293,8 @@ jobs:
           persist-credentials: false
 
       - name: Download trusted mutation evidence
+        id: mutation-evidence-download
+        continue-on-error: true
         if: needs.mutation.outputs.required == 'true' && needs.mutation.outputs.artifact-name != ''
         uses: actions/download-artifact@v6
         with:
@@ -299,6 +302,7 @@ jobs:
           path: .mutation-evidence
 
       - name: Publish trusted quality evidence
+        if: always()
         uses: $/.github/actions/quality-report
         with:
           # Never parse report files from the PR checkout in the privileged
@@ -312,8 +316,10 @@ jobs:
           coverage-threshold: ${{ needs.independent-verification.outputs.coverage-threshold }}
           quality-status: ${{ needs.independent-verification.outputs.quality-status }}
           security-issues: ${{ needs.independent-verification.outputs.security-issues }}
+          security-scan-errors: ${{ needs.independent-verification.outputs.security-scan-errors }}
           mutation-report: ${{ needs.mutation.outputs.report-file != '' && format('.mutation-evidence/{0}', needs.mutation.outputs.report-file) || '' }}
-          mutation-required: ${{ needs.mutation.outputs.required == 'true' }}
+          mutation-required: ${{ needs.mutation.outputs.required || 'unknown' }}
+          mutation-result: ${{ needs.mutation.result || 'unknown' }}
           tests-total: ${{ needs.independent-verification.outputs.tests-total }}
           tests-failed: ${{ needs.independent-verification.outputs.tests-failed }}
           tests-skipped: ${{ needs.independent-verification.outputs.tests-skipped }}
@@ -326,3 +332,19 @@ jobs:
           github-token: ${{ github.token }}
           comment: ${{ inputs.comment }}
           artifact-suffix: ${{ inputs.repo-type }}
+
+      - name: Enforce mutation evidence publication
+        if: always()
+        shell: bash
+        env:
+          MUTATION_RESULT: ${{ needs.mutation.result }}
+          MUTATION_REQUIRED: ${{ needs.mutation.outputs.required }}
+          DOWNLOAD_RESULT: ${{ steps.mutation-evidence-download.outcome }}
+        run: |
+          set -euo pipefail
+          test "$MUTATION_RESULT" = success
+          case "$MUTATION_REQUIRED" in
+            true) test "$DOWNLOAD_RESULT" = success ;;
+            false) ;;
+            *) echo '::error::Mutation classification is missing'; exit 1 ;;
+          esac

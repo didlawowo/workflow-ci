@@ -38,6 +38,14 @@ inputs:
     description: "Trusted count of security issues"
     required: false
     default: ""
+  mutation-result:
+    description: "Trusted mutation workflow result; empty preserves standalone compatibility"
+    required: false
+    default: ""
+  security-scan-errors:
+    description: "Scanner execution errors, separate from actual security findings"
+    required: false
+    default: "0"
   mutation-required:
     description: "Whether mutation evidence is mandatory for this PR"
     required: false
@@ -143,6 +151,12 @@ runs:
           ARGS+=(--security-issues "${{ inputs.security-issues }}")
         fi
         ARGS+=(--mutation-required "${{ inputs.mutation-required }}")
+        if [[ -n "${{ inputs.security-scan-errors }}" ]]; then
+          ARGS+=(--security-scan-errors "${{ inputs.security-scan-errors }}")
+        fi
+        if [[ -n "${{ inputs.mutation-result }}" ]]; then
+          ARGS+=(--mutation-result "${{ inputs.mutation-result }}")
+        fi
         if [[ -n "${{ inputs.tests-total }}" ]]; then
           ARGS+=(--tests-total "${{ inputs.tests-total }}")
         fi

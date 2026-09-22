@@ -467,7 +467,7 @@ def test_quality_evidence_separates_read_only_execution_from_privileged_publicat
     assert "Download trusted mutation evidence" in publisher
     assert "needs.mutation.outputs.report-file" in publisher
     assert "format('.mutation-evidence/{0}', needs.mutation.outputs.report-file)" in publisher
-    assert "mutation-required: ${{ needs.mutation.outputs.required == 'true' }}" in publisher
+    assert "mutation-required: ${{ needs.mutation.outputs.required || 'unknown' }}" in publisher
     assert "issues: write" not in publisher
     assert "pull-requests: write" in publisher
     assert publisher.count("persist-credentials: false") >= 1
