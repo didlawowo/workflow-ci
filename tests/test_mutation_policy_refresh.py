@@ -121,7 +121,91 @@ def test_mutation_run_match_requires_policy_workflow_and_pr_identity():
     wrong_pr = dict(base, pull_requests=[{"number": 99}])
     assert not mutation_policy._is_mutation_policy_run(wrong_pr, 42, "head")
 
+    reusable_caller = dict(
+        base,
+        path=".github/workflows/trusted-quality-evidence.yml",
+        name="Trusted quality evidence",
+    )
+    assert mutation_policy._is_mutation_policy_run(reusable_caller, 42, "head")
+
     wrong_path = dict(base, path=".github/workflows/ci.yml")
     assert not mutation_policy._is_mutation_policy_run(wrong_path, 42, "head")
 
     assert not mutation_policy._is_mutation_policy_run(base, 42, "other-head")
+
+
+def test_dependency_only_dependabot_pr_skips_mutation(monkeypatch, tmp_path):
+    event = {
+        "number": 134,
+        "pull_request": {
+            "number": 134,
+            "changed_files": 2,
+            "user": {"login": "dependabot[bot]"},
+            "labels": [],
+            "body": "Bump dependency",
+        },
+    }
+    calls = []
+
+    def fake_api(method, path, payload=None):
+        calls.append((method, path, payload))
+        if method == "GET" and path == "pulls/134/files?per_page=100":
+            return [{"filename": "src/go.mod"}, {"filename": "src/go.sum"}]
+        raise AssertionError((method, path, payload))
+
+    output = tmp_path / "output"
+    monkeypatch.setenv("GITHUB_OUTPUT", str(output))
+    monkeypatch.setattr(mutation_policy, "_api_request", fake_api)
+
+    assert mutation_policy.classify(event) == 0
+    rendered = output.read_text()
+    assert "required=false" in rendered
+    assert "labels=" in rendered
+    assert calls == [("GET", "pulls/134/files?per_page=100", None)]
+
+
+def test_dependabot_high_risk_label_still_requires_mutation(monkeypatch, tmp_path):
+    event = {
+        "number": 135,
+        "pull_request": {
+            "number": 135,
+            "changed_files": 2,
+            "user": {"login": "dependabot[bot]"},
+            "labels": [{"name": "priority:high"}],
+            "body": "",
+        },
+    }
+    output = tmp_path / "output"
+    monkeypatch.setenv("GITHUB_OUTPUT", str(output))
+    monkeypatch.setattr(
+        mutation_policy,
+        "_api_request",
+        lambda method, path, payload=None: (_ for _ in ()).throw(
+            AssertionError((method, path, payload))
+        ),
+    )
+
+    assert mutation_policy.classify(event) == 0
+    rendered = output.read_text()
+    assert "required=true" in rendered
+    assert "labels=priority:high" in rendered
+
+
+def test_dependabot_with_production_code_is_not_dependency_only(monkeypatch):
+    event = {
+        "number": 136,
+        "pull_request": {
+            "number": 136,
+            "changed_files": 2,
+            "user": {"login": "dependabot[bot]"},
+            "labels": [],
+        },
+    }
+
+    def fake_api(method, path, payload=None):
+        if method == "GET" and path == "pulls/136/files?per_page=100":
+            return [{"filename": "go.mod"}, {"filename": "internal/service.go"}]
+        raise AssertionError((method, path, payload))
+
+    monkeypatch.setattr(mutation_policy, "_api_request", fake_api)
+    assert not mutation_policy._dependabot_dependency_only(event)
