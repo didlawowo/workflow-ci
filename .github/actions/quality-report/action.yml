@@ -103,7 +103,7 @@ runs:
   using: "composite"
   steps:
     - name: Install uv for quality reporter
-      uses: astral-sh/setup-uv@v3
+      uses: astral-sh/setup-uv@v10.1.0
       with:
         version: "latest"
         enable-cache: false
