@@ -1,6 +1,7 @@
 name: Mutation testing policy
 
 on:
+  workflow_call:
   issues:
     types: [labeled, unlabeled]
   pull_request:
