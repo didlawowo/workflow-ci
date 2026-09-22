@@ -276,6 +276,7 @@ def _is_non_production(path: str) -> bool:
         or lowered.startswith(".forgejo/")
         or lowered.startswith(".ci/")
         or lowered.endswith(".md")
+        or lowered == "sonar-project.properties"
     )
 
 
