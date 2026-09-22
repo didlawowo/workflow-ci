@@ -1,0 +1,226 @@
+"""Exercise the real composite shell, without Docker or network access."""
+
+from __future__ import annotations
+
+import json
+import os
+import re
+import subprocess
+import textwrap
+from pathlib import Path
+
+import pytest
+
+ROOT = Path(__file__).resolve().parents[1]
+ACTION = ROOT / ".github/actions/docker-build-push/action.yml"
+TEXT = ACTION.read_text(encoding="utf-8")
+# Read only the composite's uniformly indented named steps. No YAML dependency
+# is needed in the repository's existing pytest-only self-test environment.
+STEPS = {
+    block.splitlines()[0].removeprefix("    - name: "): block
+    for block in re.split(r"(?=^    - name: )", TEXT, flags=re.MULTILINE)[1:]
+}
+
+
+def shell_for(name: str) -> str:
+    block = STEPS[name]
+    match = re.search(r"^      run: \|\n((?:        .*\n|\n)+)", block, re.MULTILINE)
+    assert match is not None, f"No shell found in {name}"
+    return textwrap.dedent(match.group(1))
+
+
+def run_step(name: str, tmp_path: Path, content: str | None):
+    report = tmp_path / "scan report.sarif"
+    output = tmp_path / "outputs"
+    output.write_text("", encoding="utf-8")
+    if content is not None:
+        report.write_text(content, encoding="utf-8")
+    result = subprocess.run(
+        [
+            "bash",
+            "--noprofile",
+            "--norc",
+            "-e",
+            "-o",
+            "pipefail",
+            "-c",
+            shell_for(name),
+        ],
+        cwd=tmp_path,
+        env={**os.environ, "SARIF_FILE": str(report), "GITHUB_OUTPUT": str(output)},
+        capture_output=True,
+        text=True,
+        timeout=10,
+        check=False,
+    )
+    return result, output.read_text(encoding="utf-8"), report
+
+
+def sarif(*counts: int) -> dict:
+    return {
+        "version": "2.1.0",
+        "runs": [
+            {
+                "tool": {"driver": {"name": "Trivy"}},
+                "results": [
+                    {
+                        "ruleId": f"TEST-{index}",
+                        "message": {"text": "Synthetic finding"},
+                    }
+                    for index in range(count)
+                ],
+            }
+            for count in counts
+        ],
+    }
+
+
+@pytest.mark.parametrize("counts,expected", [((0,), 0), ((2,), 2), ((0, 3, 2), 5)])
+def test_counts_only_valid_reports(tmp_path, counts, expected):
+    result, output, _ = run_step(
+        "Analyze scan results", tmp_path, json.dumps(sarif(*counts))
+    )
+    assert result.returncode == 0, result.stderr
+    assert output == f"vuln-count={expected}\n"
+
+
+@pytest.mark.parametrize(
+    "content",
+    [None, "", " ", "{", "null", "[]", "{}", "{}\n{}", "false", "42"],
+    ids=[
+        "missing",
+        "empty",
+        "whitespace",
+        "truncated",
+        "null",
+        "array",
+        "object",
+        "stream",
+        "bool",
+        "number",
+    ],
+)
+def test_unavailable_report_never_means_zero(tmp_path, content):
+    result, output, _ = run_step("Analyze scan results", tmp_path, content)
+    assert result.returncode != 0
+    assert "::error" in result.stdout
+    assert output == ""
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"version": "2.0.0", "runs": sarif(0)["runs"]},
+        {"version": "2.1.0", "runs": []},
+        {"version": "2.1.0", "runs": None},
+        {"version": "2.1.0", "runs": {}},
+        {"version": "2.1.0", "runs": [None]},
+        {"version": "2.1.0", "runs": [{"results": []}]},
+        {
+            "version": "2.1.0",
+            "runs": [{"tool": {"driver": {"name": ""}}, "results": []}],
+        },
+        {"version": "2.1.0", "runs": [{"tool": {"driver": {"name": "Trivy"}}}]},
+        {"version": "2.1.0", "runs": [{**sarif(0)["runs"][0], "results": None}]},
+        {"version": "2.1.0", "runs": [{**sarif(0)["runs"][0], "results": {}}]},
+        {"version": "2.1.0", "runs": [{**sarif(0)["runs"][0], "results": [None]}]},
+        {"version": "2.1.0", "runs": [sarif(0)["runs"][0], {}]},
+        {
+            "version": "2.1.0",
+            "runs": [
+                {
+                    **sarif(0)["runs"][0],
+                    "invocations": [{"executionSuccessful": False}],
+                }
+            ],
+        },
+        {
+            "version": "2.1.0",
+            "runs": [{**sarif(0)["runs"][0], "invocations": [{}]}],
+        },
+        {
+            "version": "2.1.0",
+            "runs": [{**sarif(0)["runs"][0], "invocations": None}],
+        },
+    ],
+)
+def test_incomplete_analysis_never_means_zero(tmp_path, payload):
+    result, output, _ = run_step("Analyze scan results", tmp_path, json.dumps(payload))
+    assert result.returncode != 0
+    assert "::error" in result.stdout
+    assert output == ""
+
+
+def test_valid_successful_invocation(tmp_path):
+    payload = sarif(0)
+    payload["runs"][0]["invocations"] = [{"executionSuccessful": True}]
+    result, output, _ = run_step("Analyze scan results", tmp_path, json.dumps(payload))
+    assert result.returncode == 0, result.stderr
+    assert output == "vuln-count=0\n"
+
+
+@pytest.mark.parametrize("content", [None, json.dumps(sarif(0))])
+def test_prepare_removes_stale_report_without_error_on_first_use(tmp_path, content):
+    result, output, report = run_step("Prepare Trivy report", tmp_path, content)
+    assert result.returncode == 0, result.stderr
+    assert not report.exists()
+    assert output == ""
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "Build and push Docker image",
+        "Prepare Trivy report",
+        "Run Trivy vulnerability scanner",
+        "Analyze scan results",
+        "Upload Trivy scan results",
+        "Upload scan artifacts",
+    ],
+)
+def test_required_steps_cannot_swallow_failures(name):
+    assert "continue-on-error:" not in STEPS[name]
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "Prepare Trivy report",
+        "Run Trivy vulnerability scanner",
+        "Analyze scan results",
+        "Upload Trivy scan results",
+    ],
+)
+def test_scan_steps_are_gated_but_not_always_successful(name):
+    assert "      if: inputs.scan == 'true'\n" in STEPS[name]
+    assert "always()" not in STEPS[name]
+
+
+def test_validate_before_upload_and_keep_evidence_after_failure():
+    order = list(STEPS)
+    expected = [
+        "Prepare Trivy report",
+        "Run Trivy vulnerability scanner",
+        "Analyze scan results",
+        "Upload Trivy scan results",
+        "Upload scan artifacts",
+    ]
+    assert [name for name in order if name in expected] == expected
+    assert "      id: trivy\n" in STEPS["Run Trivy vulnerability scanner"]
+    archive = STEPS["Upload scan artifacts"]
+    condition = (
+        "if: ${{ !cancelled() && inputs.scan == 'true' && "
+        "(steps.trivy.outcome == 'success' || steps.trivy.outcome == 'failure') }}"
+    )
+    assert condition in archive
+    assert "        if-no-files-found: error\n" in archive
+    assert "        retention-days: 7\n" in archive
+
+
+def test_vulnerability_policy_and_non_security_fallbacks_are_unchanged():
+    scan_input = TEXT.split("  scan:\n", 1)[1].split("  scan-severity:\n", 1)[0]
+    assert '    default: "true"' in scan_input
+    assert "exit-code:" not in STEPS["Run Trivy vulnerability scanner"]
+    hub_login = STEPS["Login to Docker Hub (authenticated base image pulls)"]
+    assert "continue-on-error: true" in hub_login
+    assert "ignore-error=true" in STEPS["Build and push Docker image"]
