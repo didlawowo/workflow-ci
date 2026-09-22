@@ -32,13 +32,20 @@ jobs:
       required: ${{ steps.policy.outputs.required }}
       labels: ${{ steps.policy.outputs.labels }}
     steps:
-      - name: Checkout central workflow implementation
-        uses: actions/checkout@v7
-        with:
-          repository: ${{ job.workflow_repository }}
-          ref: ${{ job.workflow_sha }}
-          path: .workflow-ci
-          persist-credentials: false
+      - name: Fetch central workflow implementation without submodule traversal
+        env:
+          WORKFLOW_REPOSITORY: ${{ job.workflow_repository }}
+          WORKFLOW_SHA: ${{ job.workflow_sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          DEST="$GITHUB_WORKSPACE/.workflow-ci"
+          rm -rf "$DEST"
+          mkdir -p "$DEST"
+          git -C "$DEST" init -q
+          URL="${GITHUB_SERVER_URL}/${WORKFLOW_REPOSITORY}.git"
+          git -C "$DEST" fetch --no-tags "$URL" "$WORKFLOW_SHA"
+          git -C "$DEST" checkout -q --detach "$WORKFLOW_SHA"
 
       - name: Fetch trusted base policy without submodule traversal
         env:
@@ -363,13 +370,20 @@ jobs:
     outputs:
       artifact-name: ${{ steps.trusted-output.outputs.artifact-name }}
     steps:
-      - name: Checkout central workflow implementation
-        uses: actions/checkout@v7
-        with:
-          repository: ${{ job.workflow_repository }}
-          ref: ${{ job.workflow_sha }}
-          path: .workflow-ci
-          persist-credentials: false
+      - name: Fetch central workflow implementation without submodule traversal
+        env:
+          WORKFLOW_REPOSITORY: ${{ job.workflow_repository }}
+          WORKFLOW_SHA: ${{ job.workflow_sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          DEST="$GITHUB_WORKSPACE/.workflow-ci"
+          rm -rf "$DEST"
+          mkdir -p "$DEST"
+          git -C "$DEST" init -q
+          URL="${GITHUB_SERVER_URL}/${WORKFLOW_REPOSITORY}.git"
+          git -C "$DEST" fetch --no-tags "$URL" "$WORKFLOW_SHA"
+          git -C "$DEST" checkout -q --detach "$WORKFLOW_SHA"
 
       - name: Fetch trusted base policy without submodule traversal
         env:
