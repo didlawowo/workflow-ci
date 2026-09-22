@@ -67,6 +67,7 @@ def test_mutation_policy_cancels_only_relevant_pr_events():
     assert "concurrency:" in header
     assert "group: mutation-policy-${{ github.repository }}-" in header
     assert "github.event.pull_request.number || github.run_id" in header
+    assert "inputs.scope-key || 'default'" in header
     assert "cancel-in-progress: true" in header
     assert content.count("github.event.changes.body != null") >= 2
 
@@ -462,6 +463,7 @@ def test_quality_evidence_separates_read_only_execution_from_privileged_publicat
     assert "repository: didlawowo/workflow-ci" not in execution
 
     assert "needs: [independent-verification, mutation]" in publisher
+    assert "scope-key: ${{ format('{0}-{1}', inputs.repo-type, inputs.working-directory) }}" in content
     assert "Download trusted mutation evidence" in publisher
     assert "needs.mutation.outputs.report-file" in publisher
     assert "format('.mutation-evidence/{0}', needs.mutation.outputs.report-file)" in publisher
