@@ -427,16 +427,25 @@ runs:
         fi
         echo "vuln-count=${VULN_COUNT}" >> "$GITHUB_OUTPUT"
 
-    # Required when scanning is enabled. An upload failure must remain a job
-    # failure; publishing a Docker image alone is not a complete scan result.
-    # Callers need contents:read, actions:read, security-events:write and an
-    # eligible repository with GitHub Code Scanning enabled (see docs).
+    # Code Scanning publication is best-effort. The Trivy execution and local
+    # SARIF validation above remain hard gates; GitHub Code Scanning availability
+    # or token permissions must not turn an otherwise valid security scan red.
+    # Callers should still grant contents:read, actions:read and
+    # security-events:write so publication succeeds whenever GitHub supports it.
     - name: Upload Trivy scan results
+      id: upload-sarif
       if: inputs.scan == 'true'
+      continue-on-error: true
       uses: github/codeql-action/upload-sarif@v4
       with:
         sarif_file: ${{ steps.meta.outputs.sarif-file }}
         category: trivy-${{ steps.meta.outputs.target-name }}-scan
+
+    - name: Warn when SARIF publication failed
+      if: inputs.scan == 'true' && steps.upload-sarif.outcome == 'failure'
+      shell: bash
+      run: |
+        echo "::warning title=Code Scanning upload failed::Trivy completed and the SARIF report was validated, but GitHub Code Scanning publication failed. The raw SARIF artifact is still archived; check actions:read/security-events:write permissions and repository Code Scanning eligibility."
 
     # Keep diagnostics after a scanner, validation or Code Scanning failure.
     # This does not neutralize the earlier failure and must not run if no scan
