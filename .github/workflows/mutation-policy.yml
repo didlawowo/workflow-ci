@@ -3,6 +3,11 @@ name: Mutation testing policy
 on:
   workflow_call:
     inputs:
+      scope-key:
+        description: "Caller-specific concurrency scope"
+        required: false
+        type: string
+        default: "default"
       trusted-runner:
         description: "Trusted runner label for verification-only jobs"
         required: false
@@ -22,7 +27,7 @@ on:
     types: [opened, synchronize, reopened, labeled, unlabeled, edited]
 
 concurrency:
-  group: mutation-policy-${{ github.repository }}-${{ github.event.pull_request.number || github.run_id }}
+  group: mutation-policy-${{ github.repository }}-${{ github.event.pull_request.number || github.run_id }}-${{ inputs.scope-key || 'default' }}
   cancel-in-progress: true
 jobs:
   mutation-run:
