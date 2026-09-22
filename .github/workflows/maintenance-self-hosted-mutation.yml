@@ -17,170 +17,42 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
-          ref: 80c309a684659ea7bdb09c89a356cf7488f4a0b5
+          ref: 0eeaf349db4ef745185d8c600fb309ffd13d9a95
           persist-credentials: false
       - uses: astral-sh/setup-uv@v10.1.0
         with:
           enable-cache: false
-      - name: Prepare minimal runner correction
-        shell: bash
-        run: |
-          python3 -I - <<'PY'
-          from pathlib import Path
-
-          paths = [
-              '.github/workflows/mutation-policy.yml',
-              '.github/workflows/mutation-issue-policy.yml',
-          ]
-          replacements = {
-              "vars.UNTRUSTED_RUNNER || 'ubuntu-latest'":
-                  "vars.UNTRUSTED_RUNNER || vars.RUNNER || 'self-hosted'",
-              "inputs.trusted-runner || vars.RUNNER || 'ubuntu-latest'":
-                  "inputs.trusted-runner || vars.RUNNER || 'self-hosted'",
-              "inputs.runner || vars.RUNNER || 'ubuntu-latest'":
-                  "inputs.runner || vars.RUNNER || 'self-hosted'",
-          }
-          for filename in paths:
-              path = Path(filename)
-              before = path.read_text()
-              after = before
-              for old, new in replacements.items():
-                  after = after.replace(old, new)
-              if filename.endswith('/mutation-policy.yml'):
-                  old = (
-                      '    # PR code and its tests are untrusted. Keep this job read-only and, unless\n'
-                      '    # explicitly overridden, off self-hosted/ARC runners.\n'
-                  )
-                  new = (
-                      '    # Use a dedicated execution runner when configured; otherwise inherit\n'
-                      '    # the repository runner. Keep PR execution read-only and isolated.\n'
-                  )
-                  assert old in after
-                  after = after.replace(old, new)
-              assert after != before, filename
-              assert 'ubuntu-latest' not in after, filename
-              path.write_text(after)
-
-          contract = Path('tests/test_quality_workflow_contract.py')
-          before = contract.read_text()
-          after = before
-          for old, new in replacements.items():
-              after = after.replace(old, new)
-          assert after != before
-          contract.write_text(after)
-
-          test = '''"""Mutation jobs inherit the configured ARC runner without hosted fallbacks."""
-
-          from pathlib import Path
-
-          import pytest
-          import yaml
-
-          ROOT = Path(__file__).resolve().parents[1]
-
-
-          @pytest.mark.parametrize(
-              ("filename", "job", "expression"),
-              [
-                  (
-                      "mutation-policy.yml",
-                      "mutation-run",
-                      "vars.UNTRUSTED_RUNNER || vars.RUNNER || 'self-hosted'",
-                  ),
-                  (
-                      "mutation-policy.yml",
-                      "mutation-verify",
-                      "inputs.trusted-runner || vars.RUNNER || 'self-hosted'",
-                  ),
-                  (
-                      "mutation-issue-policy.yml",
-                      "notify",
-                      "inputs.runner || vars.RUNNER || 'self-hosted'",
-                  ),
-                  (
-                      "mutation-issue-policy.yml",
-                      "refresh-linked-prs",
-                      "inputs.runner || vars.RUNNER || 'self-hosted'",
-                  ),
-              ],
-          )
-          def test_runner_precedence_and_self_hosted_fallback(filename, job, expression):
-              workflow = yaml.safe_load((ROOT / ".github/workflows" / filename).read_text())
-              expected = "$" + "{{ " + expression + " }}"
-              assert workflow["jobs"][job]["runs-on"] == expected
-
-
-          def test_runner_change_keeps_untrusted_execution_read_only():
-              path = ROOT / ".github/workflows/mutation-policy.yml"
-              content = path.read_text()
-              workflow = yaml.safe_load(content)
-              assert workflow["jobs"]["mutation-run"]["permissions"] == {
-                  "contents": "read",
-                  "issues": "read",
-                  "pull-requests": "read",
-              }
-              assert "env -i" in content
-              assert "pull_request_target:" not in content
-              assert "ubuntu-latest" not in content
-          '''
-          Path('tests/test_mutation_self_hosted_routing.py').write_text(test)
-          Path('docs/mutation-runners.md').write_text('''# Mutation runners
-
-          Mutation execution uses `UNTRUSTED_RUNNER` when explicitly configured,
-          otherwise the repository's existing `RUNNER`, then `self-hosted`.
-          Verification keeps its separate `trusted-runner` override and otherwise
-          uses `RUNNER`, then `self-hosted`. Issue-policy jobs follow the same
-          self-hosted fallback while preserving their explicit `runner` override.
-
-          For an ARC installation, `RUNNER` must name the actual scale set, for
-          example `arc-runner-photo-analyser`; no extra variable or GitHub Manager
-          deployment is required when `RUNNER` is already configured.
-
-          This changes scheduling, not trust: PR execution remains read-only with
-          a sanitized environment. Untrusted contributions require an appropriately
-          isolated, ephemeral execution runner; environment cleanup is not a VM
-          or network security boundary. Use `UNTRUSTED_RUNNER` for that dedicated
-          runner when needed. No mutation threshold or evidence check is relaxed.
-
-          Existing published tags are unchanged. Consumers pinned to an older tag
-          only receive the fix through a maintainer-published release containing it.
-          ''')
-          PY
-      - name: Verify only routing changed in workflow semantics
+      - name: Run pinned reviewed preparation and regression commands
         run: |
           uv run --no-project --python 3.12 --with PyYAML==6.0.3 python - <<'PY'
-          import copy
           import subprocess
-          from pathlib import Path
           import yaml
 
-          for filename in ('.github/workflows/mutation-policy.yml', '.github/workflows/mutation-issue-policy.yml'):
-              original = yaml.safe_load(subprocess.check_output(['git', 'show', 'HEAD:' + filename], text=True))
-              updated = yaml.safe_load(Path(filename).read_text())
-              expected = copy.deepcopy(original)
-              for name, job in expected['jobs'].items():
-                  job['runs-on'] = updated['jobs'][name]['runs-on']
-              assert updated == expected, filename
-          print('All non-routing workflow semantics are unchanged')
+          # This exact revision contains the preparation and tests already reviewed
+          # and executed in run 35756026354. Never execute a moving branch here.
+          revision = '0eeaf349db4ef745185d8c600fb309ffd13d9a95'
+          filename = '.github/workflows/maintenance-self-hosted-mutation.yml'
+          text = subprocess.check_output(['git', 'show', revision + ':' + filename], text=True)
+          workflow = yaml.safe_load(text)
+          steps = {step.get('name'): step for step in workflow['jobs']['validate']['steps']}
+          for name in (
+              'Prepare minimal runner correction',
+              'Verify only routing changed in workflow semantics',
+              'Execute routing and existing workflow contract tests',
+          ):
+              print('EXECUTING: ' + name, flush=True)
+              subprocess.run(['bash', '-e', '-o', 'pipefail', '-c', steps[name]['run']], check=True)
           PY
-      - name: Execute routing and existing workflow contract tests
-        run: |
-          uv run --no-project --python 3.12 --with pytest==8.4.2 --with PyYAML==6.0.3 python -m pytest -q tests/test_quality_workflow_contract.py tests/test_mutation_self_hosted_routing.py
-          uvx --from ruff==0.16.8 ruff check tests/test_mutation_self_hosted_routing.py
-          uvx --from ruff==0.16.8 ruff format --check tests/test_mutation_self_hosted_routing.py
-      - name: Create tested commit without changing branches or tags
+      - name: Export tested content objects without changing branches or tags
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           python3 -I - <<'PY'
           import json
           import os
-          import subprocess
           import urllib.request
           from pathlib import Path
 
-          parent = subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip()
-          assert parent == '80c309a684659ea7bdb09c89a356cf7488f4a0b5'
           paths = [
               '.github/workflows/mutation-policy.yml',
               '.github/workflows/mutation-issue-policy.yml',
@@ -188,11 +60,11 @@ jobs:
               'tests/test_mutation_self_hosted_routing.py',
               'docs/mutation-runners.md',
           ]
-          tree = subprocess.check_output(['git', 'rev-parse', 'HEAD^{tree}'], text=True).strip()
-          def post(endpoint, payload):
+          blobs = []
+          for path in paths:
               request = urllib.request.Request(
-                  'https://api.github.com/repos/didlawowo/workflow-ci/' + endpoint,
-                  data=json.dumps(payload).encode(),
+                  'https://api.github.com/repos/didlawowo/workflow-ci/git/blobs',
+                  data=json.dumps({'content': Path(path).read_text(), 'encoding': 'utf-8'}).encode(),
                   headers={
                       'Authorization': 'Bearer ' + os.environ['GH_TOKEN'],
                       'Accept': 'application/vnd.github+json',
@@ -201,15 +73,8 @@ jobs:
                   method='POST',
               )
               with urllib.request.urlopen(request, timeout=30) as response:
-                  return json.load(response)
-          created_tree = post('git/trees', {
-              'base_tree': tree,
-              'tree': [{'path': path, 'mode': '100644', 'type': 'blob', 'content': Path(path).read_text()} for path in paths],
-          })
-          commit = post('git/commits', {
-              'message': 'fix(ci): inherit repository self-hosted runner for mutation jobs',
-              'tree': created_tree['sha'],
-              'parents': [parent],
-          })
-          print('TESTED_COMMIT=' + commit['sha'])
+                  blob = json.load(response)
+              blobs.append({'path': path, 'mode': '100644', 'type': 'blob', 'sha': blob['sha']})
+          print('BASE_COMMIT=80c309a684659ea7bdb09c89a356cf7488f4a0b5')
+          print('TESTED_BLOBS=' + json.dumps(blobs))
           PY
