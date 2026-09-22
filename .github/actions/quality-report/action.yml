@@ -151,7 +151,9 @@ runs:
           ARGS+=(--security-issues "${{ inputs.security-issues }}")
         fi
         ARGS+=(--mutation-required "${{ inputs.mutation-required }}")
-        ARGS+=(--security-scan-errors "${{ inputs.security-scan-errors }}")
+        if [[ -n "${{ inputs.security-scan-errors }}" ]]; then
+          ARGS+=(--security-scan-errors "${{ inputs.security-scan-errors }}")
+        fi
         if [[ -n "${{ inputs.mutation-result }}" ]]; then
           ARGS+=(--mutation-result "${{ inputs.mutation-result }}")
         fi
