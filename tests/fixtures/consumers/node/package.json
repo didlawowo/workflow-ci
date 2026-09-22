@@ -3,6 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "scripts": {
-    "test": "node --test --test-reporter=junit --test-reporter-destination=coverage-reports/junit.xml"
+    "test": "node --test --test-reporter=junit --test-reporter-destination=coverage-reports/junit.xml",
+    "lint": "node --check src/index.js"
   }
 }
