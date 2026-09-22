@@ -9,6 +9,7 @@ import os
 import re
 from pathlib import Path
 from typing import Callable
+from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
 MUTATION_REQUIRED_LABELS = ("complexity:high", "priority:high")
@@ -164,9 +165,108 @@ def classify(event: dict) -> int:
     return 0
 
 
+
+def _open_pull_requests() -> list[dict]:
+    payload = _api_request("GET", "pulls?state=open&per_page=100") or []
+    return [item for item in payload if isinstance(item, dict)] if isinstance(payload, list) else []
+
+
+def _mutation_runs_for_head(head_sha: str) -> list[dict]:
+    provider = os.environ.get("POLICY_PROVIDER", "github").lower()
+    params = {
+        "event": "pull_request",
+        "head_sha": head_sha,
+        ("limit" if provider == "forgejo" else "per_page"): "100",
+    }
+    payload = _api_request("GET", f"actions/runs?{urlencode(params)}") or {}
+    if not isinstance(payload, dict):
+        return []
+    runs = payload.get("workflow_runs")
+    if not isinstance(runs, list):
+        runs = payload.get("runs")
+    return [item for item in (runs or []) if isinstance(item, dict)]
+
+
+def _is_mutation_policy_run(run: dict, pr_number: int, head_sha: str) -> bool:
+    if str(run.get("head_sha") or "") != head_sha:
+        return False
+
+    path = str(run.get("path") or "")
+    name = str(run.get("name") or "")
+    valid_workflow_paths = (
+        ".github/workflows/mutation-policy.yml",
+        ".forgejo/workflows/mutation-policy.yml",
+    )
+    if path and not path.endswith(valid_workflow_paths):
+        return False
+    if not path and name and name != "Mutation testing policy":
+        return False
+
+    pull_requests = run.get("pull_requests")
+    if isinstance(pull_requests, list) and pull_requests:
+        numbers = {
+            int(item["number"])
+            for item in pull_requests
+            if isinstance(item, dict) and str(item.get("number", "")).isdigit()
+        }
+        if numbers and pr_number not in numbers:
+            return False
+    return True
+
+
+def refresh(event: dict) -> int:
+    """Re-run the current-head mutation gate when a linked issue risk label changes."""
+    label = event.get("label") or {}
+    label_name = label.get("name")
+    if label_name not in MUTATION_REQUIRED_LABELS:
+        print(f"Label {label_name!r} does not affect mutation policy")
+        return 0
+
+    issue = event.get("issue") or {}
+    issue_number = issue.get("number") or event.get("number")
+    if not issue_number:
+        raise RuntimeError("Issue event does not contain an issue number")
+    issue_number = int(issue_number)
+
+    refreshed = 0
+    for pull_request in _open_pull_requests():
+        pr_number = pull_request.get("number")
+        head = pull_request.get("head") or {}
+        head_sha = head.get("sha")
+        if not isinstance(pr_number, int) or not isinstance(head_sha, str) or not head_sha:
+            continue
+        if issue_number not in linked_issue_numbers(pull_request.get("body")):
+            continue
+
+        candidates = [
+            run
+            for run in _mutation_runs_for_head(head_sha)
+            if _is_mutation_policy_run(run, pr_number, head_sha)
+            and str(run.get("status") or "").lower() == "completed"
+        ]
+        if not candidates:
+            print(
+                f"No completed mutation-policy run found for PR #{pr_number} "
+                f"at {head_sha}; nothing to re-run"
+            )
+            continue
+
+        run = max(candidates, key=lambda item: int(item.get("id") or 0))
+        run_id = int(run["id"])
+        _api_request("POST", f"actions/runs/{run_id}/rerun")
+        refreshed += 1
+        print(
+            f"Re-ran mutation policy for PR #{pr_number} at {head_sha} "
+            f"after {event.get('action', 'label')} of {label_name}"
+        )
+
+    print(f"Recomputed mutation policy for {refreshed} linked pull request(s)")
+    return 0
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
-    parser.add_argument("command", choices=("notify", "classify"))
+    parser.add_argument("command", choices=("notify", "classify", "refresh"))
     return parser.parse_args()
 
 
@@ -175,6 +275,8 @@ def main() -> int:
     event = _load_event()
     if args.command == "notify":
         return notify(event)
+    if args.command == "refresh":
+        return refresh(event)
     return classify(event)
 
 
