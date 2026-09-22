@@ -22,7 +22,6 @@ jobs:
       runner: ${{ vars.RUNNER || 'ubuntu-latest' }}
       workflow-ci-ref: ${{ github.event.pull_request.head.sha }}
       working-directory: tests/fixtures/consumers/python
-      sonar-enabled: false
       python-test-command: >-
         uv run pytest tests -q
         --cov=src
@@ -44,7 +43,6 @@ jobs:
       runner: ${{ vars.RUNNER || 'ubuntu-latest' }}
       workflow-ci-ref: ${{ github.event.pull_request.head.sha }}
       working-directory: tests/fixtures/consumers/go
-      sonar-enabled: false
       comment: false
 
   node-consumer:
@@ -59,6 +57,5 @@ jobs:
       runner: ${{ vars.RUNNER || 'ubuntu-latest' }}
       workflow-ci-ref: ${{ github.event.pull_request.head.sha }}
       working-directory: tests/fixtures/consumers/node
-      sonar-enabled: false
       package-manager: npm
       comment: false
