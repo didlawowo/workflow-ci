@@ -78,6 +78,8 @@ concurrency:
 jobs:
   mutation:
     name: "Mutation quality gate"
+    with:
+      trusted-runner: ${{ inputs.runner }}
     permissions:
       contents: read
       actions: read
@@ -207,32 +209,6 @@ jobs:
             exit 1
           fi
 
-      - name: Resolve SonarQube coverage argument
-        id: sonar-coverage
-        if: vars.SONAR_ENABLED == 'true'
-        shell: bash
-        run: |
-          set -euo pipefail
-          WORKDIR="${{ inputs.working-directory }}"
-          PREFIX=""
-          if [[ "$WORKDIR" != "." ]]; then
-            PREFIX="${WORKDIR%/}/"
-          fi
-          case "${{ inputs.repo-type }}" in
-            python)
-              echo "value=-Dsonar.python.coverage.reportPaths=${PREFIX}${{ inputs.python-coverage-report-path }}" >> "$GITHUB_OUTPUT"
-              ;;
-            go)
-              echo "value=-Dsonar.go.coverage.reportPaths=${PREFIX}coverage.out" >> "$GITHUB_OUTPUT"
-              ;;
-            node|typescript|javascript)
-              echo "value=-Dsonar.javascript.lcov.reportPaths=${PREFIX}coverage/lcov.info" >> "$GITHUB_OUTPUT"
-              ;;
-            *)
-              echo "value=" >> "$GITHUB_OUTPUT"
-              ;;
-          esac
-
       - name: Verify SonarQube Quality Gate
         id: sonarqube
         if: vars.SONAR_ENABLED == 'true'
@@ -242,7 +218,9 @@ jobs:
           sonar-token: ${{ secrets.SONAR_TOKEN }}
           sonar-root-cert: ${{ secrets.SONAR_ROOT_CERT }}
           project-key: ${{ vars.SONAR_PROJECT_KEY }}
-          coverage-args: ${{ steps.sonar-coverage.outputs.value }}
+          repo-type: ${{ inputs.repo-type }}
+          working-directory: ${{ inputs.working-directory }}
+          python-coverage-report-path: ${{ inputs.python-coverage-report-path }}
 
       - name: Enforce independent verification
         if: always()
@@ -326,7 +304,7 @@ jobs:
           coverage-threshold: ${{ needs.independent-verification.outputs.coverage-threshold }}
           quality-status: ${{ needs.independent-verification.outputs.quality-status }}
           security-issues: ${{ needs.independent-verification.outputs.security-issues }}
-          mutation-report: ${{ needs.mutation.outputs.artifact-name != '' && '.mutation-evidence/scoped-mutation.json' || '' }}
+          mutation-report: ${{ needs.mutation.outputs.report-file != '' && format('.mutation-evidence/{0}', needs.mutation.outputs.report-file) || '' }}
           mutation-required: ${{ needs.mutation.outputs.required == 'true' }}
           tests-total: ${{ needs.independent-verification.outputs.tests-total }}
           tests-failed: ${{ needs.independent-verification.outputs.tests-failed }}
