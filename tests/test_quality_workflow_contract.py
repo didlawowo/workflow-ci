@@ -97,7 +97,7 @@ def test_mutation_policy_separates_untrusted_execution_from_trusted_verification
     assert "pull_request:" in content
     assert "Fetch trusted base policy without submodule traversal" in content
     assert "Fetch pull request code without submodule traversal" in content
-    assert "vars.UNTRUSTED_RUNNER || 'ubuntu-latest'" in content
+    assert "vars.UNTRUSTED_RUNNER || vars.RUNNER || format('arc-runner-{0}', github.event.repository.name)" in content
     assert "Resolve trusted mutation runner" in content
     assert ".workflow-ci/.ci/mutation-go.sh" in content
     assert ".workflow-ci/.ci/mutation.sh" in content
@@ -201,7 +201,7 @@ def test_mutation_verify_is_read_only_and_scoped_to_changed_functions():
     verify = content.split("  mutation-verify:", 1)[1]
     assert "issues: write" not in verify
     assert "pull-requests: write" not in verify
-    assert "inputs.trusted-runner || vars.RUNNER || 'ubuntu-latest'" in verify
+    assert "inputs.trusted-runner || vars.RUNNER || format('arc-runner-{0}', github.event.repository.name)" in verify
     assert "git\", \"-C\", str(repo), \"diff\", \"--unified=0\"" in verify
     assert "mutation gate failed for changed functions" in verify
     assert "scoped-mutation-evidence-" in verify
@@ -402,7 +402,7 @@ def test_issue_56_reacts_to_issue_label_add_and_remove():
     assert "refresh-linked-prs:" in workflow
     assert "actions: write" in workflow
     assert "mutation_policy.py refresh" in workflow
-    assert "inputs.runner || vars.RUNNER || 'ubuntu-latest'" in workflow
+    assert "inputs.runner || vars.RUNNER || format('arc-runner-{0}', github.event.repository.name)" in workflow
     assert "job.workflow_repository" in workflow
     assert "job.workflow_sha" in workflow
     notify = workflow.split("  notify:", 1)[1].split("  refresh-linked-prs:", 1)[0]
