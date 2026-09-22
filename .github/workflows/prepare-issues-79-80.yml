@@ -17,46 +17,78 @@ jobs:
       - uses: astral-sh/setup-uv@v3
         with:
           enable-cache: false
-      - name: Materialize reviewed patch and migrated contracts
+      - name: Materialize reviewed patch and complete mutation test selection
         run: |
           uv run --no-project --with pyyaml python - <<'PY'
           import subprocess
           import yaml
-          previous = subprocess.check_output(['git', 'show', 'e94307d53b5234ddabcb79fdd0dee3df3d9de728:.github/workflows/prepare-issues-79-80.yml'], text=True)
+          previous = subprocess.check_output(['git', 'show', '3538cb97b933494b69d827ee3d07c3bd05cda682:.github/workflows/prepare-issues-79-80.yml'], text=True)
           subprocess.run(['bash', '-e', '-c', yaml.safe_load(previous)['jobs']['prepare']['steps'][2]['run']], check=True)
+          PY
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('tests/test_mutation_report_fail_closed.py')
+          text = p.read_text()
+          start = text.index('def report(mutation):')
+          split = text.index('@pytest.mark.parametrize("result,required,download,success"')
+          unit = '"""Pure reporter regressions included in Mutmut selection."""\n\nimport json\n\nimport pytest\n\nimport quality_report\n\n\n' + text[start:split]
+          contract = '"""Publication workflow and reporter CLI contracts for issues 79 and 80."""\n\nimport json\nimport os\nimport subprocess\nimport sys\nfrom pathlib import Path\n\nimport pytest\nimport yaml\n\nROOT = Path(__file__).resolve().parents[1]\n\n\n' + text[split:]
+          p.write_text(unit)
+          Path('tests/test_mutation_publication_contract.py').write_text(contract)
+          p = Path('pyproject.toml')
+          text = p.read_text()
+          old = 'pytest_add_cli_args_test_selection = ["tests/test_quality_report.py"]'
+          new = 'pytest_add_cli_args_test_selection = ["tests/test_quality_report.py", "tests/test_mutation_report_fail_closed.py"]'
+          assert text.count(old) == 1
+          p.write_text(text.replace(old, new))
           PY
       - name: Format and lint new tests
         run: |
-          uvx --from ruff==0.16.8 ruff format tests/test_mutation_report_fail_closed.py tests/test_secret_scan.py
-          uvx --from ruff==0.16.8 ruff check tests/test_mutation_report_fail_closed.py tests/test_secret_scan.py
+          uvx --from ruff==0.16.8 ruff format tests/test_mutation_report_fail_closed.py tests/test_mutation_publication_contract.py tests/test_secret_scan.py
+          uvx --from ruff==0.16.8 ruff check tests/test_mutation_report_fail_closed.py tests/test_mutation_publication_contract.py tests/test_secret_scan.py
           bash -n .github/actions/python-quality-security/trufflehog.sh
       - name: Full regression suite
         run: uv run --no-project --with pytest --with pyyaml python -m pytest -q tests
       - name: Real TruffleHog Docker smoke on ARC shared workspace
         run: |
-          set -euo pipefail
-          SCRIPT="$GITHUB_WORKSPACE/.github/actions/python-quality-security/trufflehog.sh"
-          WORK=$(mktemp -d "$GITHUB_WORKSPACE/.trufflehog-smoke.XXXXXX")
-          trap 'rm -rf "$WORK"' EXIT
-          git -C "$WORK" init -q
-          git -C "$WORK" config user.name Test
-          git -C "$WORK" config user.email test@example.invalid
-          echo 'public fixture' > "$WORK/sample.txt"
-          git -C "$WORK" add .
-          git -C "$WORK" commit -qm fixture
-          SHA=$(git -C "$WORK" rev-parse HEAD)
-          if ! GITHUB_WORKSPACE="$WORK" GITHUB_SHA="$SHA" GITHUB_EVENT_NAME=workflow_dispatch bash "$SCRIPT"; then
-            echo 'Diagnosing the public synthetic fixture only (no repository secrets).'
-            docker run --rm -v "$WORK:/repo:ro" -w /repo ghcr.io/trufflesecurity/trufflehog:latest git file:///repo/ --branch "$SHA" --fail --fail-on-scan-errors --no-update --only-verified --json
-            exit 1
-          fi
-      - name: Publish validated Git tree only
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
           uv run --no-project --with pyyaml python - <<'PY'
           import subprocess
           import yaml
-          previous = subprocess.check_output(['git', 'show', 'e94307d53b5234ddabcb79fdd0dee3df3d9de728:.github/workflows/prepare-issues-79-80.yml'], text=True)
-          subprocess.run(['bash', '-e', '-c', yaml.safe_load(previous)['jobs']['prepare']['steps'][6]['run']], check=True)
+          previous = subprocess.check_output(['git', 'show', '3538cb97b933494b69d827ee3d07c3bd05cda682:.github/workflows/prepare-issues-79-80.yml'], text=True)
+          subprocess.run(['bash', '-e', '-c', yaml.safe_load(previous)['jobs']['prepare']['steps'][5]['run']], check=True)
+          PY
+      - name: Export validated content-addressed blobs
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 - <<'PY'
+          import hashlib, json, os, urllib.request, urllib.error
+          from pathlib import Path
+          paths = [
+              'quality_report.py', '.github/workflows/quality-evidence.yml',
+              '.github/actions/quality-report/action.yml',
+              '.github/actions/python-quality-security/action.yml',
+              '.github/actions/python-quality-security/trufflehog.sh',
+              'tests/test_mutation_report_fail_closed.py', 'tests/test_secret_scan.py',
+              'tests/test_mutation_publication_contract.py', 'pyproject.toml',
+              'tests/test_issue_55_portability.py', 'tests/test_quality_workflow_contract.py',
+              'docs/issues-79-80.md', '.github/workflows/quality-report-selftest.yml',
+          ]
+          for path in paths:
+              raw = Path(path).read_bytes()
+              digest = hashlib.sha1(b'blob ' + str(len(raw)).encode() + b'\0' + raw).hexdigest()
+              request = urllib.request.Request(
+                  'https://api.github.com/repos/didlawowo/workflow-ci/git/blobs',
+                  data=json.dumps({'content': raw.decode(), 'encoding': 'utf-8'}).encode(),
+                  headers={'Authorization': 'Bearer ' + os.environ['GH_TOKEN'], 'Accept': 'application/vnd.github+json', 'Content-Type': 'application/json', 'User-Agent': 'workflow-ci-regression-validation'},
+                  method='POST',
+              )
+              try:
+                  with urllib.request.urlopen(request, timeout=30) as response:
+                      sha = json.load(response)['sha']
+              except urllib.error.HTTPError as exc:
+                  print('Export error:', exc.code, exc.read().decode()[:1000])
+                  raise
+              assert sha == digest
+              print('VALIDATED_BLOB', path, sha, flush=True)
           PY
