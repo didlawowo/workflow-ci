@@ -29,7 +29,8 @@ def test_python_actions_honor_nested_projects_and_explicit_evidence():
     assert "Custom test-command succeeded but did not produce the required JUnit evidence" in tests
 
     assert "working-directory: ${{ inputs.working-directory }}" in quality
-    assert "path: ${{ inputs.working-directory }}" in quality
+    # Secret scanning needs the git root; nested project tooling still honors working-directory.
+    assert "path: ." in quality
 
 
 def test_node_actions_honor_nested_projects_and_selected_package_manager():
