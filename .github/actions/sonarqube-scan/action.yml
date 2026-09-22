@@ -21,6 +21,12 @@ outputs:
   project-url:
     description: "SonarQube project dashboard URL"
     value: ${{ steps.metadata.outputs.project-url }}
+  main-coverage:
+    description: "Coverage percentage currently stored for main"
+    value: ${{ steps.metrics.outputs.main-coverage }}
+  changed-lines-coverage:
+    description: "SonarQube new-code coverage for the current pull request"
+    value: ${{ steps.metrics.outputs.changed-lines-coverage }}
 
 runs:
   using: "composite"
@@ -50,6 +56,8 @@ runs:
         echo "project-url=${HOST}/dashboard?id=${SONAR_PROJECT_VALUE}" >> "$GITHUB_OUTPUT"
 
     - name: Run SonarQube scan and wait for Quality Gate
+      id: scan
+      continue-on-error: true
       uses: SonarSource/sonarqube-scan-action@v8.2.2
       env:
         SONAR_TOKEN: ${{ inputs.sonar-token }}
@@ -63,3 +71,47 @@ runs:
           -Dsonar.host.url=https://sonarqube.dc-tech.work
           -Dsonar.qualitygate.wait=true
           -Dsonar.qualitygate.timeout=300
+
+    - name: Read SonarQube coverage evidence
+      id: metrics
+      if: always() && steps.metadata.outcome == 'success'
+      shell: bash
+      env:
+        SONAR_TOKEN_VALUE: ${{ inputs.sonar-token }}
+        SONAR_PROJECT_VALUE: ${{ inputs.project-key }}
+        PR_NUMBER: ${{ github.event.pull_request.number }}
+      run: |
+        set -euo pipefail
+        HOST="https://sonarqube.dc-tech.work"
+
+        measure() {
+          local metric="$1"
+          shift
+          local payload
+          if ! payload="$(curl -fsS -u "${SONAR_TOKEN_VALUE}:" --get             --data-urlencode "component=${SONAR_PROJECT_VALUE}"             --data-urlencode "metricKeys=${metric}"             "$@"             "${HOST}/api/measures/component" 2>/dev/null)"; then
+            return 0
+          fi
+          printf '%s' "$payload" | jq -r '
+            .component.measures[0] as $m
+            | ($m.value // $m.period.value // $m.periods[0].value // empty)
+          ' 2>/dev/null || true
+        }
+
+        MAIN_COVERAGE="$(measure coverage --data-urlencode "branch=main")"
+        echo "main-coverage=$MAIN_COVERAGE" >> "$GITHUB_OUTPUT"
+
+        CHANGED=""
+        if [[ -n "${PR_NUMBER:-}" ]]; then
+          CHANGED="$(measure new_coverage --data-urlencode "pullRequest=${PR_NUMBER}")"
+        fi
+        echo "changed-lines-coverage=$CHANGED" >> "$GITHUB_OUTPUT"
+
+    - name: Enforce SonarQube Quality Gate result
+      if: always()
+      shell: bash
+      run: |
+        set -euo pipefail
+        if [[ "${{ steps.scan.outcome }}" != "success" ]]; then
+          echo "::error::SonarQube analysis or server-side Quality Gate failed."
+          exit 1
+        fi
