@@ -118,6 +118,11 @@ SonarQube host, full-repository scan base and blocking Quality Gate wait are als
 workflow-ci. A pull request that changes `sonar-project.properties` is rejected by trusted
 quality evidence; such policy changes must be reviewed separately on the protected base branch.
 
+`sonar-project.properties` is optional: the project key, host and blocking Quality Gate settings
+are supplied centrally. If a repository needs custom Sonar properties such as source/exclusion
+rules, merge that file to `main` before enabling Sonar. Only then set `SONAR_ENABLED=true`; the
+evaluated PR is intentionally not allowed to change its own Sonar policy.
+
 Quality Gate thresholds stay in SonarQube, so tightening coverage/security/duplication rules does
 not require another workflow-ci release.
 
@@ -141,3 +146,4 @@ actions to the exact commit of the tagged workflow and prevents stale cross-vers
 | Variable | Value |
 | --- | --- |
 | `SONAR_PROJECT_KEY` | Exact SonarQube project key imported for the repository |
+| `SONAR_ENABLED` | `true` to execute the SonarQube gate; otherwise Sonar is skipped |
