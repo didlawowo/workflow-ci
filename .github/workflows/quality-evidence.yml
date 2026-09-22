@@ -33,6 +33,11 @@ on:
         required: false
         type: string
         default: "1.24"
+      golangci-lint-version:
+        description: "Exact golangci-lint release or auto based on the configuration major version"
+        required: false
+        type: string
+        default: "auto"
       node-version:
         required: false
         type: string
@@ -110,7 +115,7 @@ jobs:
       security-issues: ${{ steps.python-quality.outputs.security-issues || steps.go-quality.outputs.security-issues || steps.node-quality.outputs.security-issues }}
       coverage-threshold: ${{ steps.threshold.outputs.value }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: $/.github/actions/checkout-source
         with:
           fetch-depth: 0
           persist-credentials: false
@@ -186,6 +191,9 @@ jobs:
         with:
           go-version: ${{ inputs.go-version }}
           working-directory: ${{ inputs.working-directory }}
+          golangci-lint-version: ${{ inputs.golangci-lint-version }}
+          # The verifier stays read-only. SARIF is retained as an artifact.
+          upload-sarif: "false"
 
       - name: Verify Node quality and security
         id: node-quality
@@ -277,9 +285,8 @@ jobs:
       pull-requests: write
     steps:
       # The publisher needs the git graph for diff statistics, but it never
-      # executes repository code. Credentials are removed immediately after
-      # checkout so PR-controlled files cannot reuse a write-capable token.
-      - uses: actions/checkout@v7
+      # executes repository code. The checkout never persists its token.
+      - uses: $/.github/actions/checkout-source
         with:
           fetch-depth: 0
           persist-credentials: false
