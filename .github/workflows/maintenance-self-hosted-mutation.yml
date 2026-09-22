@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   validate:
-    runs-on: ${{ vars.RUNNER }}
+    runs-on: arc-runner-workflow-ci
     timeout-minutes: 10
     permissions:
       contents: write
@@ -80,32 +80,33 @@ jobs:
 
 
           @pytest.mark.parametrize(
-              ("filename", "job", "expected"),
+              ("filename", "job", "expression"),
               [
                   (
                       "mutation-policy.yml",
                       "mutation-run",
-                      "${{ vars.UNTRUSTED_RUNNER || vars.RUNNER || 'self-hosted' }}",
+                      "vars.UNTRUSTED_RUNNER || vars.RUNNER || 'self-hosted'",
                   ),
                   (
                       "mutation-policy.yml",
                       "mutation-verify",
-                      "${{ inputs.trusted-runner || vars.RUNNER || 'self-hosted' }}",
+                      "inputs.trusted-runner || vars.RUNNER || 'self-hosted'",
                   ),
                   (
                       "mutation-issue-policy.yml",
                       "notify",
-                      "${{ inputs.runner || vars.RUNNER || 'self-hosted' }}",
+                      "inputs.runner || vars.RUNNER || 'self-hosted'",
                   ),
                   (
                       "mutation-issue-policy.yml",
                       "refresh-linked-prs",
-                      "${{ inputs.runner || vars.RUNNER || 'self-hosted' }}",
+                      "inputs.runner || vars.RUNNER || 'self-hosted'",
                   ),
               ],
           )
-          def test_runner_precedence_and_self_hosted_fallback(filename, job, expected):
+          def test_runner_precedence_and_self_hosted_fallback(filename, job, expression):
               workflow = yaml.safe_load((ROOT / ".github/workflows" / filename).read_text())
+              expected = "$" + "{{ " + expression + " }}"
               assert workflow["jobs"][job]["runs-on"] == expected
 
 
