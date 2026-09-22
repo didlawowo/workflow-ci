@@ -145,9 +145,38 @@ runs:
         if [ -n "$CUSTOM_CMD" ]; then
           eval "$CUSTOM_CMD"
         else
+          COVERAGE_SOURCES="$(
+            uv run --no-project --python "${{ inputs.python-version }}" python - <<'PY'
+        import pathlib
+        import tomllib
+
+        data = tomllib.loads(pathlib.Path("pyproject.toml").read_text(encoding="utf-8"))
+        sources = (
+            data.get("tool", {})
+            .get("coverage", {})
+            .get("run", {})
+            .get("source", [])
+        )
+        if isinstance(sources, str):
+            sources = [sources]
+        print("\n".join(str(source).strip() for source in sources if str(source).strip()))
+        PY
+          )"
+
+          COVERAGE_ARGS=()
+          if [ -n "$COVERAGE_SOURCES" ]; then
+            while IFS= read -r source; do
+              [ -n "$source" ] && COVERAGE_ARGS+=("--cov=$source")
+            done <<< "$COVERAGE_SOURCES"
+          elif [ -d src ]; then
+            COVERAGE_ARGS+=(--cov=src)
+          else
+            COVERAGE_ARGS+=(--cov=.)
+          fi
+
           uv run --with pytest --with pytest-cov pytest ${{ inputs.test-paths }} \
             -v --tb=short \
-            --cov=src --cov-report=xml:${{ inputs.coverage-report-path }} \
+            "${COVERAGE_ARGS[@]}" --cov-report=xml:${{ inputs.coverage-report-path }} \
             --cov-report=term-missing \
             --junitxml=${{ inputs.junit-report-path }}
         fi
