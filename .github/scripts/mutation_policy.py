@@ -106,6 +106,100 @@ def _is_dependency_only_path(path: str) -> bool:
     return any(pattern.fullmatch(normalized) for pattern in _DEPENDENCY_ONLY_PATTERNS)
 
 
+def _pull_request_files(event: dict) -> list[str] | None:
+    """Return the complete changed-file list, or None when completeness is unknown."""
+    pull_request = event.get("pull_request") or {}
+    number = pull_request.get("number") or event.get("number")
+    if not isinstance(number, int):
+        return None
+
+    changed_count = pull_request.get("changed_files")
+    if isinstance(changed_count, int) and changed_count < 0:
+        return None
+
+    files: list[str] = []
+    page = 1
+    while True:
+        suffix = "per_page=100" if page == 1 else f"per_page=100&page={page}"
+        payload = _api_request("GET", f"pulls/{number}/files?{suffix}") or []
+        if not isinstance(payload, list):
+            return None
+
+        page_files = [
+            str(item.get("filename") or "")
+            for item in payload
+            if isinstance(item, dict)
+        ]
+        if len(page_files) != len(payload) or any(not path for path in page_files):
+            return None
+        files.extend(page_files)
+
+        if isinstance(changed_count, int) and len(files) >= changed_count:
+            break
+        if len(payload) < 100:
+            break
+        page += 1
+        if page > 100:
+            return None
+
+    if isinstance(changed_count, int) and len(files) != changed_count:
+        return None
+    return files
+
+
+def _is_python_production_path(path: str) -> bool:
+    """Treat Python outside obvious test/docs/generated trees as production code."""
+    normalized = path.strip("/")
+    if not normalized.endswith(".py"):
+        return False
+
+    parts = Path(normalized).parts
+    if not parts:
+        return False
+
+    lowered = {part.lower() for part in parts}
+    if lowered.intersection(
+        {
+            "tests",
+            "test",
+            "docs",
+            "examples",
+            "example",
+            ".venv",
+            "venv",
+            "build",
+            "dist",
+        }
+    ):
+        return False
+
+    name = Path(normalized).name.lower()
+    if name.startswith("test_") or name.endswith("_test.py"):
+        return False
+
+    return True
+
+
+def _is_go_production_path(path: str) -> bool:
+    normalized = path.strip("/")
+    if not normalized.endswith(".go") or normalized.endswith("_test.go"):
+        return False
+    parts = Path(normalized).parts
+    return bool(parts) and parts[0] not in {"vendor", "testdata", "tests"}
+
+
+def production_change_reasons(event: dict) -> tuple[str, ...]:
+    """Automatically require mutation for supported production source changes."""
+    files = _pull_request_files(event)
+    if files is None:
+        return ("changed-files-unverified",)
+    if any(_is_python_production_path(path) for path in files):
+        return ("python-production-change",)
+    if any(_is_go_production_path(path) for path in files):
+        return ("go-production-change",)
+    return ()
+
+
 def _dependabot_dependency_only(event: dict) -> bool:
     """Return True only for Dependabot PRs changing dependency metadata/workflows."""
     pull_request = event.get("pull_request") or {}
@@ -120,27 +214,8 @@ def _dependabot_dependency_only(event: dict) -> bool:
     if direct_labels.intersection(MUTATION_REQUIRED_LABELS):
         return False
 
-    number = pull_request.get("number") or event.get("number")
-    if not isinstance(number, int):
-        return False
-
-    changed_count = pull_request.get("changed_files")
-    if isinstance(changed_count, int) and changed_count > 100:
-        return False
-
-    payload = _api_request("GET", f"pulls/{number}/files?per_page=100") or []
-    if not isinstance(payload, list) or not payload:
-        return False
-
-    filenames = [
-        str(item.get("filename") or "")
-        for item in payload
-        if isinstance(item, dict)
-    ]
-    if not filenames or len(filenames) != len(payload):
-        return False
-    if isinstance(changed_count, int) and changed_count != len(filenames):
-        # Fail closed if pagination/truncation hides part of the PR.
+    filenames = _pull_request_files(event)
+    if not filenames:
         return False
 
     return all(_is_dependency_only_path(path) for path in filenames)
@@ -223,17 +298,18 @@ def classify(event: dict) -> int:
         reasons = ()
         print("Mutation testing skipped for dependency-only Dependabot PR")
     else:
-        reasons = mutation_reasons(
+        label_reasons = mutation_reasons(
             event,
             lambda number: _api_request("GET", f"issues/{number}") or {},
         )
+        reasons = label_reasons or production_change_reasons(event)
     required = bool(reasons)
     _write_output("required", "true" if required else "false")
     _write_output("labels", ",".join(reasons))
     if required:
         print(f"Mutation testing required by: {', '.join(reasons)}")
     else:
-        print("Mutation testing not required by issue/PR labels")
+        print("Mutation testing not required: no high-risk label or supported production code change")
     return 0
 
 
