@@ -22,6 +22,7 @@ jobs:
       runner: ${{ vars.RUNNER || 'ubuntu-latest' }}
       workflow-ci-ref: ${{ github.event.pull_request.head.sha }}
       working-directory: tests/fixtures/consumers/python
+      python-source-path: src
       python-test-command: >-
         uv run pytest tests -q
         --cov=src
