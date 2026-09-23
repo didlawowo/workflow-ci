@@ -558,6 +558,25 @@ def test_consumer_mutation_runner_is_materialized_from_protected_tree_only():
     assert 'MATERIALIZED="$GITHUB_WORKSPACE/pr/.ci/mutation.sh"' not in content
     assert "publishes no supported trusted evidence; falling back to the central runner" in content
 
+
+def test_mutation_diagnostics_accept_machine_readable_stats_without_mutmut_binary():
+    root = Path(__file__).resolve().parents[1]
+    for relative in (
+        ".github/workflows/mutation-policy.yml",
+        "templates/forgejo/mutation-policy.yml",
+    ):
+        content = (root / relative).read_text()
+        capture = content.split("- name: Capture mutmut diagnostics", 1)[1].split(
+            "- name: Locate mutation evidence", 1
+        )[0]
+
+        stats_guard = 'elif [[ -f mutants/mutmut-cicd-stats.json ]]; then'
+        assert stats_guard in capture
+        assert "Mutmut completed successfully; machine-readable diagnostics are in " in capture
+        assert capture.index(stats_guard) < capture.index(
+            "Mutation diagnostics unavailable"
+        )
+
 def test_python_actions_fallback_from_read_only_uv_cache():
     root = Path(__file__).resolve().parents[1]
     setup = (
@@ -584,4 +603,3 @@ def test_python_security_bandit_matches_medium_severity_gate():
 
     assert action.count("bandit -r ${{ inputs.bandit-paths }} -ll") == 2
     assert "-ll -f json -o bandit-report.json" in action
-
