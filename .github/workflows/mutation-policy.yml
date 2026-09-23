@@ -96,8 +96,18 @@ jobs:
           fi
           echo "Trusted mutation policy loaded from $MUTATION_FETCH_SHA without traversing submodules."
 
+      - name: Configure writable uv cache
+        shell: bash
+        run: |
+          set -euo pipefail
+          UV_CACHE="${RUNNER_TEMP:-/tmp}/uv-cache"
+          mkdir -p "$UV_CACHE"
+          echo "UV_CACHE_DIR=$UV_CACHE" >> "$GITHUB_ENV"
+
       - name: Install uv for policy and mutation helpers
         uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+        with:
+          enable-cache: false
 
       - name: Classify pull request from trusted policy
         id: policy
@@ -440,8 +450,18 @@ jobs:
           fi
           echo "Trusted mutation policy loaded from $MUTATION_FETCH_SHA without traversing submodules."
 
+      - name: Configure writable uv cache
+        shell: bash
+        run: |
+          set -euo pipefail
+          UV_CACHE="${RUNNER_TEMP:-/tmp}/uv-cache"
+          mkdir -p "$UV_CACHE"
+          echo "UV_CACHE_DIR=$UV_CACHE" >> "$GITHUB_ENV"
+
       - name: Install uv for verification helpers
         uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+        with:
+          enable-cache: false
 
       - name: Re-classify pull request independently
         id: policy

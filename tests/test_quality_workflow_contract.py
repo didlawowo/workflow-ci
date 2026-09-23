@@ -521,3 +521,22 @@ def test_release_workflow_never_commits_workflow_ci_checkout():
     assert "Exclude workflow-ci checkout from release commits" in content
     assert "'.workflow-ci/' >> .git/info/exclude" in content
     assert "git reset -- .workflow-ci 2>/dev/null || true" in content
+
+
+
+def test_mutation_jobs_force_uv_cache_into_runner_temp():
+    root = Path(__file__).resolve().parents[1]
+    content = (root / ".github" / "workflows" / "mutation-policy.yml").read_text()
+
+    mutation_run = content.split("  mutation-run:", 1)[1].split(
+        "  mutation-verify:", 1
+    )[0]
+    mutation_verify = content.split("  mutation-verify:", 1)[1]
+
+    for job in (mutation_run, mutation_verify):
+        assert "Configure writable uv cache" in job
+        assert 'UV_CACHE="${RUNNER_TEMP:-/tmp}/uv-cache"' in job
+        assert 'echo "UV_CACHE_DIR=$UV_CACHE" >> "$GITHUB_ENV"' in job
+        assert "enable-cache: false" in job
+
+    assert "UV_CACHE_DIR: ${{ runner.temp }}/uv-cache" not in content
