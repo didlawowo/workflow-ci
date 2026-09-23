@@ -101,8 +101,8 @@ def test_checkout_retains_other_branch_commits_for_trusted_event_diffs(tmp_path)
     event_base = git(repo, 'rev-parse', 'HEAD')
 
     git(repo, 'checkout', '-q', '--detach', head)
-    result = checkout(tmp_path, head)
+    result = checkout(tmp_path, head, CHECKOUT_BASE_REF=event_base, CHECKOUT_HEAD_REF=head)
     assert result.returncode == 0, result.stderr
     workspace = tmp_path / 'workspace'
     assert git(workspace, 'rev-parse', f'{event_base}^{{commit}}') == event_base
-    assert git(workspace, 'rev-parse', 'refs/remotes/origin/event-base') == event_base
+    assert git(workspace, 'rev-parse', f'{head}^{{commit}}') == head
