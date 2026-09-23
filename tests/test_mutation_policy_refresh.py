@@ -209,3 +209,176 @@ def test_dependabot_with_production_code_is_not_dependency_only(monkeypatch):
 
     monkeypatch.setattr(mutation_policy, "_api_request", fake_api)
     assert not mutation_policy._dependabot_dependency_only(event)
+
+
+
+def test_python_production_change_requires_mutation_outside_src(monkeypatch, tmp_path):
+    event = {
+        "number": 201,
+        "pull_request": {
+            "number": 201,
+            "changed_files": 3,
+            "user": {"login": "developer"},
+            "labels": [],
+            "body": "",
+        },
+    }
+
+    def fake_api(method, path, payload=None):
+        if method == "GET" and path == "pulls/201/files?per_page=100":
+            return [
+                {"filename": "core/service.py"},
+                {"filename": "tests/test_service.py"},
+                {"filename": "docs/example.py"},
+            ]
+        raise AssertionError((method, path, payload))
+
+    output = tmp_path / "output"
+    monkeypatch.setenv("GITHUB_OUTPUT", str(output))
+    monkeypatch.setattr(mutation_policy, "_api_request", fake_api)
+
+    assert mutation_policy.classify(event) == 0
+    rendered = output.read_text()
+    assert "required=true" in rendered
+    assert "labels=python-production-change" in rendered
+
+
+def test_root_python_production_change_requires_mutation(monkeypatch, tmp_path):
+    event = {
+        "number": 202,
+        "pull_request": {
+            "number": 202,
+            "changed_files": 1,
+            "user": {"login": "developer"},
+            "labels": [],
+            "body": "",
+        },
+    }
+
+    monkeypatch.setattr(
+        mutation_policy,
+        "_api_request",
+        lambda method, path, payload=None: [{"filename": "service.py"}],
+    )
+    output = tmp_path / "output"
+    monkeypatch.setenv("GITHUB_OUTPUT", str(output))
+
+    assert mutation_policy.classify(event) == 0
+    rendered = output.read_text()
+    assert "required=true" in rendered
+    assert "labels=python-production-change" in rendered
+
+
+def test_go_production_change_requires_mutation_without_labels(monkeypatch, tmp_path):
+    event = {
+        "number": 203,
+        "pull_request": {
+            "number": 203,
+            "changed_files": 2,
+            "user": {"login": "developer"},
+            "labels": [],
+            "body": "",
+        },
+    }
+
+    def fake_api(method, path, payload=None):
+        if method == "GET" and path == "pulls/203/files?per_page=100":
+            return [
+                {"filename": "internal/service.go"},
+                {"filename": "internal/service_test.go"},
+            ]
+        raise AssertionError((method, path, payload))
+
+    output = tmp_path / "output"
+    monkeypatch.setenv("GITHUB_OUTPUT", str(output))
+    monkeypatch.setattr(mutation_policy, "_api_request", fake_api)
+
+    assert mutation_policy.classify(event) == 0
+    rendered = output.read_text()
+    assert "required=true" in rendered
+    assert "labels=go-production-change" in rendered
+
+
+def test_tests_docs_and_workflows_do_not_auto_require_mutation(monkeypatch, tmp_path):
+    event = {
+        "number": 204,
+        "pull_request": {
+            "number": 204,
+            "changed_files": 5,
+            "user": {"login": "developer"},
+            "labels": [],
+            "body": "",
+        },
+    }
+
+    def fake_api(method, path, payload=None):
+        if method == "GET" and path == "pulls/204/files?per_page=100":
+            return [
+                {"filename": "tests/test_service.py"},
+                {"filename": "test_helper.py"},
+                {"filename": "docs/example.py"},
+                {"filename": ".github/workflows/ci.yml"},
+                {"filename": "internal/service_test.go"},
+            ]
+        raise AssertionError((method, path, payload))
+
+    output = tmp_path / "output"
+    monkeypatch.setenv("GITHUB_OUTPUT", str(output))
+    monkeypatch.setattr(mutation_policy, "_api_request", fake_api)
+
+    assert mutation_policy.classify(event) == 0
+    rendered = output.read_text()
+    assert "required=false" in rendered
+    assert "labels=" in rendered
+
+
+def test_incomplete_changed_file_listing_fails_closed(monkeypatch, tmp_path):
+    event = {
+        "number": 205,
+        "pull_request": {
+            "number": 205,
+            "changed_files": 101,
+            "user": {"login": "developer"},
+            "labels": [],
+            "body": "",
+        },
+    }
+
+    def fake_api(method, path, payload=None):
+        if method == "GET" and path == "pulls/205/files?per_page=100":
+            return [{"filename": f"tests/test_{index}.py"} for index in range(100)]
+        if method == "GET" and path == "pulls/205/files?per_page=100&page=2":
+            return []
+        raise AssertionError((method, path, payload))
+
+    output = tmp_path / "output"
+    monkeypatch.setenv("GITHUB_OUTPUT", str(output))
+    monkeypatch.setattr(mutation_policy, "_api_request", fake_api)
+
+    assert mutation_policy.classify(event) == 0
+    rendered = output.read_text()
+    assert "required=true" in rendered
+    assert "labels=changed-files-unverified" in rendered
+
+
+def test_dependabot_dependency_listing_paginates_before_exemption(monkeypatch):
+    event = {
+        "number": 206,
+        "pull_request": {
+            "number": 206,
+            "changed_files": 101,
+            "user": {"login": "dependabot[bot]"},
+            "labels": [],
+            "body": "",
+        },
+    }
+
+    def fake_api(method, path, payload=None):
+        if path == "pulls/206/files?per_page=100":
+            return [{"filename": f"requirements-{index}.txt"} for index in range(100)]
+        if path == "pulls/206/files?per_page=100&page=2":
+            return [{"filename": "internal/service.py"}]
+        raise AssertionError((method, path, payload))
+
+    monkeypatch.setattr(mutation_policy, "_api_request", fake_api)
+    assert not mutation_policy._dependabot_dependency_only(event)

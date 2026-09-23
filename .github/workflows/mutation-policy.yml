@@ -417,7 +417,8 @@ jobs:
 
       - name: Mutation testing not required
         if: steps.policy.outputs.required != 'true'
-        run: echo "No complexity:high or priority:high label found on the PR or linked issue."
+        run: >-
+          echo "No high-risk label or supported production source change requires mutation testing."
 
   mutation-verify:
     name: Mutation policy gate
@@ -986,4 +987,5 @@ jobs:
 
       - name: Confirm mutation testing is not required
         if: steps.policy.outputs.required != 'true'
-        run: echo "Mutation testing is not required for this pull request."
+        run: >-
+          echo "Mutation testing is not required: no high-risk label or supported production source change."
