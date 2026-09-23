@@ -29,6 +29,11 @@ on:
         required: false
         type: string
         default: "3.12"
+      python-source-path:
+        description: "Python application source path used by coverage and Bandit"
+        required: false
+        type: string
+        default: "src"
       go-version:
         required: false
         type: string
@@ -145,12 +150,14 @@ jobs:
         with:
           python-version: ${{ inputs.python-version }}
           working-directory: ${{ inputs.working-directory }}
+          bandit-paths: ${{ inputs.python-source-path }}
           test-command: ${{ inputs.python-test-command }}
           junit-report-path: ${{ inputs.python-junit-report-path }}
           coverage-report-path: ${{ inputs.python-coverage-report-path }}
           upload-coverage: "false"
           fail-on-coverage: "true"
           coverage-threshold: ${{ steps.threshold.outputs.value }}
+          coverage-source: ${{ inputs.python-source-path }}
 
       - name: Verify Go tests
         id: go-tests
