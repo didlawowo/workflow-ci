@@ -32,14 +32,21 @@ case "$1" in
 esac
 ASKPASS
 chmod 700 "$tmp/askpass"
+FETCH_REFS=("$CHECKOUT_REF")
+for related in "${CHECKOUT_BASE_REF:-}" "${CHECKOUT_HEAD_REF:-}"; do
+  [[ -z "$related" || "$related" =~ ^[0-9a-fA-F]{40}$|^[0-9a-fA-F]{64}$ ]] || {
+    echo '::error::Related checkout refs must be exact commit SHAs'
+    exit 1
+  }
+  if [[ -n "$related" && "$related" != "$CHECKOUT_REF" ]]; then
+    FETCH_REFS+=("$related")
+  fi
+done
+# Fetch the exact execution commit plus the PR event base/head in one operation.
+# This preserves the graph needed by diff and secret-scanning gates without
+# downloading unrelated branches or creating mutable refs in the checkout.
 GIT_ASKPASS="$tmp/askpass" GIT_TERMINAL_PROMPT=0 \
-  git -C "$tmp/repository" -c credential.helper= fetch --no-tags --no-recurse-submodules origin "$CHECKOUT_REF"
-# The exact PR/merge commit fetch above is intentionally minimal. Fetch branch
-# refs as well so trusted diff/security reporters can resolve the event's
-# base/head SHAs without relying on a shallow or incomplete object graph.
-GIT_ASKPASS="$tmp/askpass" GIT_TERMINAL_PROMPT=0 \
-  git -C "$tmp/repository" -c credential.helper= fetch --no-tags --no-recurse-submodules origin \
-    '+refs/heads/*:refs/remotes/origin/*'
+  git -C "$tmp/repository" -c credential.helper= fetch --no-tags --no-recurse-submodules origin "${FETCH_REFS[@]}"
 git -C "$tmp/repository" -c advice.detachedHead=false checkout -q --detach "$CHECKOUT_REF"
 actual="$(git -C "$tmp/repository" rev-parse HEAD)"
 [[ "$actual" == "${CHECKOUT_REF,,}" ]] || { echo '::error::Checkout SHA mismatch'; exit 1; }
