@@ -318,3 +318,27 @@ def test_remote_buildkit_only_adds_requested_architectures():
     assert "BUILDKIT_AMD64_ENDPOINT" in remote
     assert "BUILDKIT_ARM64_ENDPOINT" in remote
     assert "Unsupported remote BuildKit platform" in remote
+
+
+def test_trivy_prefers_preinstalled_binary_with_portable_fallback():
+    detect = STEPS["Detect preinstalled Trivy"]
+    scan = STEPS["Run Trivy vulnerability scanner"]
+    assert "Version: 0.70.0" in detect
+    assert "aquasecurity/trivy-action@v0.36.0" in scan
+    assert "skip-setup-trivy:" in scan
+    assert "aquasecurity/trivy-action@master" not in TEXT
+
+    filesystem = (
+        ROOT / ".github" / "actions" / "trivy-filesystem-scan" / "action.yml"
+    ).read_text(encoding="utf-8")
+    assert filesystem.count("aquasecurity/trivy-action@v0.36.0") == 5
+    assert filesystem.count("skip-setup-trivy:") == 5
+    assert "aquasecurity/trivy-action@master" not in filesystem
+
+
+def test_cosign_prefers_runner_binary_and_fallback_is_same_version():
+    detect = STEPS["Detect preinstalled Cosign"]
+    install = STEPS["Install Cosign when absent"]
+    assert "v3.0.6" in detect
+    assert "steps.cosign-runtime.outputs.preinstalled != 'true'" in install
+    assert 'cosign-release: "v3.0.6"' in install

@@ -7,6 +7,7 @@ FINDINGS=''
 MODE=unknown
 SCAN_EXIT=1
 TMP=''
+TRUFFLEHOG_VERSION=3.97.7
 finish() {
   rc=$?
   trap - EXIT
@@ -57,18 +58,37 @@ if [[ -n "$BASE" ]] && { [[ "$BASE" == "$HEAD" ]] || ! git merge-base --is-ances
   BASE=''
 fi
 MODE=full
-ARGS=(git file:///repo/ --branch "$HEAD" --fail --fail-on-scan-errors --no-update --only-verified --json)
+LOCAL_TRUFFLEHOG=""
+if [[ "${WORKFLOW_CI_DISABLE_PREINSTALLED_TOOLS:-false}" != true ]]; then
+  candidate="$(command -v trufflehog 2>/dev/null || true)"
+  if [[ -n "$candidate" ]] && "$candidate" --version 2>&1 | grep -Fq "$TRUFFLEHOG_VERSION"; then
+    LOCAL_TRUFFLEHOG="$candidate"
+    echo "::notice::Using preinstalled TruffleHog $TRUFFLEHOG_VERSION from $LOCAL_TRUFFLEHOG"
+  fi
+fi
+
+if [[ -n "$LOCAL_TRUFFLEHOG" ]]; then
+  SOURCE_URI="file://$ROOT/"
+else
+  SOURCE_URI="file:///repo/"
+fi
+ARGS=(git "$SOURCE_URI" --branch "$HEAD" --fail --fail-on-scan-errors --no-update --only-verified --json)
 if [[ -n "$BASE" ]]; then
   MODE=range
   ARGS+=(--since-commit "$BASE")
 fi
 TMP=$(mktemp -d "${RUNNER_TEMP:-/tmp}/trufflehog.XXXXXX")
-# Same official image/default as the previously pinned upstream action. Do not
-# expose credential-bearing JSON or stderr in logs or uploaded artifacts.
+# Prefer the verified binary baked into arc-runner. The pinned official image
+# remains the portable fallback. Never expose credential-bearing JSON/stderr.
 SCAN_EXIT=0
-docker run --rm -v "$ROOT:/repo:ro" -w /repo \
-  ghcr.io/trufflesecurity/trufflehog:latest "${ARGS[@]}" \
-  > "$TMP/results.jsonl" 2> "$TMP/stderr.log" || SCAN_EXIT=$?
+if [[ -n "$LOCAL_TRUFFLEHOG" ]]; then
+  "$LOCAL_TRUFFLEHOG" "${ARGS[@]}" \
+    > "$TMP/results.jsonl" 2> "$TMP/stderr.log" || SCAN_EXIT=$?
+else
+  docker run --rm -v "$ROOT:/repo:ro" -w /repo \
+    "ghcr.io/trufflesecurity/trufflehog:$TRUFFLEHOG_VERSION" "${ARGS[@]}" \
+    > "$TMP/results.jsonl" 2> "$TMP/stderr.log" || SCAN_EXIT=$?
+fi
 if ! jq -se 'all(.[]; type == "object" and .Verified == true)' "$TMP/results.jsonl" >/dev/null; then
   exit 1
 fi

@@ -40,9 +40,23 @@ outputs:
 runs:
   using: "composite"
   steps:
+    - name: Detect preinstalled Trivy
+      id: trivy-runtime
+      shell: bash
+      run: |
+        set -euo pipefail
+        if command -v trivy >/dev/null 2>&1 && trivy --version 2>&1 | grep -q 'Version: 0.70.0'; then
+          echo "skip-setup=true" >> "$GITHUB_OUTPUT"
+          echo "Using preinstalled Trivy: $(command -v trivy)"
+        else
+          echo "skip-setup=false" >> "$GITHUB_OUTPUT"
+        fi
+
     - name: Run Trivy vulnerability scan
-      uses: aquasecurity/trivy-action@master
+      uses: aquasecurity/trivy-action@v0.36.0
       with:
+        version: "v0.70.0"
+        skip-setup-trivy: ${{ steps.trivy-runtime.outputs.skip-setup || 'false' }}
         scan-type: "fs"
         scan-ref: ${{ inputs.scan-path }}
         format: "sarif"
@@ -54,8 +68,10 @@ runs:
       continue-on-error: true
 
     - name: Run Trivy secret detection
-      uses: aquasecurity/trivy-action@master
+      uses: aquasecurity/trivy-action@v0.36.0
       with:
+        version: "v0.70.0"
+        skip-setup-trivy: ${{ steps.trivy-runtime.outputs.skip-setup || 'false' }}
         scan-type: "fs"
         scan-ref: ${{ inputs.scan-path }}
         format: "sarif"
@@ -65,8 +81,10 @@ runs:
       continue-on-error: true
 
     - name: Run Trivy misconfiguration scan
-      uses: aquasecurity/trivy-action@master
+      uses: aquasecurity/trivy-action@v0.36.0
       with:
+        version: "v0.70.0"
+        skip-setup-trivy: ${{ steps.trivy-runtime.outputs.skip-setup || 'false' }}
         scan-type: "fs"
         scan-ref: ${{ inputs.scan-path }}
         format: "sarif"
@@ -77,8 +95,10 @@ runs:
       continue-on-error: true
 
     - name: Run Trivy license scan
-      uses: aquasecurity/trivy-action@master
+      uses: aquasecurity/trivy-action@v0.36.0
       with:
+        version: "v0.70.0"
+        skip-setup-trivy: ${{ steps.trivy-runtime.outputs.skip-setup || 'false' }}
         scan-type: "fs"
         scan-ref: ${{ inputs.scan-path }}
         format: "sarif"
@@ -121,8 +141,10 @@ runs:
 
     - name: Check for critical issues
       if: inputs.fail-on-critical == 'true'
-      uses: aquasecurity/trivy-action@master
+      uses: aquasecurity/trivy-action@v0.36.0
       with:
+        version: "v0.70.0"
+        skip-setup-trivy: ${{ steps.trivy-runtime.outputs.skip-setup || 'false' }}
         scan-type: "fs"
         scan-ref: ${{ inputs.scan-path }}
         format: "table"

@@ -364,11 +364,24 @@ runs:
         SLUG="$(echo "${{ inputs.image-name }}" | tr '/:' '--')"
         echo "artifact-name=docker-scan-${SLUG}-${TARGET}" >> "$GITHUB_OUTPUT"
 
-    - name: Install Cosign
+    - name: Detect preinstalled Cosign
+      id: cosign-runtime
       if: inputs.sign == 'true'
+      shell: bash
+      run: |
+        set -euo pipefail
+        if command -v cosign >/dev/null 2>&1 && cosign version 2>&1 | grep -q 'v3.0.6'; then
+          echo "preinstalled=true" >> "$GITHUB_OUTPUT"
+          echo "Using preinstalled Cosign: $(command -v cosign)"
+        else
+          echo "preinstalled=false" >> "$GITHUB_OUTPUT"
+        fi
+
+    - name: Install Cosign when absent
+      if: inputs.sign == 'true' && steps.cosign-runtime.outputs.preinstalled != 'true'
       uses: sigstore/cosign-installer@v3
       with:
-        cosign-release: "v2.2.4"
+        cosign-release: "v3.0.6"
 
     - name: Build and push Docker image
       id: build
@@ -432,6 +445,21 @@ runs:
           --certificate-oidc-issuer="https://token.actions.githubusercontent.com" \
           "${{ inputs.image-name }}@${{ steps.build.outputs.digest }}"
 
+    # Prefer the Trivy binary baked into the ARC runner. GitHub-hosted runners
+    # keep the upstream setup-trivy fallback for portability.
+    - name: Detect preinstalled Trivy
+      id: trivy-runtime
+      if: inputs.scan == 'true'
+      shell: bash
+      run: |
+        set -euo pipefail
+        if command -v trivy >/dev/null 2>&1 && trivy --version 2>&1 | grep -q 'Version: 0.70.0'; then
+          echo "skip-setup=true" >> "$GITHUB_OUTPUT"
+          echo "Using preinstalled Trivy: $(command -v trivy)"
+        else
+          echo "skip-setup=false" >> "$GITHUB_OUTPUT"
+        fi
+
     # trivy-action restaure/sauvegarde déjà sa DB avec une clé quotidienne.
     # Son entrée cache-dir pilote à la fois ce cache et TRIVY_CACHE_DIR : une
     # variable env externe est écrasée. L'ancien second cache .trivy-cache
@@ -449,11 +477,13 @@ runs:
     - name: Run Trivy vulnerability scanner
       id: trivy
       if: inputs.scan == 'true'
-      uses: aquasecurity/trivy-action@master
+      uses: aquasecurity/trivy-action@v0.36.0
       env:
         # Plain-HTTP registry (registry-plain-http=true): allow non-TLS pulls.
         TRIVY_INSECURE: ${{ inputs.registry-plain-http == 'true' && 'true' || 'false' }}
       with:
+        version: "v0.70.0"
+        skip-setup-trivy: ${{ steps.trivy-runtime.outputs.skip-setup || 'false' }}
         cache: "true"
         cache-dir: ${{ github.workspace }}/.cache/trivy
         image-ref: ${{ steps.meta.outputs.full-name }}

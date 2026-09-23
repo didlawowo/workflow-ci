@@ -106,10 +106,24 @@ runs:
           exit 1
         fi
 
+    - name: Detect preinstalled Codecov CLI
+      id: codecov-runtime
+      if: inputs.upload-coverage == 'true'
+      shell: bash
+      run: |
+        set -euo pipefail
+        if command -v codecov >/dev/null 2>&1 && codecov --version 2>&1 | grep -q '11.3.1'; then
+          echo "binary=$(command -v codecov)" >> "$GITHUB_OUTPUT"
+          echo "Using preinstalled Codecov CLI: $(command -v codecov)"
+        else
+          echo "binary=" >> "$GITHUB_OUTPUT"
+        fi
+
     - name: Upload coverage to Codecov
       if: inputs.upload-coverage == 'true'
       uses: codecov/codecov-action@v5
       with:
+        binary: ${{ steps.codecov-runtime.outputs.binary }}
         files: ${{ inputs.working-directory }}/coverage.out
         flags: unittests
         token: ${{ inputs.codecov-token }}

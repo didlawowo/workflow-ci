@@ -21,22 +21,38 @@ case "$(uname -m)" in
   *) echo "::error::Unsupported runner architecture for Gremlins: $(uname -m)"; exit 1 ;;
 esac
 
-asset="gremlins_${GREMLINS_VERSION}_${os}_${arch}.tar.gz"
-base_url="https://github.com/go-gremlins/gremlins/releases/download/v${GREMLINS_VERSION}"
-tmp="$(mktemp -d "${RUNNER_TEMP:-/tmp}/gremlins.XXXXXX")"
-trap 'rm -rf "$tmp"' EXIT
+GREMLINS=""
+tmp=""
+cleanup() {
+  [[ -z "$tmp" ]] || rm -rf "$tmp"
+}
+trap cleanup EXIT
 
-curl -fsSL "$base_url/$asset" -o "$tmp/$asset"
-curl -fsSL "$base_url/checksums.txt" -o "$tmp/checksums.txt"
-(
-  cd "$tmp"
-  grep -E "[[:space:]]${asset}$" checksums.txt | sha256sum -c -
-)
-tar -xzf "$tmp/$asset" -C "$tmp"
-GREMLINS="$(find "$tmp" -maxdepth 2 -type f -name gremlins -perm -u+x -print -quit)"
+if [[ "${WORKFLOW_CI_DISABLE_PREINSTALLED_TOOLS:-false}" != true ]]; then
+  candidate="$(command -v gremlins 2>/dev/null || true)"
+  if [[ -n "$candidate" ]] && "$candidate" --version 2>&1 | grep -Fq "$GREMLINS_VERSION"; then
+    GREMLINS="$candidate"
+    echo "::notice::Using preinstalled Gremlins $GREMLINS_VERSION from $GREMLINS"
+  fi
+fi
+
 if [[ -z "$GREMLINS" ]]; then
-  echo "::error::Gremlins binary missing from verified release archive."
-  exit 1
+  asset="gremlins_${GREMLINS_VERSION}_${os}_${arch}.tar.gz"
+  base_url="https://github.com/go-gremlins/gremlins/releases/download/v${GREMLINS_VERSION}"
+  tmp="$(mktemp -d "${RUNNER_TEMP:-/tmp}/gremlins.XXXXXX")"
+
+  curl -fsSL "$base_url/$asset" -o "$tmp/$asset"
+  curl -fsSL "$base_url/checksums.txt" -o "$tmp/checksums.txt"
+  (
+    cd "$tmp"
+    grep -E "[[:space:]]${asset}$" checksums.txt | sha256sum -c -
+  )
+  tar -xzf "$tmp/$asset" -C "$tmp"
+  GREMLINS="$(find "$tmp" -maxdepth 2 -type f -name gremlins -perm -u+x -print -quit)"
+  if [[ -z "$GREMLINS" ]]; then
+    echo "::error::Gremlins binary missing from verified release archive."
+    exit 1
+  fi
 fi
 
 mkdir -p .quality
