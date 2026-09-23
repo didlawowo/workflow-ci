@@ -206,9 +206,45 @@ jobs:
               echo "::error::Protected .ci/mutation.sh does not invoke a supported real mutation engine."
               exit 1
             fi
-            echo "path=$CUSTOM" >> "$GITHUB_OUTPUT"
-            echo "source=consumer-base" >> "$GITHUB_OUTPUT"
-          elif [[ -f "$GITHUB_WORKSPACE/pr/go.mod" ]]; then
+
+            if grep -Eiq 'mutmut-cicd-stats\.json|mutation-no-targets\.json|\.quality/gremlins\.json' "$CUSTOM"; then
+              PR_ROOT="$(realpath -e "$GITHUB_WORKSPACE/pr")"
+              TRUSTED_DIR="$GITHUB_WORKSPACE/pr/.workflow-ci-trusted-runner"
+
+              rm -rf -- "$TRUSTED_DIR"
+              mkdir -m 700 -- "$TRUSTED_DIR"
+              TRUSTED_REAL="$(realpath -e "$TRUSTED_DIR")"
+              case "$TRUSTED_REAL" in
+                "$PR_ROOT"/*) ;;
+                *)
+                  echo "::error::Trusted mutation runner escaped the PR worktree."
+                  exit 1
+                  ;;
+              esac
+              if [[ -L "$TRUSTED_DIR" ]]; then
+                echo "::error::Trusted mutation runner directory must not be a symlink."
+                exit 1
+              fi
+
+              cp -a "$GITHUB_WORKSPACE/.policy/.ci/." "$TRUSTED_DIR/"
+              MATERIALIZED="$TRUSTED_DIR/mutation.sh"
+              if [[ ! -f "$MATERIALIZED" || -L "$MATERIALIZED" ]]; then
+                echo "::error::Trusted mutation runner materialization is not a regular protected file."
+                exit 1
+              fi
+              cmp --silent "$CUSTOM" "$MATERIALIZED" || {
+                echo "::error::Trusted mutation runner changed while materializing it into the PR worktree."
+                exit 1
+              }
+
+              echo "path=$MATERIALIZED" >> "$GITHUB_OUTPUT"
+              echo "source=consumer-base" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            echo "::warning::Protected .ci/mutation.sh runs a mutation engine but publishes no supported trusted evidence; falling back to the central runner."
+          fi
+
+          if [[ -f "$GITHUB_WORKSPACE/pr/go.mod" ]]; then
             echo "path=$GITHUB_WORKSPACE/.workflow-ci/.ci/mutation-go.sh" >> "$GITHUB_OUTPUT"
             echo "source=workflow-ci-go" >> "$GITHUB_OUTPUT"
           elif [[ -f "$GITHUB_WORKSPACE/pr/pyproject.toml" || -f "$GITHUB_WORKSPACE/pr/setup.cfg" ]] || find "$GITHUB_WORKSPACE/pr" -type f -name '*.py' -not -path '*/.venv/*' -print -quit | grep -q .; then
@@ -216,7 +252,7 @@ jobs:
             echo "source=workflow-ci-python" >> "$GITHUB_OUTPUT"
           else
             echo "::error::No central mutation runner is available for this repository type."
-            echo "::error::Add a protected-base .ci/mutation.sh for an unsupported language."
+            echo "::error::Add a protected-base .ci/mutation.sh that publishes supported evidence for an unsupported language."
             exit 1
           fi
 
