@@ -119,3 +119,26 @@ def test_publication_is_opt_in_and_not_an_input_to_gate():
     upload = action.split('    - name: Upload GoSec SARIF', 1)[1]
     assert 'continue-on-error: true' in upload
     assert 'Retain local GoSec evidence' in action
+
+
+def test_gosec_uses_matching_preinstalled_binary_without_go_install(tmp_path):
+    tools = tmp_path / 'preinstalled'
+    tools.mkdir()
+    scanner = tools / 'gosec'
+    scanner.write_text(
+        '#!/usr/bin/env bash\n'
+        'if [[ "$1" == "-version" ]]; then echo "Version: 2.29.0"; exit 0; fi\n'
+        'printf \'%s\' \'{"runs":[{"results":[]}]}\' > gosec-results.sarif\n'
+    )
+    scanner.chmod(0o755)
+
+    process, values = run(
+        tmp_path,
+        'gosec',
+        PATH=str(tools) + ':' + os.environ['PATH'],
+        GOSEC_VERSION='v2.29.0',
+        WORKFLOW_CI_DISABLE_PREINSTALLED_TOOLS='false',
+    )
+    assert process.returncode == 0, process.stderr
+    assert values == {'status': 'passed', 'issues': '0'}
+    assert 'Using preinstalled GoSec 2.29.0' in process.stdout
