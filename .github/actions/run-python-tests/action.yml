@@ -100,8 +100,20 @@ runs:
         echo "path=$CACHE" >> "$GITHUB_OUTPUT"
         echo "UV_CACHE_DIR=$CACHE" >> "$GITHUB_ENV"
 
-    - name: Install uv
+    - name: Detect preinstalled uv
+      id: uv-runtime
       if: inputs.use-docker-compose != 'true'
+      shell: bash
+      run: |
+        if command -v uv >/dev/null 2>&1; then
+          echo "preinstalled=true" >> "$GITHUB_OUTPUT"
+          echo "Using preinstalled uv: $(uv --version)"
+        else
+          echo "preinstalled=false" >> "$GITHUB_OUTPUT"
+        fi
+
+    - name: Install uv
+      if: inputs.use-docker-compose != 'true' && steps.uv-runtime.outputs.preinstalled != 'true'
       uses: astral-sh/setup-uv@v10.1.0
       with:
         version: "latest"
