@@ -389,7 +389,9 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p .quality
-          if [[ -x "$MUTATION_VENV/bin/mutmut" ]]; then
+          if [[ -s .quality/mutmut-results.txt ]]; then
+            echo "::notice::Preserving mutation diagnostics produced by the trusted runner."
+          elif [[ -x "$MUTATION_VENV/bin/mutmut" ]]; then
             "$MUTATION_VENV/bin/mutmut" results > .quality/mutmut-results.txt || true
           elif [[ -f mutants/mutmut-cicd-stats.json ]]; then
             echo "Mutmut completed successfully; machine-readable diagnostics are in mutants/mutmut-cicd-stats.json." > .quality/mutmut-results.txt
