@@ -56,10 +56,14 @@ def test_quality_evidence_dependency_chain_uses_same_commit_self_refs():
     assert "uses: $/.github/actions/setup-node-env" in node_tests
 
 
-def test_mutation_policy_cancels_only_relevant_pr_events():
+def test_mutation_policy_classifies_every_pr_event_it_subscribes_to():
     root = Path(__file__).resolve().parents[1]
     content = (root / ".github" / "workflows" / "mutation-policy.yml").read_text()
     header = content.split("\njobs:", 1)[0]
+    mutation_run = content.split("  mutation-run:", 1)[1].split(
+        "  mutation-verify:", 1
+    )[0]
+    mutation_verify = content.split("  mutation-verify:", 1)[1]
 
     assert "workflow_call:" in header
     assert "types: [opened, synchronize, reopened, labeled, unlabeled, edited]" in header
@@ -69,8 +73,12 @@ def test_mutation_policy_cancels_only_relevant_pr_events():
     assert "github.event.pull_request.number || github.run_id" in header
     assert "inputs.scope-key || 'default'" in header
     assert "cancel-in-progress: true" in header
-    assert content.count("github.event.changes.body != null") >= 2
-
+    # Publishing is fail-closed when mutation classification is absent, so a
+    # title-only edited event must still classify instead of skipping both jobs.
+    assert "github.event.changes.body != null" not in mutation_run
+    assert "github.event.changes.body != null" not in mutation_verify
+    assert "if: github.event_name == 'pull_request'" in mutation_run
+    assert "if: always() && github.event_name == 'pull_request'" in mutation_verify
 
 def test_forgejo_filters_irrelevant_edits_and_isolates_noop_concurrency():
     root = Path(__file__).resolve().parents[1]

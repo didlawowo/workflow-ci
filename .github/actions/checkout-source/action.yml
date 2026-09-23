@@ -16,6 +16,12 @@ inputs:
   fetch-depth:
     default: '0'
     description: Must remain zero for complete base/head ancestry
+  base-ref:
+    default: ${{ github.event.pull_request.base.sha }}
+    description: Optional exact pull-request base SHA to retain for trusted diffs
+  head-ref:
+    default: ${{ github.event.pull_request.head.sha }}
+    description: Optional exact pull-request head SHA to retain for trusted diffs
 outputs:
   sha:
     value: ${{ steps.checkout.outputs.sha }}
@@ -32,4 +38,6 @@ runs:
         CHECKOUT_TOKEN: ${{ inputs.token }}
         CHECKOUT_PERSIST_CREDENTIALS: ${{ inputs.persist-credentials }}
         CHECKOUT_FETCH_DEPTH: ${{ inputs.fetch-depth }}
+        CHECKOUT_BASE_REF: ${{ inputs.base-ref }}
+        CHECKOUT_HEAD_REF: ${{ inputs.head-ref }}
       run: bash "$GITHUB_ACTION_PATH/checkout.sh"

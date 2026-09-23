@@ -24,6 +24,8 @@ def test_python_actions_honor_nested_projects_and_explicit_evidence():
     assert "SYNC_ARGS+=(--extra dev)" in tests
     assert "uv run --with pytest --with pytest-cov pytest" in tests
     assert "coverage-report-path:" in tests
+    assert "coverage-source:" in tests
+    assert "--cov=${{ inputs.coverage-source }}" in tests
     assert "working-directory: ${{ inputs.working-directory }}" in tests
     assert 'echo "evidence-found=true"' in tests
     assert "Custom test-command succeeded but did not produce the required JUnit evidence" in tests
@@ -98,6 +100,9 @@ def test_reusable_quality_workflow_routes_nested_projects_for_all_languages():
     assert "python-test-command:" in workflow
     assert "python-junit-report-path:" in workflow
     assert "python-coverage-report-path:" in workflow
+    assert "python-source-path:" in workflow
+    assert "coverage-source: ${{ inputs.python-source-path }}" in workflow
+    assert "bandit-paths: ${{ inputs.python-source-path }}" in workflow
     assert "working-directory: ${{ inputs.working-directory }}" in workflow
     assert "artifact-suffix: ${{ inputs.repo-type }}" in workflow
 
@@ -119,3 +124,10 @@ def test_quality_reporter_does_not_depend_on_consumer_python_tooling():
     assert "uv run --no-project --python 3.12 python" in content
     assert "include-hidden-files: true" in content
     assert '--output-json "$GITHUB_WORKSPACE/.quality/quality-report.json"' in content
+
+
+def test_mutation_policy_does_not_turn_non_body_pr_edits_into_missing_evidence():
+    workflow = read(".github/workflows/mutation-policy.yml")
+    assert "github.event.changes.body != null" not in workflow
+    assert "if: github.event_name == 'pull_request'" in workflow
+    assert "if: always() && github.event_name == 'pull_request'" in workflow

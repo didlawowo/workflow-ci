@@ -10,6 +10,10 @@ inputs:
     description: "Minimum coverage percentage"
     required: false
     default: "30"
+  coverage-source:
+    description: "Python source/package path measured by pytest-cov"
+    required: false
+    default: "src"
   test-command:
     description: "Custom test command (overrides default pytest)"
     required: false
@@ -147,7 +151,7 @@ runs:
         else
           uv run --with pytest --with pytest-cov pytest ${{ inputs.test-paths }} \
             -v --tb=short \
-            --cov=src --cov-report=xml:${{ inputs.coverage-report-path }} \
+            --cov=${{ inputs.coverage-source }} --cov-report=xml:${{ inputs.coverage-report-path }} \
             --cov-report=term-missing \
             --junitxml=${{ inputs.junit-report-path }}
         fi
