@@ -34,7 +34,13 @@ ASKPASS
 chmod 700 "$tmp/askpass"
 GIT_ASKPASS="$tmp/askpass" GIT_TERMINAL_PROMPT=0 \
   git -C "$tmp/repository" -c credential.helper= fetch --no-tags --no-recurse-submodules origin "$CHECKOUT_REF"
-git -C "$tmp/repository" -c advice.detachedHead=false checkout -q --detach FETCH_HEAD
+# The exact PR/merge commit fetch above is intentionally minimal. Fetch branch
+# refs as well so trusted diff/security reporters can resolve the event's
+# base/head SHAs without relying on a shallow or incomplete object graph.
+GIT_ASKPASS="$tmp/askpass" GIT_TERMINAL_PROMPT=0 \
+  git -C "$tmp/repository" -c credential.helper= fetch --no-tags --no-recurse-submodules origin \
+    '+refs/heads/*:refs/remotes/origin/*'
+git -C "$tmp/repository" -c advice.detachedHead=false checkout -q --detach "$CHECKOUT_REF"
 actual="$(git -C "$tmp/repository" rev-parse HEAD)"
 [[ "$actual" == "${CHECKOUT_REF,,}" ]] || { echo '::error::Checkout SHA mismatch'; exit 1; }
 unset CHECKOUT_TOKEN
