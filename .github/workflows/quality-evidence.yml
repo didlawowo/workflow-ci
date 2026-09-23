@@ -150,7 +150,6 @@ jobs:
         with:
           python-version: ${{ inputs.python-version }}
           working-directory: ${{ inputs.working-directory }}
-          bandit-paths: ${{ inputs.python-source-path }}
           test-command: ${{ inputs.python-test-command }}
           junit-report-path: ${{ inputs.python-junit-report-path }}
           coverage-report-path: ${{ inputs.python-coverage-report-path }}
@@ -190,6 +189,7 @@ jobs:
         with:
           python-version: ${{ inputs.python-version }}
           working-directory: ${{ inputs.working-directory }}
+          bandit-paths: ${{ inputs.python-source-path }}
 
       - name: Verify Go quality and security
         id: go-quality
