@@ -4,16 +4,16 @@ With `scan: true` (the existing default), a successful action now requires:
 
 1. A successful Trivy process.
 2. A non-empty, parseable SARIF 2.1.0 report with at least one run and explicit result arrays. The counter covers all runs, rejects failed invocations, and never substitutes zero for missing or invalid evidence.
-3. A successful upload to GitHub Code Scanning.
-4. Successful archival of the SARIF report as a workflow artifact.
+3. Successful archival of the SARIF report as a workflow artifact.
+4. GitHub Code Scanning publication only when `upload-sarif: true`.
 
-The previous `continue-on-error: true` on `upload-sarif` is removed. A permission, service, schema or repository-eligibility error remains a job failure. A fresh report is required: the previous file is removed before starting Trivy.
+CodeQL/SARIF publication is **disabled by default** (`upload-sarif: false`). Trivy execution, local SARIF validation, Markdown reporting and artifact retention remain enabled. Repositories that explicitly want GitHub Code Scanning can opt in and must grant the corresponding permissions/eligibility.
 
 Artifacts are still attempted after scanner, validation or Code Scanning failures, unless the workflow was cancelled. Archival never changes the earlier failure into success. Missing artifacts are errors, not warnings. Artifact names and the seven-day retention period are unchanged. Reports can contain security-sensitive findings; do not publish their raw content in public logs.
 
-## Consumer permissions and repository eligibility
+## Optional Code Scanning publication
 
-Grant these permissions to each job that calls this composite:
+Code Scanning is off by default. Only jobs that explicitly set `upload-sarif: true` need these permissions:
 
 ```yaml
 permissions:
@@ -52,3 +52,11 @@ python -m pytest tests/test_docker_scan_contract.py -q
 ```
 
 These tests execute the actual shell extracted from `action.yml` and verify the workflow contract. They do not simulate a real GitHub Code Scanning upload or an OCI production publish. Complete that integration validation with an eligible repository and the released action before declaring the migration operational.
+
+
+## Build bootstrap performance
+
+For a native single-architecture build, QEMU is skipped automatically. With
+`native-multiarch: true`, the remote BuildKit builder now registers only the
+requested architectures, so an amd64-only consumer does not initialize or
+depend on the arm64 BuildKit endpoint.
