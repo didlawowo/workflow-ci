@@ -49,13 +49,25 @@ case "${1:-}" in
     emit status failed
     emit issues -1
     if [[ ! "${GOSEC_VERSION:?}" =~ ^v2\.[0-9]+\.[0-9]+$ ]]; then echo '::error::gosec-version must be an exact v2 release'; exit 1; fi
-    bin="${RUNNER_TEMP:?}/workflow-ci-tools/gosec-${GOSEC_VERSION}"
-    mkdir -p "$bin"
-    if ! GOBIN="$bin" GOTOOLCHAIN=auto go install "github.com/securego/gosec/v2/cmd/gosec@$GOSEC_VERSION"; then
-      echo '::error::GoSec installation failed; no security evidence'; exit 1
+    requested="${GOSEC_VERSION#v}"
+    scanner=""
+    if [[ "${WORKFLOW_CI_DISABLE_PREINSTALLED_TOOLS:-false}" != true ]]; then
+      candidate="$(command -v gosec 2>/dev/null || true)"
+      if [[ -n "$candidate" ]] && "$candidate" -version 2>&1 | grep -Fq "$requested"; then
+        scanner="$candidate"
+        echo "::notice::Using preinstalled GoSec $requested from $scanner"
+      fi
+    fi
+    if [[ -z "$scanner" ]]; then
+      bin="${RUNNER_TEMP:?}/workflow-ci-tools/gosec-${GOSEC_VERSION}"
+      mkdir -p "$bin"
+      if ! GOBIN="$bin" GOTOOLCHAIN=auto go install "github.com/securego/gosec/v2/cmd/gosec@$GOSEC_VERSION"; then
+        echo '::error::GoSec installation failed; no security evidence'; exit 1
+      fi
+      scanner="$bin/gosec"
     fi
     rc=0
-    "$bin/gosec" -fmt sarif -out gosec-results.sarif ./... || rc=$?
+    "$scanner" -fmt sarif -out gosec-results.sarif ./... || rc=$?
     if ! count="$(jq -er '
       if (.runs | type) != "array" or (.runs | length) == 0 then error("missing runs") else . end
       | if all(.runs[]; (.results | type) == "array") then . else error("missing results") end
