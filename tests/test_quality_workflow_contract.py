@@ -576,3 +576,30 @@ def test_mutation_diagnostics_accept_machine_readable_stats_without_mutmut_binar
         assert capture.index(stats_guard) < capture.index(
             "Mutation diagnostics unavailable"
         )
+
+def test_python_actions_fallback_from_read_only_uv_cache():
+    root = Path(__file__).resolve().parents[1]
+    setup = (
+        root / ".github" / "actions" / "setup-python-env" / "action.yml"
+    ).read_text()
+    tests = (
+        root / ".github" / "actions" / "run-python-tests" / "action.yml"
+    ).read_text()
+
+    for content in (setup, tests):
+        assert "Resolve writable uv cache" in content
+        assert 'REQUESTED="${UV_CACHE_DIR:-}"' in content
+        assert 'FALLBACK="${RUNNER_TEMP:-/tmp}/uv-cache"' in content
+        assert 'echo "UV_CACHE_DIR=$CACHE" >> "$GITHUB_ENV"' in content
+        assert "cache-local-path: ${{ steps.uv-cache.outputs.path }}" in content
+        assert "enable-cache: false" in content
+
+
+def test_python_security_bandit_matches_medium_severity_gate():
+    root = Path(__file__).resolve().parents[1]
+    action = (
+        root / ".github" / "actions" / "python-quality-security" / "action.yml"
+    ).read_text()
+
+    assert action.count("bandit -r ${{ inputs.bandit-paths }} -ll") == 2
+    assert "-ll -f json -o bandit-report.json" in action
