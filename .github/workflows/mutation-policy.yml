@@ -31,9 +31,7 @@ concurrency:
   cancel-in-progress: true
 jobs:
   mutation-run:
-    if: >-
-      github.event_name == 'pull_request' &&
-      (github.event.action != 'edited' || github.event.changes.body != null)
+    if: github.event_name == 'pull_request'
     # Use a dedicated execution runner when configured; otherwise inherit
     # the repository runner. Keep PR execution read-only and isolated.
     permissions:
@@ -377,9 +375,7 @@ jobs:
 
   mutation-verify:
     name: Mutation policy gate
-    if: >-
-      always() && github.event_name == 'pull_request' &&
-      (github.event.action != 'edited' || github.event.changes.body != null)
+    if: always() && github.event_name == 'pull_request'
     needs: [mutation-run]
     permissions:
       contents: read
