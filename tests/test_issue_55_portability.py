@@ -17,6 +17,8 @@ def test_python_actions_honor_nested_projects_and_explicit_evidence():
     assert 'data.get("dependency-groups", {})' in setup
     assert "SYNC_ARGS+=(--group dev)" in setup
     assert "SYNC_ARGS+=(--extra dev)" in setup
+    assert "Detect preinstalled uv" in setup
+    assert "steps.uv-runtime.outputs.preinstalled != 'true'" in setup
 
     assert "junit-report-path:" in tests
     assert 'data.get("dependency-groups", {})' in tests
@@ -29,6 +31,9 @@ def test_python_actions_honor_nested_projects_and_explicit_evidence():
     assert "working-directory: ${{ inputs.working-directory }}" in tests
     assert 'echo "evidence-found=true"' in tests
     assert "Custom test-command succeeded but did not produce the required JUnit evidence" in tests
+    assert "Detect preinstalled uv" in tests
+    assert "Detect preinstalled Codecov CLI" in tests
+    assert "binary: ${{ steps.codecov-runtime.outputs.binary }}" in tests
 
     assert "working-directory: ${{ inputs.working-directory }}" in quality
     # Secret scanning needs the git root; nested project tooling still honors working-directory.
@@ -119,6 +124,7 @@ def test_reusable_quality_workflow_routes_nested_projects_for_all_languages():
 def test_quality_reporter_does_not_depend_on_consumer_python_tooling():
     content = read(".github/actions/quality-report/action.yml")
 
+    assert "Detect preinstalled uv for quality reporter" in content
     assert "Install uv for quality reporter" in content
     assert "uv python install 3.12" in content
     assert "uv run --no-project --python 3.12 python" in content
