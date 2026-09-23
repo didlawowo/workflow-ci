@@ -66,6 +66,7 @@ sys.exit(int(os.environ['FAKE_EXIT']))
         "DOCKER_CALL": str(call),
         "FAKE_JSON": payload,
         "FAKE_EXIT": str(code),
+        "WORKFLOW_CI_DISABLE_PREINSTALLED_TOOLS": "true",
     }
     result = subprocess.run(
         ["bash", str(SCRIPT)], env=env, check=False, capture_output=True, text=True
