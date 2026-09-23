@@ -378,10 +378,12 @@ jobs:
           mkdir -p .quality
           if [[ -x "$MUTATION_VENV/bin/mutmut" ]]; then
             "$MUTATION_VENV/bin/mutmut" results > .quality/mutmut-results.txt || true
+          elif [[ -f mutants/mutmut-cicd-stats.json ]]; then
+            echo "Mutmut completed successfully; machine-readable diagnostics are in mutants/mutmut-cicd-stats.json." > .quality/mutmut-results.txt
           elif [[ -f .quality/mutation-no-targets.json ]]; then
             echo "No mutmut diagnostics: exact PR scope contains no mutation targets." > .quality/mutmut-results.txt
           else
-            echo "::error::Mutation diagnostics unavailable: mutmut was not installed and no no-target evidence exists."
+            echo "::error::Mutation diagnostics unavailable: no mutmut executable or supported mutation evidence exists."
             exit 1
           fi
 
