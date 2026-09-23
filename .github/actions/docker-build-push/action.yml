@@ -62,6 +62,10 @@ inputs:
     description: "Run Trivy security scan"
     required: false
     default: "true"
+  upload-sarif:
+    description: "Publish validated Trivy SARIF to GitHub Code Scanning (disabled by default)"
+    required: false
+    default: "false"
   scan-severity:
     description: "Trivy scan severity levels"
     required: false
@@ -188,8 +192,38 @@ runs:
     # defense covering FROM directives in user Dockerfiles.
     # QEMU + docker-container Buildx: the emulated multi-arch path. Skipped when
     # native-multiarch=true (remote BuildKit nodes handle each arch natively).
-    - name: Set up QEMU
+    - name: Detect whether QEMU is required
+      id: execution-mode
       if: inputs.native-multiarch != 'true'
+      shell: bash
+      env:
+        REQUESTED_PLATFORMS: ${{ inputs.platforms }}
+        PUSH_IMAGE: ${{ inputs.push }}
+      run: |
+        set -euo pipefail
+        case "$(uname -m)" in
+          x86_64) native_platform="linux/amd64" ;;
+          aarch64|arm64) native_platform="linux/arm64" ;;
+          *) native_platform="" ;;
+        esac
+
+        needs_qemu=false
+        if [ "$PUSH_IMAGE" = "true" ]; then
+          IFS=',' read -ra targets <<< "$REQUESTED_PLATFORMS"
+          for target in "${targets[@]}"; do
+            target="$(echo "$target" | xargs)"
+            [ -n "$target" ] || continue
+            if [ -z "$native_platform" ] || [ "$target" != "$native_platform" ]; then
+              needs_qemu=true
+              break
+            fi
+          done
+        fi
+        echo "native-platform=$native_platform" >> "$GITHUB_OUTPUT"
+        echo "needs-qemu=$needs_qemu" >> "$GITHUB_OUTPUT"
+
+    - name: Set up QEMU
+      if: inputs.native-multiarch != 'true' && steps.execution-mode.outputs.needs-qemu == 'true'
       uses: docker/setup-qemu-action@v4
       with:
         image: ${{ inputs.qemu-image }}
@@ -220,11 +254,49 @@ runs:
     - name: Set up native multi-arch Buildx (remote BuildKit)
       if: inputs.native-multiarch == 'true'
       shell: bash
+      env:
+        REQUESTED_PLATFORMS: ${{ inputs.platforms }}
+        BUILDKIT_AMD64_ENDPOINT: ${{ inputs.buildkit-amd64-endpoint }}
+        BUILDKIT_ARM64_ENDPOINT: ${{ inputs.buildkit-arm64-endpoint }}
       run: |
-        docker buildx create --name native --driver remote \
-          --node native-amd64 --platform linux/amd64 "${{ inputs.buildkit-amd64-endpoint }}"
-        docker buildx create --append --name native \
-          --node native-arm64 --platform linux/arm64 "${{ inputs.buildkit-arm64-endpoint }}"
+        set -euo pipefail
+        created=false
+        IFS=',' read -ra targets <<< "$REQUESTED_PLATFORMS"
+        for target in "${targets[@]}"; do
+          target="$(echo "$target" | xargs)"
+          case "$target" in
+            linux/amd64)
+              if [ "$created" = "false" ]; then
+                docker buildx create --name native --driver remote \
+                  --node native-amd64 --platform linux/amd64 "$BUILDKIT_AMD64_ENDPOINT"
+                created=true
+              else
+                docker buildx create --append --name native \
+                  --node native-amd64 --platform linux/amd64 "$BUILDKIT_AMD64_ENDPOINT"
+              fi
+              ;;
+            linux/arm64)
+              if [ "$created" = "false" ]; then
+                docker buildx create --name native --driver remote \
+                  --node native-arm64 --platform linux/arm64 "$BUILDKIT_ARM64_ENDPOINT"
+                created=true
+              else
+                docker buildx create --append --name native \
+                  --node native-arm64 --platform linux/arm64 "$BUILDKIT_ARM64_ENDPOINT"
+              fi
+              ;;
+            "")
+              ;;
+            *)
+              echo "::error title=Unsupported remote BuildKit platform::native-multiarch supports linux/amd64 and linux/arm64, got '$target'"
+              exit 1
+              ;;
+          esac
+        done
+        if [ "$created" != "true" ]; then
+          echo "::error title=Missing remote BuildKit platform::No supported target found in '$REQUESTED_PLATFORMS'"
+          exit 1
+        fi
         docker buildx use native
         docker buildx inspect --bootstrap native
 
@@ -518,7 +590,7 @@ runs:
 
     - name: Upload Trivy scan results
       id: upload-sarif
-      if: inputs.scan == 'true'
+      if: inputs.scan == 'true' && inputs.upload-sarif == 'true'
       continue-on-error: true
       uses: github/codeql-action/upload-sarif@v4
       with:
@@ -526,7 +598,7 @@ runs:
         category: trivy-${{ steps.meta.outputs.target-name }}-scan
 
     - name: Warn when SARIF publication failed
-      if: inputs.scan == 'true' && steps.upload-sarif.outcome == 'failure'
+      if: inputs.scan == 'true' && inputs.upload-sarif == 'true' && steps.upload-sarif.outcome == 'failure'
       shell: bash
       run: |
         echo "::warning title=Code Scanning upload failed::Trivy completed and the SARIF report was validated, but GitHub Code Scanning publication failed. The raw SARIF artifact is still archived; check actions:read/security-events:write permissions and repository Code Scanning eligibility."
