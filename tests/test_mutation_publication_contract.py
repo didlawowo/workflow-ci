@@ -120,3 +120,35 @@ def test_cli_json_and_markdown_agree(tmp_path, extra, expected, detail):
     if "--security-scan-errors" in extra:
         assert value["security"]["issues"] == 0
         assert value["security"]["scan_errors"] == 1
+
+
+
+@pytest.mark.parametrize(
+    "workflow",
+    [
+        ROOT / ".github/workflows/mutation-policy.yml",
+        ROOT / "templates/forgejo/mutation-policy.yml",
+    ],
+)
+def test_scoped_mutation_validator_imports_configparser(workflow):
+    text = workflow.read_text()
+    marker = "Validate mutation evidence for changed Python functions"
+    scoped = text.split(marker, 1)[1]
+    validator = scoped.split("PY", 1)[1]
+    assert "import configparser" in validator
+
+
+
+@pytest.mark.parametrize(
+    "workflow",
+    [
+        ROOT / ".github/workflows/mutation-policy.yml",
+        ROOT / "templates/forgejo/mutation-policy.yml",
+    ],
+)
+def test_capture_preserves_trusted_runner_mutation_diagnostics(workflow):
+    text = workflow.read_text()
+    marker = "Capture mutmut diagnostics"
+    capture = text.split(marker, 1)[1].split("- name:", 1)[0]
+    assert '[[ -s .quality/mutmut-results.txt ]]' in capture
+    assert "Preserving mutation diagnostics produced by the trusted runner" in capture
