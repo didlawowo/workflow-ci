@@ -187,7 +187,6 @@ def test_required_steps_cannot_swallow_failures(name):
         "Prepare Trivy report",
         "Run Trivy vulnerability scanner",
         "Analyze scan results",
-        "Upload Trivy scan results",
     ],
 )
 def test_scan_steps_are_gated_but_not_always_successful(name):
@@ -195,12 +194,17 @@ def test_scan_steps_are_gated_but_not_always_successful(name):
     assert "always()" not in STEPS[name]
 
 
-def test_sarif_publication_is_best_effort_but_visible():
+def test_code_scanning_publication_is_disabled_by_default_and_opt_in():
+    upload_input = TEXT.split("  upload-sarif:\n", 1)[1].split("  scan-severity:\n", 1)[0]
+    assert '    default: "false"' in upload_input
+
     upload = STEPS["Upload Trivy scan results"]
     assert "      id: upload-sarif\n" in upload
+    assert "inputs.scan == 'true' && inputs.upload-sarif == 'true'" in upload
     assert "      continue-on-error: true\n" in upload
 
     warning = STEPS["Warn when SARIF publication failed"]
+    assert "inputs.upload-sarif == 'true'" in warning
     assert "steps.upload-sarif.outcome == 'failure'" in warning
     assert "::warning title=Code Scanning upload failed::" in warning
 
@@ -294,3 +298,23 @@ def test_docker_actions_use_node24_capable_majors():
     assert "docker/setup-qemu-action@v3" not in TEXT
     assert "docker/setup-buildx-action@v3" not in TEXT
     assert "docker/build-push-action@v6" not in TEXT
+
+
+def test_qemu_is_skipped_for_native_single_arch_builds():
+    detect = STEPS["Detect whether QEMU is required"]
+    assert 'native_platform="linux/amd64"' in detect
+    assert 'native_platform="linux/arm64"' in detect
+    assert 'needs_qemu=false' in detect
+
+    qemu = STEPS["Set up QEMU"]
+    assert "steps.execution-mode.outputs.needs-qemu == 'true'" in qemu
+
+
+def test_remote_buildkit_only_adds_requested_architectures():
+    remote = STEPS["Set up native multi-arch Buildx (remote BuildKit)"]
+    assert 'case "$target" in' in remote
+    assert "linux/amd64)" in remote
+    assert "linux/arm64)" in remote
+    assert "BUILDKIT_AMD64_ENDPOINT" in remote
+    assert "BUILDKIT_ARM64_ENDPOINT" in remote
+    assert "Unsupported remote BuildKit platform" in remote
