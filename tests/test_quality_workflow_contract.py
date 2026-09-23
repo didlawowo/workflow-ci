@@ -534,5 +534,9 @@ def test_mutation_jobs_force_uv_cache_into_runner_temp():
     mutation_verify = content.split("  mutation-verify:", 1)[1]
 
     for job in (mutation_run, mutation_verify):
-        assert "UV_CACHE_DIR: ${{ runner.temp }}/uv-cache" in job
+        assert "Configure writable uv cache" in job
+        assert 'UV_CACHE="${RUNNER_TEMP:-/tmp}/uv-cache"' in job
+        assert 'echo "UV_CACHE_DIR=$UV_CACHE" >> "$GITHUB_ENV"' in job
         assert "enable-cache: false" in job
+
+    assert "UV_CACHE_DIR: ${{ runner.temp }}/uv-cache" not in content
