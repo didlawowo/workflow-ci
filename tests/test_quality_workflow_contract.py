@@ -540,3 +540,20 @@ def test_mutation_jobs_force_uv_cache_into_runner_temp():
         assert "enable-cache: false" in job
 
     assert "UV_CACHE_DIR: ${{ runner.temp }}/uv-cache" not in content
+
+
+
+def test_consumer_mutation_runner_is_materialized_from_protected_tree_only():
+    root = Path(__file__).resolve().parents[1]
+    content = (root / ".github" / "workflows" / "mutation-policy.yml").read_text()
+
+    assert 'TRUSTED_DIR="$GITHUB_WORKSPACE/pr/.workflow-ci-trusted-runner"' in content
+    assert 'rm -rf -- "$TRUSTED_DIR"' in content
+    assert 'mkdir -m 700 -- "$TRUSTED_DIR"' in content
+    assert 'TRUSTED_REAL="$(realpath -e "$TRUSTED_DIR")"' in content
+    assert '"$PR_ROOT"/*' in content
+    assert 'cp -a "$GITHUB_WORKSPACE/.policy/.ci/." "$TRUSTED_DIR/"' in content
+    assert 'MATERIALIZED="$TRUSTED_DIR/mutation.sh"' in content
+    assert 'cmp --silent "$CUSTOM" "$MATERIALIZED"' in content
+    assert 'MATERIALIZED="$GITHUB_WORKSPACE/pr/.ci/mutation.sh"' not in content
+    assert "publishes no supported trusted evidence; falling back to the central runner" in content
