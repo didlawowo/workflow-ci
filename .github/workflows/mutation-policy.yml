@@ -40,10 +40,6 @@ jobs:
       pull-requests: read
     runs-on: ${{ vars.UNTRUSTED_RUNNER || vars.RUNNER || format('arc-runner-{0}', github.event.repository.name) }}
     timeout-minutes: 45
-    env:
-      # ARC images may expose $HOME/.cache as read-only. Force uv's runtime
-      # cache into the writable per-job runner temp directory.
-      UV_CACHE_DIR: ${{ runner.temp }}/uv-cache
     outputs:
       required: ${{ steps.policy.outputs.required }}
       labels: ${{ steps.policy.outputs.labels }}
@@ -99,6 +95,14 @@ jobs:
             exit 1
           fi
           echo "Trusted mutation policy loaded from $MUTATION_FETCH_SHA without traversing submodules."
+
+      - name: Configure writable uv cache
+        shell: bash
+        run: |
+          set -euo pipefail
+          UV_CACHE="${RUNNER_TEMP:-/tmp}/uv-cache"
+          mkdir -p "$UV_CACHE"
+          echo "UV_CACHE_DIR=$UV_CACHE" >> "$GITHUB_ENV"
 
       - name: Install uv for policy and mutation helpers
         uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
@@ -390,10 +394,6 @@ jobs:
       pull-requests: read
     runs-on: ${{ inputs.trusted-runner || vars.RUNNER || format('arc-runner-{0}', github.event.repository.name) }}
     timeout-minutes: 10
-    env:
-      # Keep trusted verification independent from a potentially read-only
-      # runner HOME cache as well.
-      UV_CACHE_DIR: ${{ runner.temp }}/uv-cache
     outputs:
       artifact-name: ${{ steps.trusted-output.outputs.artifact-name }}
       report-file: ${{ steps.trusted-output.outputs.report-file }}
@@ -449,6 +449,14 @@ jobs:
             exit 1
           fi
           echo "Trusted mutation policy loaded from $MUTATION_FETCH_SHA without traversing submodules."
+
+      - name: Configure writable uv cache
+        shell: bash
+        run: |
+          set -euo pipefail
+          UV_CACHE="${RUNNER_TEMP:-/tmp}/uv-cache"
+          mkdir -p "$UV_CACHE"
+          echo "UV_CACHE_DIR=$UV_CACHE" >> "$GITHUB_ENV"
 
       - name: Install uv for verification helpers
         uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
