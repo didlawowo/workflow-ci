@@ -100,7 +100,7 @@ def test_checkout_retains_other_branch_commits_for_trusted_event_diffs(tmp_path)
     git(repo, 'commit', '-qm', 'event base')
     event_base = git(repo, 'rev-parse', 'HEAD')
 
-    git(repo, 'checkout', '-q', 'master')
+    git(repo, 'checkout', '-q', '--detach', head)
     result = checkout(tmp_path, head)
     assert result.returncode == 0, result.stderr
     workspace = tmp_path / 'workspace'
