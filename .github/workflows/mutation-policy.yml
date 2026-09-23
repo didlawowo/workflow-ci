@@ -627,6 +627,7 @@ jobs:
 
           uv run --no-project --python 3.12 python - "$REPORT" "$RESULTS" "$GITHUB_WORKSPACE/pr" "$GITHUB_WORKSPACE/.policy" "$BASE_SHA" "$HEAD_SHA" "$GITHUB_OUTPUT" <<'PY'
           import ast
+          import configparser
           import json
           import re
           import subprocess
