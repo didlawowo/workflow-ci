@@ -12,7 +12,12 @@ SCRIPT = ROOT / '.github/actions/go-quality-security/quality.sh'
 def run(tmp_path, operation, **overrides):
     output = tmp_path / 'outputs'
     output.write_text('')
-    env = {**os.environ, 'GITHUB_OUTPUT': str(output), 'RUNNER_TEMP': str(tmp_path / 'temp')}
+    env = {
+        **os.environ,
+        'GITHUB_OUTPUT': str(output),
+        'RUNNER_TEMP': str(tmp_path / 'temp'),
+        'WORKFLOW_CI_DISABLE_PREINSTALLED_TOOLS': 'true',
+    }
     env.update(overrides)
     process = subprocess.run(['bash', str(SCRIPT), operation], cwd=tmp_path, env=env,
                              capture_output=True, text=True, timeout=15)
