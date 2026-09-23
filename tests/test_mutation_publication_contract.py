@@ -136,3 +136,19 @@ def test_scoped_mutation_validator_imports_configparser(workflow):
     scoped = text.split(marker, 1)[1]
     validator = scoped.split("PY", 1)[1]
     assert "import configparser" in validator
+
+
+
+@pytest.mark.parametrize(
+    "workflow",
+    [
+        ROOT / ".github/workflows/mutation-policy.yml",
+        ROOT / "templates/forgejo/mutation-policy.yml",
+    ],
+)
+def test_capture_preserves_trusted_runner_mutation_diagnostics(workflow):
+    text = workflow.read_text()
+    marker = "Capture mutmut diagnostics"
+    capture = text.split(marker, 1)[1].split("- name:", 1)[0]
+    assert '[[ -s .quality/mutmut-results.txt ]]' in capture
+    assert "Preserving mutation diagnostics produced by the trusted runner" in capture
