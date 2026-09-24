@@ -100,6 +100,10 @@ on:
         required: false
       DOCKERHUB_TOKEN:
         required: false
+      SONAR_TOKEN:
+        required: false
+      SONAR_ROOT_CERT:
+        required: false
 
 concurrency:
   group: ci-v2-${{ github.repository }}-${{ github.head_ref || github.ref_name }}
@@ -117,6 +121,10 @@ jobs:
       tests-total: ${{ steps.python-tests.outputs.test-count || steps.go-tests.outputs.test-count || steps.node-tests.outputs.test-count }}
       tests-failed: ${{ steps.python-tests.outputs.tests-failed || steps.go-tests.outputs.tests-failed || steps.node-tests.outputs.tests-failed }}
       tests-skipped: ${{ steps.python-tests.outputs.tests-skipped || steps.go-tests.outputs.tests-skipped || steps.node-tests.outputs.tests-skipped }}
+      baseline-coverage-percentage: ${{ steps.coverage-compare.outputs.baseline-percentage }}
+      sonar-status: ${{ vars.SONAR_ENABLED == 'true' && steps.sonarqube.outcome || 'disabled' }}
+      sonar-project-url: ${{ steps.sonarqube.outputs.project-url }}
+      sonar-changed-lines-coverage: ${{ steps.sonarqube.outputs.changed-lines-coverage }}
     steps:
       - uses: $/.github/actions/checkout-source
         with:
@@ -173,6 +181,7 @@ jobs:
           upload-coverage: "false"
 
       - name: Compare with committed main coverage
+        id: coverage-compare
         if: github.event_name == 'pull_request' && (steps.python-tests.outputs.coverage-percentage != '' || steps.go-tests.outputs.coverage-percentage != '' || steps.node-tests.outputs.coverage-percentage != '')
         uses: $/.github/actions/coverage-baseline
         with:
@@ -180,6 +189,30 @@ jobs:
           coverage-percentage: ${{ steps.python-tests.outputs.coverage-percentage || steps.go-tests.outputs.coverage-percentage || steps.node-tests.outputs.coverage-percentage }}
           baseline-path: ${{ inputs.coverage-baseline-path }}
           base-sha: ${{ github.event.pull_request.base.sha }}
+
+      - name: Protect SonarQube analysis policy
+        if: vars.SONAR_ENABLED == 'true' && github.event_name == 'pull_request'
+        shell: bash
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          if git diff --name-only "$BASE_SHA...$HEAD_SHA" -- sonar-project.properties | grep -q .; then
+            echo "::error::sonar-project.properties is protected quality policy and cannot be changed by the same PR it evaluates."
+            exit 1
+          fi
+
+      - name: SonarQube quality gate
+        id: sonarqube
+        if: vars.SONAR_ENABLED == 'true'
+        uses: $/.github/actions/sonarqube-scan
+        with:
+          sonar-token: ${{ secrets.SONAR_TOKEN }}
+          sonar-root-cert: ${{ secrets.SONAR_ROOT_CERT }}
+          project-key: ${{ vars.SONAR_PROJECT_KEY }}
+          repo-type: ${{ inputs.repo-type }}
+          working-directory: ${{ inputs.working-directory }}
 
   quality:
     name: Quality & security
@@ -278,6 +311,66 @@ jobs:
           platforms: ${{ inputs.platforms }}
           native-multiarch: ${{ inputs.native-multiarch }}
           push: ${{ github.event_name != 'pull_request' }}
+
+  report:
+    name: Trusted quality report
+    if: always() && github.event_name == 'pull_request'
+    needs: [tests, quality, mutation]
+    runs-on: ${{ inputs.runner }}
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: read
+      pull-requests: write
+    steps:
+      - uses: $/.github/actions/checkout-source
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Materialize trusted mutation evidence
+        id: mutation-evidence
+        if: needs.mutation.outputs.required == 'true'
+        shell: bash
+        env:
+          REPORT_FILE: ${{ needs.mutation.outputs.report-file }}
+        run: |
+          set -euo pipefail
+          test -n "$REPORT_FILE"
+          mkdir -p .mutation-evidence
+          REPORT_B64_FILE="${RUNNER_TEMP:-/tmp}/ci-v2-mutation-${GITHUB_RUN_ID}.b64"
+          trap 'rm -f "$REPORT_B64_FILE"' EXIT
+          cat > "$REPORT_B64_FILE" <<'B64_REPORT'
+          ${{ needs.mutation.outputs.report-b64 }}
+          B64_REPORT
+          test -s "$REPORT_B64_FILE"
+          base64 -d "$REPORT_B64_FILE" > ".mutation-evidence/$REPORT_FILE"
+
+      - name: Publish trusted quality evidence
+        uses: $/.github/actions/quality-report
+        with:
+          junit-glob: "${{ runner.temp }}/ci-v2/no-junit.xml"
+          coverage-glob: "${{ runner.temp }}/ci-v2/no-coverage.xml"
+          coverage-percentage: ${{ needs.tests.outputs.coverage-percentage }}
+          base-coverage-percentage: ${{ needs.tests.outputs.baseline-coverage-percentage }}
+          changed-lines-coverage: ${{ needs.tests.outputs.sonar-changed-lines-coverage }}
+          quality-status: ${{ needs.quality.outputs.quality-passed }}
+          security-issues: ${{ needs.quality.outputs.security-issues }}
+          mutation-report: ${{ needs.mutation.outputs.report-file != '' && format('.mutation-evidence/{0}', needs.mutation.outputs.report-file) || '' }}
+          mutation-required: ${{ needs.mutation.outputs.required || 'unknown' }}
+          mutation-result: ${{ needs.mutation.result || 'unknown' }}
+          tests-total: ${{ needs.tests.outputs.tests-total }}
+          tests-failed: ${{ needs.tests.outputs.tests-failed }}
+          tests-skipped: ${{ needs.tests.outputs.tests-skipped }}
+          test-status: ${{ needs.tests.result }}
+          sonar-required: ${{ vars.SONAR_ENABLED == 'true' }}
+          sonar-status: ${{ needs.tests.outputs.sonar-status }}
+          sonar-project-url: ${{ needs.tests.outputs.sonar-project-url }}
+          base-sha: ${{ github.event.pull_request.base.sha }}
+          head-sha: ${{ github.event.pull_request.head.sha }}
+          github-token: ${{ github.token }}
+          comment: true
+          artifact-suffix: ci-v2
 
   commit-main-coverage:
     name: Commit main coverage baseline
