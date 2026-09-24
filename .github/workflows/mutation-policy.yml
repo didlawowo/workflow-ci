@@ -412,7 +412,7 @@ jobs:
             exit 1
           fi
 
-      - name: Export mutation evidence for trusted verification
+      - name: Expose raw mutation evidence
         id: inline-evidence
         if: always() && steps.policy.outputs.required == 'true' && steps.evidence.outputs.path != ''
         shell: bash
