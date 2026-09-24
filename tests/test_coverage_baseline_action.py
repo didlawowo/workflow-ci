@@ -120,3 +120,32 @@ def test_write_updates_baseline_once_per_source_commit(tmp_path):
     )
     assert second.returncode == 0
     assert "changed=false" in output
+
+
+
+def test_compare_allows_first_consumer_without_baseline(tmp_path):
+    repo = tmp_path / "repo-missing"
+    repo.mkdir()
+    subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+    subprocess.run(["git", "config", "user.name", "test"], cwd=repo, check=True)
+    subprocess.run(["git", "config", "user.email", "test@example.invalid"], cwd=repo, check=True)
+    (repo / "README.md").write_text("bootstrap\n", encoding="utf-8")
+    subprocess.run(["git", "add", "."], cwd=repo, check=True)
+    subprocess.run(["git", "commit", "-qm", "base without coverage"], cwd=repo, check=True)
+    base = git(repo, "rev-parse", "HEAD")
+
+    result, output = run_action(
+        repo, tmp_path, mode="compare", current="72.3", base_sha=base
+    )
+
+    assert result.returncode == 0, result.stderr + result.stdout
+    assert "Coverage baseline bootstrap" in result.stdout
+    assert "baseline-missing=true" in output
+    assert "baseline-percentage=" in output
+
+
+def test_compare_marks_existing_baseline_present(tmp_path):
+    repo, base = init_repo(tmp_path, "80.0")
+    result, output = run_action(repo, tmp_path, mode="compare", current="80.0", base_sha=base)
+    assert result.returncode == 0
+    assert "baseline-missing=false" in output
