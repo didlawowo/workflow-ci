@@ -640,18 +640,30 @@ jobs:
         shell: bash
         env:
           EVIDENCE_FILE: ${{ needs.mutation-run.outputs.evidence-file }}
-          EVIDENCE_B64: ${{ needs.mutation-run.outputs.evidence-b64 }}
-          RESULTS_B64: ${{ needs.mutation-run.outputs.results-b64 }}
         run: |
           set -euo pipefail
           test -n "$EVIDENCE_FILE"
-          test -n "$EVIDENCE_B64"
           mkdir -p .mutation-evidence
-          printf '%s' "$EVIDENCE_B64" | base64 -d > ".mutation-evidence/$EVIDENCE_FILE"
-          if [[ -n "$RESULTS_B64" ]]; then
-            printf '%s' "$RESULTS_B64" | base64 -d > .mutation-evidence/mutmut-results.txt
-          fi
 
+          EVIDENCE_B64_FILE="${RUNNER_TEMP:-/tmp}/mutation-evidence-${GITHUB_RUN_ID}.b64"
+          RESULTS_B64_FILE="${RUNNER_TEMP:-/tmp}/mutation-results-${GITHUB_RUN_ID}.b64"
+          trap 'rm -f "$EVIDENCE_B64_FILE" "$RESULTS_B64_FILE"' EXIT
+
+          cat > "$EVIDENCE_B64_FILE" <<'B64_EVIDENCE'
+${{ needs.mutation-run.outputs.evidence-b64 }}
+B64_EVIDENCE
+          if ! grep -q '[^[:space:]]' "$EVIDENCE_B64_FILE"; then
+            echo "::error::Mandatory mutation evidence output is empty."
+            exit 1
+          fi
+          base64 -d "$EVIDENCE_B64_FILE" > ".mutation-evidence/$EVIDENCE_FILE"
+
+          cat > "$RESULTS_B64_FILE" <<'B64_RESULTS'
+${{ needs.mutation-run.outputs.results-b64 }}
+B64_RESULTS
+          if grep -q '[^[:space:]]' "$RESULTS_B64_FILE"; then
+            base64 -d "$RESULTS_B64_FILE" > .mutation-evidence/mutmut-results.txt
+          fi
       - name: Validate mutation evidence for changed Python functions
         id: validate
         if: steps.policy.outputs.required == 'true'
