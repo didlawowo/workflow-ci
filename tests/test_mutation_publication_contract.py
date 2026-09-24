@@ -13,18 +13,18 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 @pytest.mark.parametrize(
-    "result,required,inline,report_b64,success",
+    "result,required,inline,report_present,success",
     [
-        ("success", "false", "skipped", "", True),
-        ("success", "true", "success", "e30=", True),
-        ("success", "true", "failure", "e30=", False),
-        ("success", "true", "success", "", False),
-        ("success", "", "skipped", "", False),
-        ("failure", "false", "skipped", "", False),
-        ("cancelled", "false", "success", "", False),
+        ("success", "false", "skipped", "false", True),
+        ("success", "true", "success", "true", True),
+        ("success", "true", "failure", "true", False),
+        ("success", "true", "success", "false", False),
+        ("success", "", "skipped", "false", False),
+        ("failure", "false", "skipped", "false", False),
+        ("cancelled", "false", "success", "false", False),
     ],
 )
-def test_publication_guard(result, required, inline, report_b64, success):
+def test_publication_guard(result, required, inline, report_present, success):
     data = yaml.safe_load((ROOT / ".github/workflows/quality-evidence.yml").read_text())
     steps = data["jobs"]["publish-evidence"]["steps"]
     guard = next(
@@ -37,7 +37,7 @@ def test_publication_guard(result, required, inline, report_b64, success):
             "MUTATION_RESULT": result,
             "MUTATION_REQUIRED": required,
             "INLINE_RESULT": inline,
-            "REPORT_B64": report_b64,
+            "REPORT_PRESENT": report_present,
         },
         check=False,
         capture_output=True,
@@ -53,7 +53,9 @@ def test_workflow_propagates_result_independently_and_publishes_missing_artifact
         s for s in steps if s.get("name") == "Publish trusted quality evidence"
     )
     assert materialize["if"] == "needs.mutation.outputs.required == 'true'"
-    assert materialize["env"]["REPORT_B64"] == "${{ needs.mutation.outputs.report-b64 }}"
+    assert "REPORT_B64" not in materialize.get("env", {})
+    assert "${{ needs.mutation.outputs.report-b64 }}" in materialize["run"]
+    assert "B64_REPORT" in materialize["run"]
     assert publisher["if"] == "always()"
     assert (
         publisher["with"]["mutation-result"]
@@ -67,6 +69,20 @@ def test_workflow_propagates_result_independently_and_publishes_missing_artifact
         "contents": "read",
         "actions": "read",
     }
+
+def test_mutation_policy_does_not_inject_large_base64_outputs_into_environment():
+    data = yaml.safe_load((ROOT / ".github/workflows/mutation-policy.yml").read_text())
+    steps = data["jobs"]["mutation-verify"]["steps"]
+    materialize = next(
+        s for s in steps if s.get("name") == "Materialize mutation evidence from job outputs"
+    )
+    env = materialize.get("env", {})
+    assert "EVIDENCE_B64" not in env
+    assert "RESULTS_B64" not in env
+    assert "${{ needs.mutation-run.outputs.evidence-b64 }}" in materialize["run"]
+    assert "${{ needs.mutation-run.outputs.results-b64 }}" in materialize["run"]
+    assert "B64_EVIDENCE" in materialize["run"]
+    assert "B64_RESULTS" in materialize["run"]
 
 
 @pytest.mark.parametrize(
