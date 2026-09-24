@@ -1,5 +1,5 @@
 name: "Trivy Filesystem Security Scan"
-description: "Comprehensive filesystem security scanning with Trivy (vuln, secrets, misconfig, licenses)"
+description: "Filesystem security scanning with Trivy (vuln, misconfig, licenses); secrets are handled by TruffleHog"
 
 inputs:
   scan-path:
@@ -11,9 +11,9 @@ inputs:
     required: false
     default: "CRITICAL,HIGH,MEDIUM"
   scanners:
-    description: "Trivy scanners to use (comma-separated)"
+    description: "Compatibility input; Trivy secret scanning is disabled because TruffleHog owns secret detection"
     required: false
-    default: "vuln,secret,misconfig,license"
+    default: "vuln,misconfig,license"
   fail-on-critical:
     description: "Fail workflow on critical vulnerabilities"
     required: false
@@ -28,7 +28,7 @@ outputs:
     description: "Number of vulnerabilities found"
     value: ${{ steps.analysis.outputs.vuln-count }}
   secrets-found:
-    description: "Number of secrets found"
+    description: "Deprecated compatibility output; Trivy secret scanning is disabled"
     value: ${{ steps.analysis.outputs.secret-count }}
   misconfigurations-found:
     description: "Number of misconfigurations found"
@@ -52,11 +52,39 @@ runs:
           echo "skip-setup=false" >> "$GITHUB_OUTPUT"
         fi
 
+    - name: Resolve Trivy cache
+      id: trivy-cache
+      shell: bash
+      run: |
+        set -euo pipefail
+        LOCAL_CACHE="${RUNNER_TEMP:-$GITHUB_WORKSPACE}/trivy-cache"
+        rm -rf "$LOCAL_CACHE"
+        mkdir -p "$LOCAL_CACHE"
+
+        SHARED_DB="${TRIVY_SHARED_DB_DIR:-}"
+        if [[ -n "$SHARED_DB" && -s "$SHARED_DB/db/trivy.db" && -s "$SHARED_DB/db/metadata.json" ]]; then
+          ln -s "$SHARED_DB/db" "$LOCAL_CACHE/db"
+          echo "shared-db=true" >> "$GITHUB_OUTPUT"
+          echo "action-cache=false" >> "$GITHUB_OUTPUT"
+          echo "Using read-only shared Trivy vulnerability DB: $SHARED_DB/db"
+        else
+          echo "shared-db=false" >> "$GITHUB_OUTPUT"
+          echo "action-cache=true" >> "$GITHUB_OUTPUT"
+          echo "Shared Trivy DB unavailable; using local DB cache"
+        fi
+        echo "path=$LOCAL_CACHE" >> "$GITHUB_OUTPUT"
     - name: Run Trivy vulnerability scan
       uses: aquasecurity/trivy-action@v0.36.0
+      env:
+        TRIVY_SKIP_VERSION_CHECK: "true"
+        TRIVY_CACHE_BACKEND: "memory"
+        TRIVY_SKIP_DB_UPDATE: ${{ steps.trivy-cache.outputs.shared-db == 'true' && 'true' || 'false' }}
       with:
         version: "v0.70.0"
         skip-setup-trivy: ${{ steps.trivy-runtime.outputs.skip-setup || 'false' }}
+        timeout: "15m"
+        cache: ${{ steps.trivy-cache.outputs.action-cache }}
+        cache-dir: ${{ steps.trivy-cache.outputs.path }}
         scan-type: "fs"
         scan-ref: ${{ inputs.scan-path }}
         format: "sarif"
@@ -67,24 +95,18 @@ runs:
         exit-code: 0
       continue-on-error: true
 
-    - name: Run Trivy secret detection
-      uses: aquasecurity/trivy-action@v0.36.0
-      with:
-        version: "v0.70.0"
-        skip-setup-trivy: ${{ steps.trivy-runtime.outputs.skip-setup || 'false' }}
-        scan-type: "fs"
-        scan-ref: ${{ inputs.scan-path }}
-        format: "sarif"
-        output: "trivy-fs-secrets.sarif"
-        scanners: "secret"
-        exit-code: 0
-      continue-on-error: true
-
     - name: Run Trivy misconfiguration scan
       uses: aquasecurity/trivy-action@v0.36.0
+      env:
+        TRIVY_SKIP_VERSION_CHECK: "true"
+        TRIVY_CACHE_BACKEND: "memory"
+        TRIVY_SKIP_DB_UPDATE: ${{ steps.trivy-cache.outputs.shared-db == 'true' && 'true' || 'false' }}
       with:
         version: "v0.70.0"
         skip-setup-trivy: ${{ steps.trivy-runtime.outputs.skip-setup || 'false' }}
+        timeout: "15m"
+        cache: ${{ steps.trivy-cache.outputs.action-cache }}
+        cache-dir: ${{ steps.trivy-cache.outputs.path }}
         scan-type: "fs"
         scan-ref: ${{ inputs.scan-path }}
         format: "sarif"
@@ -96,9 +118,16 @@ runs:
 
     - name: Run Trivy license scan
       uses: aquasecurity/trivy-action@v0.36.0
+      env:
+        TRIVY_SKIP_VERSION_CHECK: "true"
+        TRIVY_CACHE_BACKEND: "memory"
+        TRIVY_SKIP_DB_UPDATE: ${{ steps.trivy-cache.outputs.shared-db == 'true' && 'true' || 'false' }}
       with:
         version: "v0.70.0"
         skip-setup-trivy: ${{ steps.trivy-runtime.outputs.skip-setup || 'false' }}
+        timeout: "15m"
+        cache: ${{ steps.trivy-cache.outputs.action-cache }}
+        cache-dir: ${{ steps.trivy-cache.outputs.path }}
         scan-type: "fs"
         scan-ref: ${{ inputs.scan-path }}
         format: "sarif"
@@ -113,14 +142,6 @@ runs:
       with:
         sarif_file: "trivy-fs-vulnerabilities.sarif"
         category: "trivy-fs-vulnerabilities"
-      continue-on-error: true
-
-    - name: Upload secret detection results
-      uses: github/codeql-action/upload-sarif@v4
-      if: always()
-      with:
-        sarif_file: "trivy-fs-secrets.sarif"
-        category: "trivy-fs-secrets"
       continue-on-error: true
 
     - name: Upload misconfiguration results
@@ -142,14 +163,21 @@ runs:
     - name: Check for critical issues
       if: inputs.fail-on-critical == 'true'
       uses: aquasecurity/trivy-action@v0.36.0
+      env:
+        TRIVY_SKIP_VERSION_CHECK: "true"
+        TRIVY_CACHE_BACKEND: "memory"
+        TRIVY_SKIP_DB_UPDATE: ${{ steps.trivy-cache.outputs.shared-db == 'true' && 'true' || 'false' }}
       with:
         version: "v0.70.0"
         skip-setup-trivy: ${{ steps.trivy-runtime.outputs.skip-setup || 'false' }}
+        timeout: "15m"
+        cache: ${{ steps.trivy-cache.outputs.action-cache }}
+        cache-dir: ${{ steps.trivy-cache.outputs.path }}
         scan-type: "fs"
         scan-ref: ${{ inputs.scan-path }}
         format: "table"
         severity: "CRITICAL"
-        scanners: "vuln,secret"
+        scanners: "vuln"
         exit-code: 1
         ignore-unfixed: false
 
@@ -165,9 +193,8 @@ runs:
         if [ -f trivy-fs-vulnerabilities.sarif ]; then
           VULN_COUNT=$(jq '.runs[0].results | length' trivy-fs-vulnerabilities.sarif 2>/dev/null || echo 0)
         fi
-        if [ -f trivy-fs-secrets.sarif ]; then
-          SECRET_COUNT=$(jq '.runs[0].results | length' trivy-fs-secrets.sarif 2>/dev/null || echo 0)
-        fi
+        # Secret scanning is intentionally owned by TruffleHog.
+        SECRET_COUNT=0
         if [ -f trivy-fs-misconfig.sarif ]; then
           MISCONFIG_COUNT=$(jq '.runs[0].results | length' trivy-fs-misconfig.sarif 2>/dev/null || echo 0)
         fi

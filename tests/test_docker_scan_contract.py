@@ -347,9 +347,35 @@ def test_trivy_prefers_preinstalled_binary_with_portable_fallback():
     filesystem = (
         ROOT / ".github" / "actions" / "trivy-filesystem-scan" / "action.yml"
     ).read_text(encoding="utf-8")
-    assert filesystem.count("aquasecurity/trivy-action@v0.36.0") == 5
-    assert filesystem.count("skip-setup-trivy:") == 5
+    assert filesystem.count("aquasecurity/trivy-action@v0.36.0") == 4
+    assert filesystem.count("skip-setup-trivy:") == 4
+    assert filesystem.count('timeout: "15m"') == 4
+    assert filesystem.count('TRIVY_SKIP_VERSION_CHECK: "true"') == 4
+    assert 'scanners: "secret"' not in filesystem
+    assert 'scanners: "vuln,secret"' not in filesystem
+    assert 'TRIVY_CACHE_BACKEND: "memory"' in filesystem
+    assert "TRIVY_SKIP_DB_UPDATE:" in filesystem
+    assert "TRIVY_SHARED_DB_DIR" in filesystem
+    assert "TRIVY_SHARED_CACHE" not in filesystem
     assert "aquasecurity/trivy-action@master" not in filesystem
+
+
+def test_trivy_image_scan_uses_shared_db_with_memory_scan_cache():
+    scan = STEPS["Run Trivy vulnerability scanner"]
+    cache = STEPS["Resolve Trivy cache"]
+
+    assert 'timeout: "15m"' in scan
+    assert 'scanners: "vuln"' in scan
+    assert 'TRIVY_SKIP_VERSION_CHECK: "true"' in scan
+    assert 'TRIVY_CACHE_BACKEND: "memory"' in scan
+    assert "TRIVY_SKIP_DB_UPDATE:" in scan
+    assert 'TRIVY_SHARED_DB_DIR' in cache
+    assert 'ln -s "$SHARED_DB/db" "$LOCAL_CACHE/db"' in cache
+    assert 'action-cache=false' in cache
+    assert 'action-cache=true' in cache
+    assert 'TRIVY_SHARED_CACHE' not in cache
+    assert 'test -w "$TRIVY_CACHE_DIR"' not in cache
+
 
 
 def test_cosign_prefers_runner_binary_and_fallback_is_same_version():

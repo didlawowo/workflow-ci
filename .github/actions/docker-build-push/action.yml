@@ -489,10 +489,28 @@ runs:
           echo "skip-setup=false" >> "$GITHUB_OUTPUT"
         fi
 
-    # trivy-action restaure/sauvegarde déjà sa DB avec une clé quotidienne.
-    # Son entrée cache-dir pilote à la fois ce cache et TRIVY_CACHE_DIR : une
-    # variable env externe est écrasée. L'ancien second cache .trivy-cache
-    # pointait donc vers un répertoire absent et ne sauvegardait jamais rien.
+    - name: Resolve Trivy cache
+      id: trivy-cache
+      if: inputs.scan == 'true'
+      shell: bash
+      run: |
+        set -euo pipefail
+        LOCAL_CACHE="${RUNNER_TEMP:-$GITHUB_WORKSPACE}/trivy-cache"
+        rm -rf "$LOCAL_CACHE"
+        mkdir -p "$LOCAL_CACHE"
+
+        SHARED_DB="${TRIVY_SHARED_DB_DIR:-}"
+        if [[ -n "$SHARED_DB" && -s "$SHARED_DB/db/trivy.db" && -s "$SHARED_DB/db/metadata.json" ]]; then
+          ln -s "$SHARED_DB/db" "$LOCAL_CACHE/db"
+          echo "shared-db=true" >> "$GITHUB_OUTPUT"
+          echo "action-cache=false" >> "$GITHUB_OUTPUT"
+          echo "Using read-only shared Trivy vulnerability DB: $SHARED_DB/db"
+        else
+          echo "shared-db=false" >> "$GITHUB_OUTPUT"
+          echo "action-cache=true" >> "$GITHUB_OUTPUT"
+          echo "Shared Trivy DB unavailable; using local DB cache"
+        fi
+        echo "path=$LOCAL_CACHE" >> "$GITHUB_OUTPUT"
     - name: Prepare Trivy report
       if: inputs.scan == 'true'
       shell: bash
@@ -510,11 +528,16 @@ runs:
       env:
         # Plain-HTTP registry (registry-plain-http=true): allow non-TLS pulls.
         TRIVY_INSECURE: ${{ inputs.registry-plain-http == 'true' && 'true' || 'false' }}
+        TRIVY_SKIP_VERSION_CHECK: "true"
+        TRIVY_CACHE_BACKEND: "memory"
+        TRIVY_SKIP_DB_UPDATE: ${{ steps.trivy-cache.outputs.shared-db == 'true' && 'true' || 'false' }}
       with:
         version: "v0.70.0"
         skip-setup-trivy: ${{ steps.trivy-runtime.outputs.skip-setup || 'false' }}
-        cache: "true"
-        cache-dir: ${{ github.workspace }}/.cache/trivy
+        cache: ${{ steps.trivy-cache.outputs.action-cache }}
+        cache-dir: ${{ steps.trivy-cache.outputs.path }}
+        timeout: "15m"
+        scanners: "vuln"
         image-ref: ${{ steps.meta.outputs.full-name }}
         format: "sarif"
         output: ${{ steps.meta.outputs.sarif-file }}

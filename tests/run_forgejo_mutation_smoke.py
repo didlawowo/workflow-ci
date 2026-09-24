@@ -93,7 +93,7 @@ def test_real_engine_and_sandbox():
                           POLICY_TOKEN="credential-canary", FORGEJO_TOKEN="credential-canary",
                           GITHUB_TOKEN="credential-canary", GITHUB_OUTPUT=str(output))
         event = {"pull_request": {"number": 1, "user": {"login": "tester"},
-                 "labels": [{"name": "priority:high"}], "body": "",
+                 "labels": [{"name": "complexity:medium"}], "body": "",
                  "base": {"sha": base}, "head": {"sha": head, "repo": {"full_name": "test/consumer"}}}}
         adapter.prepare(event)
         values = dict(line.split("=", 1) for line in output.read_text().splitlines())

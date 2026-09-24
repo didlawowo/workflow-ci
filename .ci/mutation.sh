@@ -140,7 +140,8 @@ test -f mutants/mutmut-cicd-stats.json
 mkdir -p .quality
 RAW_RESULTS=".quality/mutmut-results.raw.txt"
 mutmut results > "$RAW_RESULTS" || true
-"$PYTHON" - "$RAW_RESULTS" mutants/mutmut-cicd-stats.json .quality/mutmut-results.txt <<'PY'
+"$PYTHON" - "$RAW_RESULTS" mutants/mutmut-cicd-stats.json .quality/mutmut-results.txt "${MUTATION_TARGETS[@]}" <<'PY'
+from fnmatch import fnmatchcase
 import json
 import re
 import sys
@@ -149,6 +150,12 @@ from pathlib import Path
 raw_path = Path(sys.argv[1])
 stats_path = Path(sys.argv[2])
 out_path = Path(sys.argv[3])
+target_patterns = tuple(sys.argv[4:])
+
+def in_scope(mutant_id: str) -> bool:
+    return not target_patterns or any(
+        fnmatchcase(mutant_id, pattern) for pattern in target_patterns
+    )
 
 stats = json.loads(stats_path.read_text(encoding="utf-8"))
 expected_total = int(stats.get("total", 0))
@@ -161,20 +168,28 @@ for line in raw_path.read_text(encoding="utf-8").splitlines():
     if not match:
         continue
     mutant_id, status = match.groups()
-    raw_statuses[mutant_id] = status.strip().replace(" ", "_")
+    if in_scope(mutant_id):
+        raw_statuses[mutant_id] = status.strip().replace(" ", "_")
 
 assignment_re = re.compile(r"mutants_[^\[]+\['([^']+__mutmut_\d+)'\]")
 all_mutants: set[str] = set()
 for source in Path("mutants").rglob("*.py"):
     relative = source.relative_to("mutants").with_suffix("")
     parts = list(relative.parts)
+    # Keep the registry IDs aligned with mutation_scope._module_name():
+    # Mutmut stores src-layout files under mutants/src/, but reports IDs
+    # without the leading "src." package prefix.
+    if parts and parts[0] == "src":
+        parts = parts[1:]
     if parts and parts[-1] == "__init__":
         parts = parts[:-1]
     module = ".".join(parts)
     if not module:
         continue
     for local_id in assignment_re.findall(source.read_text(encoding="utf-8")):
-        all_mutants.add(f"{module}.{local_id}")
+        mutant_id = f"{module}.{local_id}"
+        if in_scope(mutant_id):
+            all_mutants.add(mutant_id)
 
 if expected_total and len(all_mutants) != expected_total:
     raise SystemExit(

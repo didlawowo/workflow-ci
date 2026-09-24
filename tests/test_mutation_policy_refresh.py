@@ -171,7 +171,7 @@ def test_dependabot_high_risk_label_still_requires_mutation(monkeypatch, tmp_pat
             "number": 135,
             "changed_files": 2,
             "user": {"login": "dependabot[bot]"},
-            "labels": [{"name": "priority:high"}],
+            "labels": [{"name": "complexity:medium"}],
             "body": "",
         },
     }
@@ -188,7 +188,7 @@ def test_dependabot_high_risk_label_still_requires_mutation(monkeypatch, tmp_pat
     assert mutation_policy.classify(event) == 0
     rendered = output.read_text()
     assert "required=true" in rendered
-    assert "labels=priority:high" in rendered
+    assert "labels=complexity:medium" in rendered
 
 
 def test_dependabot_with_production_code_is_not_dependency_only(monkeypatch):
@@ -240,7 +240,7 @@ def test_python_production_change_requires_mutation_outside_src(monkeypatch, tmp
     assert mutation_policy.classify(event) == 0
     rendered = output.read_text()
     assert "required=true" in rendered
-    assert "labels=python-production-change" in rendered
+    assert "labels=complexity:medium(default),python-production-change" in rendered
 
 
 def test_root_python_production_change_requires_mutation(monkeypatch, tmp_path):
@@ -266,7 +266,7 @@ def test_root_python_production_change_requires_mutation(monkeypatch, tmp_path):
     assert mutation_policy.classify(event) == 0
     rendered = output.read_text()
     assert "required=true" in rendered
-    assert "labels=python-production-change" in rendered
+    assert "labels=complexity:medium(default),python-production-change" in rendered
 
 
 def test_go_production_change_requires_mutation_without_labels(monkeypatch, tmp_path):
@@ -296,7 +296,7 @@ def test_go_production_change_requires_mutation_without_labels(monkeypatch, tmp_
     assert mutation_policy.classify(event) == 0
     rendered = output.read_text()
     assert "required=true" in rendered
-    assert "labels=go-production-change" in rendered
+    assert "labels=complexity:medium(default),go-production-change" in rendered
 
 
 def test_tests_docs_and_workflows_do_not_auto_require_mutation(monkeypatch, tmp_path):
@@ -382,3 +382,170 @@ def test_dependabot_dependency_listing_paginates_before_exemption(monkeypatch):
 
     monkeypatch.setattr(mutation_policy, "_api_request", fake_api)
     assert not mutation_policy._dependabot_dependency_only(event)
+
+
+
+def test_explicit_low_skips_mutation_for_small_production_change(monkeypatch, tmp_path):
+    event = {
+        "number": 301,
+        "pull_request": {
+            "number": 301,
+            "changed_files": 1,
+            "user": {"login": "developer"},
+            "labels": [{"name": "complexity:low"}],
+            "body": "",
+        },
+    }
+
+    monkeypatch.setattr(
+        mutation_policy,
+        "_api_request",
+        lambda method, path, payload=None: [
+            {"filename": "src/service.py", "additions": 20, "deletions": 5}
+        ],
+    )
+    output = tmp_path / "output"
+    monkeypatch.setenv("GITHUB_OUTPUT", str(output))
+
+    assert mutation_policy.classify(event) == 0
+    rendered = output.read_text()
+    assert "required=false" in rendered
+    assert "labels=" in rendered
+
+
+def test_explicit_medium_requires_mutation_without_file_api(monkeypatch, tmp_path):
+    event = {
+        "number": 302,
+        "pull_request": {
+            "number": 302,
+            "changed_files": 1,
+            "user": {"login": "developer"},
+            "labels": [{"name": "complexity:medium"}],
+            "body": "",
+        },
+    }
+    monkeypatch.setattr(
+        mutation_policy,
+        "_api_request",
+        lambda method, path, payload=None: (_ for _ in ()).throw(
+            AssertionError((method, path, payload))
+        ),
+    )
+    output = tmp_path / "output"
+    monkeypatch.setenv("GITHUB_OUTPUT", str(output))
+
+    assert mutation_policy.classify(event) == 0
+    assert output.read_text() == "required=true\nlabels=complexity:medium\n"
+
+
+def test_priority_high_does_not_influence_mutation(monkeypatch, tmp_path):
+    event = {
+        "number": 303,
+        "pull_request": {
+            "number": 303,
+            "changed_files": 1,
+            "user": {"login": "developer"},
+            "labels": [{"name": "priority:high"}],
+            "body": "",
+        },
+    }
+    monkeypatch.setattr(
+        mutation_policy,
+        "_api_request",
+        lambda method, path, payload=None: [
+            {"filename": "docs/README.md", "additions": 20, "deletions": 1}
+        ],
+    )
+    output = tmp_path / "output"
+    monkeypatch.setenv("GITHUB_OUTPUT", str(output))
+
+    assert mutation_policy.classify(event) == 0
+    assert output.read_text() == "required=false\nlabels=\n"
+
+
+def test_large_production_diff_auto_promotes_low_to_high(monkeypatch, tmp_path):
+    event = {
+        "number": 304,
+        "pull_request": {
+            "number": 304,
+            "changed_files": 1,
+            "user": {"login": "developer"},
+            "labels": [{"name": "complexity:low"}],
+            "body": "",
+        },
+    }
+    monkeypatch.setattr(
+        mutation_policy,
+        "_api_request",
+        lambda method, path, payload=None: [
+            {"filename": "src/service.py", "additions": 501, "deletions": 0}
+        ],
+    )
+    output = tmp_path / "output"
+    monkeypatch.setenv("GITHUB_OUTPUT", str(output))
+
+    assert mutation_policy.classify(event) == 0
+    rendered = output.read_text()
+    assert "required=true" in rendered
+    assert "complexity:high" in rendered
+    assert "auto-high:lines>500" in rendered
+
+
+def test_many_production_files_auto_promote_to_high(monkeypatch, tmp_path):
+    files = [
+        {"filename": f"src/module_{index}.py", "additions": 1, "deletions": 0}
+        for index in range(16)
+    ]
+    event = {
+        "number": 305,
+        "pull_request": {
+            "number": 305,
+            "changed_files": len(files),
+            "user": {"login": "developer"},
+            "labels": [],
+            "body": "",
+        },
+    }
+    monkeypatch.setattr(
+        mutation_policy,
+        "_api_request",
+        lambda method, path, payload=None: files,
+    )
+    output = tmp_path / "output"
+    monkeypatch.setenv("GITHUB_OUTPUT", str(output))
+
+    assert mutation_policy.classify(event) == 0
+    rendered = output.read_text()
+    assert "required=true" in rendered
+    assert "complexity:high" in rendered
+    assert "auto-high:files>15" in rendered
+
+
+def test_node_production_change_defaults_to_medium(monkeypatch, tmp_path):
+    event = {
+        "number": 306,
+        "pull_request": {
+            "number": 306,
+            "changed_files": 2,
+            "user": {"login": "developer"},
+            "labels": [],
+            "body": "",
+        },
+    }
+    files = [
+        {"filename": "web/src/debug.ts", "additions": 12, "deletions": 2},
+        {"filename": "web/src/debug.test.ts", "additions": 30, "deletions": 0},
+    ]
+    monkeypatch.setattr(
+        mutation_policy,
+        "_api_request",
+        lambda method, path, payload=None: files,
+    )
+    output = tmp_path / "output"
+    monkeypatch.setenv("GITHUB_OUTPUT", str(output))
+
+    assert mutation_policy.classify(event) == 0
+    rendered = output.read_text()
+    assert "required=true" in rendered
+    assert "complexity:medium(default)" in rendered
+    assert "node-production-change" in rendered

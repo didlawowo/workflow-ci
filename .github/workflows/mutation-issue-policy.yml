@@ -20,8 +20,8 @@ jobs:
     if: >-
       github.event_name == 'issues' &&
       github.event.action == 'labeled' &&
-      (github.event.label.name == 'complexity:high' ||
-       github.event.label.name == 'priority:high')
+      (github.event.label.name == 'complexity:medium' ||
+       github.event.label.name == 'complexity:high')
     permissions:
       contents: read
       issues: write
@@ -51,8 +51,8 @@ jobs:
   refresh-linked-prs:
     if: >-
       github.event_name == 'issues' &&
-      (github.event.label.name == 'complexity:high' ||
-       github.event.label.name == 'priority:high')
+      (github.event.label.name == 'complexity:medium' ||
+       github.event.label.name == 'complexity:high')
     permissions:
       contents: read
       issues: read

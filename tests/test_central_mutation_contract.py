@@ -1,6 +1,7 @@
 """Behavioral regressions for mutation delegated by GitHub Manager and Forgejo."""
 import json
 import os
+import subprocess
 from pathlib import Path
 import sys
 from unittest.mock import Mock
@@ -147,3 +148,65 @@ def test_config_changes_are_rejected_before_git_or_execution(tmp_path, monkeypat
     with pytest.raises(ValueError, match='protected base'):
         contract.protect_config(base, head, 'a', 'b')
     run.assert_not_called()
+
+
+
+def test_mutmut_diagnostics_reconstruction_uses_exact_requested_scope(tmp_path):
+    script = (ROOT / ".ci" / "mutation.sh").read_text(encoding="utf-8")
+    marker = (
+        '"$PYTHON" - "$RAW_RESULTS" mutants/mutmut-cicd-stats.json '
+        '.quality/mutmut-results.txt "${MUTATION_TARGETS[@]}" <<\'PY\''
+    )
+    embedded = script.split(marker, 1)[1].split("\nPY\n", 1)[0].lstrip("\n")
+
+    mutants = tmp_path / "mutants"
+    source_dir = mutants / "src"
+    source_dir.mkdir(parents=True)
+    (source_dir / "service.py").write_text(
+        "\n".join(
+            [
+                "mutants_service['x_target__mutmut_1'] = None",
+                "mutants_service['x_target__mutmut_2'] = None",
+                "mutants_service['x_unrelated__mutmut_1'] = None",
+                "mutants_service['x_unrelated__mutmut_2'] = None",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    raw = tmp_path / "raw.txt"
+    raw.write_text("service.x_target__mutmut_2: survived\n", encoding="utf-8")
+    stats = mutants / "mutmut-cicd-stats.json"
+    stats.write_text(
+        json.dumps(
+            {
+                "total": 2,
+                "killed": 1,
+                "survived": 1,
+                "timeouts": 0,
+                "suspicious": 0,
+            }
+        ),
+        encoding="utf-8",
+    )
+    output = tmp_path / "results.txt"
+
+    subprocess.run(
+        [
+            sys.executable,
+            "-",
+            str(raw),
+            str(stats),
+            str(output),
+            "service.*target__mutmut_*",
+        ],
+        input=embedded,
+        text=True,
+        cwd=tmp_path,
+        check=True,
+    )
+
+    result = output.read_text(encoding="utf-8")
+    assert "service.x_target__mutmut_1: killed" in result
+    assert "service.x_target__mutmut_2: survived" in result
+    assert "unrelated" not in result
