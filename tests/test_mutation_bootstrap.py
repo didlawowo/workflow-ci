@@ -76,7 +76,7 @@ def _run_bootstrap(tmp_path: Path, *, venv_fails: bool = False, survives: bool =
         "HOME": str(tmp_path),
         "RUNNER_TEMP": str(runner_temp),
         "MUTATION_SCRIPT": str(mutation),
-        "MUTATION_POLICY_LABELS": "priority:high",
+        "MUTATION_POLICY_LABELS": "complexity:medium",
         "MUTMUT_LOG": str(mutmut_log),
         "FAKE_VENV_FAIL": "1" if venv_fails else "0",
         "FAKE_MUTMUT_SURVIVES": "1" if survives else "0",
