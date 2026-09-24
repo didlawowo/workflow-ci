@@ -606,3 +606,16 @@ def test_python_security_bandit_matches_medium_severity_gate():
 
     assert action.count("bandit -r ${{ inputs.bandit-paths }} -ll") == 2
     assert "-ll -f json -o bandit-report.json" in action
+
+
+def test_workflow_ci_main_has_self_release_caller():
+    root = Path(__file__).resolve().parents[1]
+    content = (root / ".github" / "workflows" / "release-main.yml").read_text()
+
+    assert "push:" in content
+    assert "branches: [main]" in content
+    assert "workflow_dispatch:" in content
+    assert "contents: write" in content
+    assert "uses: ./.github/workflows/release.yml" in content
+    assert "workflow-ci-ref: main" in content
+    assert "runs-on: arc-runner-workflow-ci" in content
