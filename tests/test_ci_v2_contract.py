@@ -53,3 +53,25 @@ def test_old_trusted_workflow_remains_available_during_migration():
     legacy_text = legacy.read_text(encoding="utf-8")
     assert "Independent quality execution" in legacy_text
     assert "mutation-policy.yml" in legacy_text
+
+
+
+def test_sonar_reuses_the_single_test_workspace_without_rerunning_tests():
+    tests = section("tests", "quality")
+    assert "Protect SonarQube analysis policy" in tests
+    assert "uses: $/.github/actions/sonarqube-scan" in tests
+    assert tests.count("run-python-tests") == 1
+    assert tests.count("run-go-tests") == 1
+    assert tests.count("run-node-tests") == 1
+
+
+def test_trusted_report_reuses_job_outputs_instead_of_executing_tests():
+    report = section("report", "commit-main-coverage")
+    assert "needs: [tests, quality, mutation]" in report
+    assert "uses: $/.github/actions/quality-report" in report
+    assert "needs.tests.outputs.coverage-percentage" in report
+    assert "needs.quality.outputs.quality-passed" in report
+    assert "needs.mutation.outputs.report-b64" in report
+    assert "run-python-tests" not in report
+    assert "run-go-tests" not in report
+    assert "run-node-tests" not in report
