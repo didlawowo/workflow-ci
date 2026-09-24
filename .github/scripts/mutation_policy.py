@@ -212,8 +212,33 @@ def _is_go_production_path(path: str) -> bool:
     return bool(parts) and parts[0] not in {"vendor", "testdata", "tests"}
 
 
+def _is_node_production_path(path: str) -> bool:
+    normalized = path.strip("/")
+    suffix = Path(normalized).suffix.lower()
+    if suffix not in {".js", ".jsx", ".ts", ".tsx"}:
+        return False
+    parts = Path(normalized).parts
+    if not parts:
+        return False
+    lowered = {part.lower() for part in parts}
+    if lowered.intersection(
+        {"tests", "test", "__tests__", "docs", "examples", "node_modules", "dist", "build"}
+    ):
+        return False
+    name = Path(normalized).name.lower()
+    return not (
+        ".test." in name
+        or ".spec." in name
+        or name.startswith("test_")
+    )
+
+
 def _is_supported_production_path(path: str) -> bool:
-    return _is_python_production_path(path) or _is_go_production_path(path)
+    return (
+        _is_python_production_path(path)
+        or _is_go_production_path(path)
+        or _is_node_production_path(path)
+    )
 
 
 def production_change_reasons(event: dict) -> tuple[str, ...]:
@@ -226,6 +251,8 @@ def production_change_reasons(event: dict) -> tuple[str, ...]:
         reasons.append("python-production-change")
     if any(_is_go_production_path(path) for path in files):
         reasons.append("go-production-change")
+    if any(_is_node_production_path(path) for path in files):
+        reasons.append("node-production-change")
     return tuple(reasons)
 
 
