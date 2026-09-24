@@ -489,10 +489,26 @@ runs:
           echo "skip-setup=false" >> "$GITHUB_OUTPUT"
         fi
 
-    # trivy-action restaure/sauvegarde déjà sa DB avec une clé quotidienne.
-    # Son entrée cache-dir pilote à la fois ce cache et TRIVY_CACHE_DIR : une
-    # variable env externe est écrasée. L'ancien second cache .trivy-cache
-    # pointait donc vers un répertoire absent et ne sauvegardait jamais rien.
+    - name: Resolve Trivy cache
+      id: trivy-cache
+      if: inputs.scan == 'true'
+      shell: bash
+      run: |
+        set -euo pipefail
+        if [[ "${TRIVY_SHARED_CACHE:-false}" == "true" && -n "${TRIVY_CACHE_DIR:-}" ]]; then
+          mkdir -p "$TRIVY_CACHE_DIR"
+          test -w "$TRIVY_CACHE_DIR"
+          echo "path=$TRIVY_CACHE_DIR" >> "$GITHUB_OUTPUT"
+          echo "action-cache=false" >> "$GITHUB_OUTPUT"
+          echo "Using shared Trivy cache: $TRIVY_CACHE_DIR"
+        else
+          LOCAL_CACHE="$GITHUB_WORKSPACE/.cache/trivy"
+          mkdir -p "$LOCAL_CACHE"
+          echo "path=$LOCAL_CACHE" >> "$GITHUB_OUTPUT"
+          echo "action-cache=true" >> "$GITHUB_OUTPUT"
+          echo "Using local Trivy cache: $LOCAL_CACHE"
+        fi
+
     - name: Prepare Trivy report
       if: inputs.scan == 'true'
       shell: bash
@@ -513,8 +529,9 @@ runs:
       with:
         version: "v0.70.0"
         skip-setup-trivy: ${{ steps.trivy-runtime.outputs.skip-setup || 'false' }}
-        cache: "true"
-        cache-dir: ${{ github.workspace }}/.cache/trivy
+        cache: ${{ steps.trivy-cache.outputs.action-cache }}
+        cache-dir: ${{ steps.trivy-cache.outputs.path }}
+        scanners: "vuln"
         image-ref: ${{ steps.meta.outputs.full-name }}
         format: "sarif"
         output: ${{ steps.meta.outputs.sarif-file }}
