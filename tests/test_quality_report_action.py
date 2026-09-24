@@ -58,3 +58,22 @@ def test_absent_scanner_output_still_publishes_mutation_failure(tmp_path, scan_e
     assert "mutation-execution" in report["gate"]["failures"]
     assert report["security"]["scan_errors"] == int(scan_errors or "0")
     assert "FAIL" in (tmp_path / ".quality/quality-report.md").read_text()
+
+
+
+def test_quality_report_resolves_a_writable_uv_cache():
+    action_path = ROOT / ".github/actions/quality-report/action.yml"
+    action = yaml.safe_load(action_path.read_text())
+    steps = action["runs"]["steps"]
+    resolver = next(
+        step for step in steps if step["name"] == "Resolve writable uv cache for quality reporter"
+    )
+    command = resolver["run"]
+
+    assert 'REQUESTED="${UV_CACHE_DIR:-}"' in command
+    assert 'FALLBACK="${RUNNER_TEMP:-/tmp}/uv-cache"' in command
+    assert 'echo "UV_CACHE_DIR=$CACHE" >> "$GITHUB_ENV"' in command
+
+    installer = next(step for step in steps if step["name"] == "Install uv for quality reporter")
+    assert installer["with"]["cache-local-path"] == "${{ steps.uv-cache.outputs.path }}"
+    assert installer["with"]["prune-cache"] is False
