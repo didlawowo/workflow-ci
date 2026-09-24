@@ -102,6 +102,28 @@ inputs:
 runs:
   using: "composite"
   steps:
+    - name: Resolve writable uv cache for quality reporter
+      id: uv-cache
+      shell: bash
+      run: |
+        set -euo pipefail
+        REQUESTED="${UV_CACHE_DIR:-}"
+        FALLBACK="${RUNNER_TEMP:-/tmp}/uv-cache"
+        CACHE="$FALLBACK"
+
+        if [[ -n "$REQUESTED" ]]; then
+          mkdir -p "$REQUESTED" 2>/dev/null || true
+          PROBE="$REQUESTED/.workflow-ci-write-test-$"
+          if ( : > "$PROBE" ) 2>/dev/null; then
+            rm -f "$PROBE"
+            CACHE="$REQUESTED"
+          fi
+        fi
+
+        mkdir -p "$CACHE"
+        echo "path=$CACHE" >> "$GITHUB_OUTPUT"
+        echo "UV_CACHE_DIR=$CACHE" >> "$GITHUB_ENV"
+
     - name: Detect preinstalled uv for quality reporter
       id: uv-runtime
       shell: bash
@@ -119,6 +141,8 @@ runs:
       with:
         version: "latest"
         enable-cache: false
+        cache-local-path: ${{ steps.uv-cache.outputs.path }}
+        prune-cache: false
 
     - name: Provision quality reporter Python
       shell: bash
