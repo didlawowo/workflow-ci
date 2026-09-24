@@ -1,0 +1,353 @@
+name: CI v2
+
+on:
+  workflow_call:
+    inputs:
+      repo-type:
+        description: "python, go, node/typescript/javascript"
+        required: true
+        type: string
+      runner:
+        description: "Runner label"
+        required: true
+        type: string
+      working-directory:
+        required: false
+        type: string
+        default: "."
+      coverage-threshold:
+        required: false
+        type: string
+        default: ""
+      coverage-baseline-path:
+        required: false
+        type: string
+        default: ".ci/coverage-main.json"
+      python-version:
+        required: false
+        type: string
+        default: "3.12"
+      python-source-path:
+        required: false
+        type: string
+        default: "src"
+      python-test-command:
+        required: false
+        type: string
+        default: ""
+      go-version:
+        required: false
+        type: string
+        default: "1.24"
+      node-version:
+        required: false
+        type: string
+        default: "22"
+      package-manager:
+        required: false
+        type: string
+        default: "npm"
+      docker-enabled:
+        required: false
+        type: boolean
+        default: false
+      docker-on-pr:
+        required: false
+        type: boolean
+        default: false
+      image-name:
+        required: false
+        type: string
+        default: ""
+      image-tag:
+        required: false
+        type: string
+        default: "ci"
+      dockerfile:
+        required: false
+        type: string
+        default: "Dockerfile"
+      dockerfile-target:
+        required: false
+        type: string
+        default: ""
+      docker-context:
+        required: false
+        type: string
+        default: "."
+      registry:
+        required: false
+        type: string
+        default: ""
+      registry-plain-http:
+        required: false
+        type: boolean
+        default: false
+      platforms:
+        required: false
+        type: string
+        default: "linux/amd64"
+      native-multiarch:
+        required: false
+        type: boolean
+        default: false
+    secrets:
+      OCI_USERNAME:
+        required: false
+      OCI_PASSWORD:
+        required: false
+      DOCKERHUB_USERNAME:
+        required: false
+      DOCKERHUB_TOKEN:
+        required: false
+
+concurrency:
+  group: ci-v2-${{ github.repository }}-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
+
+jobs:
+  tests:
+    name: Tests & coverage
+    runs-on: ${{ inputs.runner }}
+    timeout-minutes: 25
+    permissions:
+      contents: read
+    outputs:
+      coverage-percentage: ${{ steps.python-tests.outputs.coverage-percentage || steps.go-tests.outputs.coverage-percentage || steps.node-tests.outputs.coverage-percentage }}
+      tests-total: ${{ steps.python-tests.outputs.test-count || steps.go-tests.outputs.test-count || steps.node-tests.outputs.test-count }}
+      tests-failed: ${{ steps.python-tests.outputs.tests-failed || steps.go-tests.outputs.tests-failed || steps.node-tests.outputs.tests-failed }}
+      tests-skipped: ${{ steps.python-tests.outputs.tests-skipped || steps.go-tests.outputs.tests-skipped || steps.node-tests.outputs.tests-skipped }}
+    steps:
+      - uses: $/.github/actions/checkout-source
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Resolve coverage threshold
+        id: threshold
+        shell: bash
+        run: |
+          set -euo pipefail
+          VALUE="${{ inputs.coverage-threshold }}"
+          if [[ -z "$VALUE" ]]; then
+            case "${{ inputs.repo-type }}" in
+              python) VALUE="30" ;;
+              go) VALUE="15" ;;
+              *) VALUE="0" ;;
+            esac
+          fi
+          echo "value=$VALUE" >> "$GITHUB_OUTPUT"
+
+      - name: Run Python tests once
+        id: python-tests
+        if: inputs.repo-type == 'python'
+        uses: $/.github/actions/run-python-tests
+        with:
+          python-version: ${{ inputs.python-version }}
+          working-directory: ${{ inputs.working-directory }}
+          test-command: ${{ inputs.python-test-command }}
+          coverage-threshold: ${{ steps.threshold.outputs.value }}
+          coverage-source: ${{ inputs.python-source-path }}
+          upload-coverage: "false"
+          fail-on-coverage: "true"
+
+      - name: Run Go tests once
+        id: go-tests
+        if: inputs.repo-type == 'go'
+        uses: $/.github/actions/run-go-tests
+        with:
+          go-version: ${{ inputs.go-version }}
+          working-directory: ${{ inputs.working-directory }}
+          coverage-threshold: ${{ steps.threshold.outputs.value }}
+          upload-coverage: "false"
+          fail-on-coverage: "true"
+
+      - name: Run Node tests once
+        id: node-tests
+        if: inputs.repo-type == 'node' || inputs.repo-type == 'typescript' || inputs.repo-type == 'javascript'
+        uses: $/.github/actions/run-node-tests
+        with:
+          node-version: ${{ inputs.node-version }}
+          package-manager: ${{ inputs.package-manager }}
+          working-directory: ${{ inputs.working-directory }}
+          upload-coverage: "false"
+
+      - name: Compare with committed main coverage
+        if: github.event_name == 'pull_request' && (steps.python-tests.outputs.coverage-percentage != '' || steps.go-tests.outputs.coverage-percentage != '' || steps.node-tests.outputs.coverage-percentage != '')
+        uses: $/.github/actions/coverage-baseline
+        with:
+          mode: compare
+          coverage-percentage: ${{ steps.python-tests.outputs.coverage-percentage || steps.go-tests.outputs.coverage-percentage || steps.node-tests.outputs.coverage-percentage }}
+          baseline-path: ${{ inputs.coverage-baseline-path }}
+          base-sha: ${{ github.event.pull_request.base.sha }}
+
+  quality:
+    name: Quality & security
+    runs-on: ${{ inputs.runner }}
+    timeout-minutes: 25
+    permissions:
+      contents: read
+      actions: read
+      security-events: write
+    outputs:
+      quality-passed: ${{ steps.python-quality.outputs.quality-passed || steps.go-quality.outputs.quality-passed || steps.node-quality.outputs.quality-passed }}
+      security-issues: ${{ steps.python-quality.outputs.security-issues || steps.go-quality.outputs.security-issues || steps.node-quality.outputs.security-issues }}
+    steps:
+      - uses: $/.github/actions/checkout-source
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Python quality
+        id: python-quality
+        if: inputs.repo-type == 'python'
+        uses: $/.github/actions/python-quality-security
+        with:
+          python-version: ${{ inputs.python-version }}
+          working-directory: ${{ inputs.working-directory }}
+          bandit-paths: ${{ inputs.python-source-path }}
+
+      - name: Go quality
+        id: go-quality
+        if: inputs.repo-type == 'go'
+        uses: $/.github/actions/go-quality-security
+        with:
+          go-version: ${{ inputs.go-version }}
+          working-directory: ${{ inputs.working-directory }}
+          upload-sarif: "false"
+
+      - name: Node quality
+        id: node-quality
+        if: inputs.repo-type == 'node' || inputs.repo-type == 'typescript' || inputs.repo-type == 'javascript'
+        uses: $/.github/actions/node-quality-security
+        with:
+          node-version: ${{ inputs.node-version }}
+          package-manager: ${{ inputs.package-manager }}
+          working-directory: ${{ inputs.working-directory }}
+
+      - name: Enforce quality
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "${{ steps.python-quality.outputs.quality-passed || steps.go-quality.outputs.quality-passed || steps.node-quality.outputs.quality-passed }}" = "true"
+          test "${{ steps.python-quality.outputs.security-issues || steps.go-quality.outputs.security-issues || steps.node-quality.outputs.security-issues }}" = "0"
+
+  mutation:
+    name: Mutation
+    if: github.event_name == 'pull_request'
+    permissions:
+      contents: read
+      actions: read
+      issues: read
+      pull-requests: read
+    uses: $/.github/workflows/mutation-policy.yml
+    with:
+      scope-key: ${{ format('ci-v2-{0}', inputs.repo-type) }}
+      trusted-runner: ${{ inputs.runner }}
+
+  docker:
+    name: Docker build & scan
+    if: inputs.docker-enabled && (github.event_name != 'pull_request' || inputs.docker-on-pr)
+    runs-on: ${{ inputs.runner }}
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      actions: read
+      security-events: write
+      pull-requests: write
+    steps:
+      - uses: $/.github/actions/checkout-source
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Build and scan image
+        uses: $/.github/actions/docker-build-push
+        with:
+          image-name: ${{ inputs.image-name }}
+          image-tag: ${{ inputs.image-tag }}
+          dockerfile: ${{ inputs.dockerfile }}
+          dockerfile-target: ${{ inputs.dockerfile-target }}
+          context: ${{ inputs.docker-context }}
+          registry: ${{ inputs.registry }}
+          registry-plain-http: ${{ inputs.registry-plain-http }}
+          registry-username: ${{ secrets.OCI_USERNAME }}
+          registry-password: ${{ secrets.OCI_PASSWORD }}
+          dockerhub-username: ${{ secrets.DOCKERHUB_USERNAME }}
+          dockerhub-token: ${{ secrets.DOCKERHUB_TOKEN }}
+          platforms: ${{ inputs.platforms }}
+          native-multiarch: ${{ inputs.native-multiarch }}
+          push: ${{ github.event_name != 'pull_request' }}
+
+  commit-main-coverage:
+    name: Commit main coverage baseline
+    if: github.event_name == 'push' && github.ref_name == 'main' && needs.tests.result == 'success' && needs.tests.outputs.coverage-percentage != ''
+    needs: [tests]
+    runs-on: ${{ inputs.runner }}
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Write baseline
+        id: baseline
+        uses: $/.github/actions/coverage-baseline
+        with:
+          mode: write
+          coverage-percentage: ${{ needs.tests.outputs.coverage-percentage }}
+          baseline-path: ${{ inputs.coverage-baseline-path }}
+          source-sha: ${{ github.sha }}
+
+      - name: Commit baseline
+        if: steps.baseline.outputs.changed == 'true'
+        shell: bash
+        env:
+          BASELINE_PATH: ${{ inputs.coverage-baseline-path }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -- "$BASELINE_PATH"
+          git commit -m "chore(ci): update main coverage baseline [skip ci]"
+          git push origin HEAD:main
+
+  summary:
+    name: CI decision
+    if: always()
+    needs: [tests, quality, mutation, docker]
+    runs-on: ${{ inputs.runner }}
+    timeout-minutes: 5
+    steps:
+      - name: Enforce required gates
+        shell: bash
+        run: |
+          set -euo pipefail
+          FAILED=0
+          [[ "${{ needs.tests.result }}" == "success" ]] || FAILED=1
+          [[ "${{ needs.quality.result }}" == "success" ]] || FAILED=1
+
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            [[ "${{ needs.mutation.result }}" == "success" ]] || FAILED=1
+          fi
+
+          if [[ "${{ inputs.docker-enabled }}" == "true" ]]; then
+            if [[ "${{ github.event_name }}" != "pull_request" || "${{ inputs.docker-on-pr }}" == "true" ]]; then
+              [[ "${{ needs.docker.result }}" == "success" ]] || FAILED=1
+            fi
+          fi
+
+          {
+            echo "## CI v2"
+            echo
+            echo "| Gate | Result |"
+            echo "|---|---|"
+            echo "| Tests / coverage | ${{ needs.tests.result }} |"
+            echo "| Quality / security | ${{ needs.quality.result }} |"
+            echo "| Mutation | ${{ needs.mutation.result }} |"
+            echo "| Docker | ${{ needs.docker.result }} |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          exit "$FAILED"
