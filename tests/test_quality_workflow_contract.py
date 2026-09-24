@@ -115,7 +115,7 @@ def test_mutation_policy_separates_untrusted_execution_from_trusted_verification
     assert "job.workflow_repository" in content
     assert "job.workflow_sha" in content
     assert "needs: [mutation-run]" in content
-    assert "Expose raw mutation evidence" in content
+    assert "Expose trusted mutation evidence" in content
     assert "report-b64" in content
     assert "continue-on-error: true" in content
 
