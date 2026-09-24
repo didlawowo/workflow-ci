@@ -110,6 +110,7 @@ runs:
     - name: Retain local GoSec evidence
       if: always() && hashFiles(format('{0}/gosec-results.sarif', inputs.working-directory)) != ''
       uses: actions/upload-artifact@v6
+      continue-on-error: true
       with:
         name: gosec-results-${{ github.job }}-${{ hashFiles(format('{0}/go.mod', inputs.working-directory)) }}
         path: ${{ inputs.working-directory }}/gosec-results.sarif
