@@ -191,7 +191,26 @@ runs:
         if [[ "${{ inputs.comment }}" == "true" ]]; then
           ARGS+=(--comment)
         fi
-        uv run --no-project --python 3.12 python "$SCRIPT" "${ARGS[@]}"
+        LOG_FILE="${RUNNER_TEMP:-/tmp}/quality-reporter-${GITHUB_RUN_ID}.log"
+        trap 'rm -f "$LOG_FILE"' EXIT
+        for attempt in 1 2 3; do
+          : > "$LOG_FILE"
+          set +e
+          uv run --no-project --python 3.12 python "$SCRIPT" "${ARGS[@]}" 2>&1 | tee "$LOG_FILE"
+          rc=${PIPESTATUS[0]}
+          set -e
+          if [[ "$rc" -eq 0 ]]; then
+            exit 0
+          fi
+          if [[ "$attempt" -lt 3 ]] && grep -Eiq \\
+            'HTTP Error (429|5[0-9]{2})|URLError|TimeoutError|temporary failure in name resolution|name or service not known|timed out' \\
+            "$LOG_FILE"; then
+            echo "::warning::Transient quality reporter transport failure; retrying (attempt $((attempt + 1))/3)."
+            sleep "$attempt"
+            continue
+          fi
+          exit "$rc"
+        done
 
     - name: Upload quality evidence
       if: always()
