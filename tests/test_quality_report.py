@@ -271,6 +271,20 @@ class QualityReportTests(unittest.TestCase):
             1,
         )
 
+    def test_api_json_uses_retry_transport_and_decodes_payload(self):
+        response = io.BytesIO(b'{"ok": true}')
+
+        with patch.object(
+            quality_report, "_urlopen_with_retry", return_value=response
+        ) as mocked:
+            result = quality_report._api_json("https://api.github.com/example", "token")
+
+        self.assertEqual(result, {"ok": True})
+        request = mocked.call_args.args[0]
+        self.assertEqual(request.full_url, "https://api.github.com/example")
+        self.assertEqual(request.headers["Authorization"], "Bearer token")
+        self.assertEqual(request.headers["Accept"], "application/vnd.github+json")
+
     def test_transient_github_api_errors_are_retried(self):
         request = quality_report.urllib.request.Request("https://api.github.com/test")
         transient = quality_report.urllib.error.URLError("temporary dns failure")
