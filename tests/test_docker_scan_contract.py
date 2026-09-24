@@ -192,6 +192,7 @@ def test_native_remote_buildkit_retries_once_and_then_fails_closed():
     assert "steps.build.outcome == 'failure'" in retry
     assert "builder: native" in retry
     assert "steps.build-retry.outcome != 'success'" in enforce
+    assert "failure()" in enforce
     assert "failed twice" in enforce
     assert "steps.build.outputs.digest || steps.build-retry.outputs.digest" in TEXT
 
