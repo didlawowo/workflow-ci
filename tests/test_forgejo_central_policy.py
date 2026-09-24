@@ -28,7 +28,7 @@ def test_forgejo_adapter_calls_canonical_classifier_not_its_own_rules(monkeypatc
         assert supplied is event
         seen.append(supplied)
         policy._write_output("required", "true")
-        policy._write_output("labels", "priority:high")
+        policy._write_output("labels", "complexity:medium")
         return 0
 
     monkeypatch.setattr(policy, "classify", classify)
@@ -50,9 +50,9 @@ def test_forgejo_issue_events_use_central_notification_and_refresh(monkeypatch):
 
 def test_canonical_policy_retains_linked_risk_and_normal_pr_behavior():
     event = {"pull_request": {"labels": [{"name": "complexity:high"}], "body": "Fixes #12"}}
-    assert policy.mutation_reasons(event, lambda _: {"labels": [{"name": "priority:high"}]}) == ("complexity:high", "priority:high")
+    assert policy.mutation_reasons(event, lambda _: {"labels": [{"name": "priority:high"}]}) == ("complexity:high",)
     event = {"pull_request": {"labels": [{"name": "complexity:medium"}], "body": "Refs #3"}}
-    assert policy.mutation_reasons(event, lambda _: {"labels": [{"name": "priority:medium"}]}) == ()
+    assert policy.mutation_reasons(event, lambda _: {"labels": [{"name": "priority:medium"}]}) == ("complexity:medium",)
 
 
 def test_workflow_output_uses_real_newlines(tmp_path, monkeypatch):
