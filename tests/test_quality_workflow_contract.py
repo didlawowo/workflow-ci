@@ -90,8 +90,9 @@ def test_forgejo_filters_irrelevant_edits_and_isolates_noop_concurrency():
     mutation_verify = content.split("  mutation-verify:", 1)[1]
 
     assert "github.run_id" in header
+    assert "github.event.label.name == 'complexity:medium'" in header
     assert "github.event.label.name == 'complexity:high'" in header
-    assert "github.event.label.name == 'priority:high'" in header
+    assert "github.event.label.name == 'priority:high'" not in header
     assert "github.event.changes.body != null" in header
     assert "github.event.changes.body != null" in mutation_run
     assert "github.event.changes.body != null" in mutation_verify
