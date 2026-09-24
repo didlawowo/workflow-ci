@@ -1,0 +1,17 @@
+name: Release workflow-ci
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    uses: ./.github/workflows/release.yml
+    with:
+      workflow-ci-ref: main
+      runs-on: arc-runner-workflow-ci
+    secrets: inherit
