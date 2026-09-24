@@ -122,6 +122,7 @@ jobs:
       tests-failed: ${{ steps.python-tests.outputs.tests-failed || steps.go-tests.outputs.tests-failed || steps.node-tests.outputs.tests-failed }}
       tests-skipped: ${{ steps.python-tests.outputs.tests-skipped || steps.go-tests.outputs.tests-skipped || steps.node-tests.outputs.tests-skipped }}
       baseline-coverage-percentage: ${{ steps.coverage-compare.outputs.baseline-percentage }}
+      coverage-baseline-missing: ${{ steps.coverage-compare.outputs.baseline-missing }}
       sonar-status: ${{ vars.SONAR_ENABLED == 'true' && steps.sonarqube.outcome || 'disabled' }}
       sonar-project-url: ${{ steps.sonarqube.outputs.project-url }}
       sonar-changed-lines-coverage: ${{ steps.sonarqube.outputs.changed-lines-coverage }}
@@ -405,7 +406,10 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -- "$BASELINE_PATH"
           git commit -m "chore(ci): update main coverage baseline [skip ci]"
-          git push origin HEAD:main
+          if ! git push origin HEAD:main; then
+            echo "::error title=Coverage baseline push blocked::Cannot commit '$BASELINE_PATH' to protected main. Grant github-actions[bot] (or the workflow GitHub App) bypass for this baseline update, or provision the baseline before enabling CI v2."
+            exit 1
+          fi
 
   summary:
     name: CI decision
@@ -438,6 +442,7 @@ jobs:
             echo "| Gate | Result |"
             echo "|---|---|"
             echo "| Tests / coverage | ${{ needs.tests.result }} |"
+            echo "| Coverage baseline | ${{ needs.tests.outputs.coverage-baseline-missing == 'true' && 'bootstrap pending' || 'present' }} |"
             echo "| Quality / security | ${{ needs.quality.result }} |"
             echo "| Mutation | ${{ needs.mutation.result }} |"
             echo "| Docker | ${{ needs.docker.result }} |"
