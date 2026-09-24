@@ -27,7 +27,7 @@ def test_tests_execute_once_per_language_and_compare_protected_main_baseline():
 def test_quality_mutation_and_docker_are_parallel_to_tests():
     quality = section("quality", "mutation")
     mutation = section("mutation", "docker")
-    docker = section("docker", "commit-main-coverage")
+    docker = section("docker", "report")
 
     assert "\n    needs:" not in quality
     assert "\n    needs:" not in mutation
