@@ -353,6 +353,10 @@ def test_trivy_prefers_preinstalled_binary_with_portable_fallback():
     assert filesystem.count('TRIVY_SKIP_VERSION_CHECK: "true"') == 4
     assert 'scanners: "secret"' not in filesystem
     assert 'scanners: "vuln,secret"' not in filesystem
+    assert 'TRIVY_CACHE_BACKEND: "memory"' in filesystem
+    assert "TRIVY_SKIP_DB_UPDATE:" in filesystem
+    assert "TRIVY_SHARED_DB_DIR" in filesystem
+    assert "TRIVY_SHARED_CACHE" not in filesystem
     assert "aquasecurity/trivy-action@master" not in filesystem
 
 
