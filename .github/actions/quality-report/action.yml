@@ -191,7 +191,7 @@ runs:
         if [[ "${{ inputs.comment }}" == "true" ]]; then
           ARGS+=(--comment)
         fi
-        LOG_FILE="${RUNNER_TEMP:-/tmp}/quality-reporter-${GITHUB_RUN_ID}.log"
+        LOG_FILE="${RUNNER_TEMP:-/tmp}/quality-reporter-${GITHUB_RUN_ID:-local}.log"
         trap 'rm -f "$LOG_FILE"' EXIT
         for attempt in 1 2 3; do
           : > "$LOG_FILE"
