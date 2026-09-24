@@ -346,9 +346,27 @@ def test_trivy_prefers_preinstalled_binary_with_portable_fallback():
     filesystem = (
         ROOT / ".github" / "actions" / "trivy-filesystem-scan" / "action.yml"
     ).read_text(encoding="utf-8")
-    assert filesystem.count("aquasecurity/trivy-action@v0.36.0") == 5
-    assert filesystem.count("skip-setup-trivy:") == 5
+    assert filesystem.count("aquasecurity/trivy-action@v0.36.0") == 4
+    assert filesystem.count("skip-setup-trivy:") == 4
+    assert filesystem.count('timeout: "15m"') == 4
+    assert filesystem.count('TRIVY_SKIP_VERSION_CHECK: "true"') == 4
+    assert 'scanners: "secret"' not in filesystem
+    assert 'scanners: "vuln,secret"' not in filesystem
     assert "aquasecurity/trivy-action@master" not in filesystem
+
+
+def test_trivy_image_scan_uses_shared_cache_contract_and_extended_timeout():
+    scan = STEPS["Run Trivy vulnerability scanner"]
+    cache = STEPS["Resolve Trivy cache"]
+
+    assert 'timeout: "15m"' in scan
+    assert 'scanners: "vuln"' in scan
+    assert 'TRIVY_SKIP_VERSION_CHECK: "true"' in scan
+    assert 'TRIVY_SHARED_CACHE' in cache
+    assert 'TRIVY_CACHE_DIR' in cache
+    assert 'action-cache=false' in cache
+    assert 'action-cache=true' in cache
+
 
 
 def test_cosign_prefers_runner_binary_and_fallback_is_same_version():
