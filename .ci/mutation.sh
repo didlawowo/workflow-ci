@@ -154,7 +154,7 @@ stats = json.loads(stats_path.read_text(encoding="utf-8"))
 expected_total = int(stats.get("total", 0))
 expected_killed = int(stats.get("killed", 0))
 
-status_re = re.compile(r"^\\s*(\\S+):\\s+([a-z_ ]+)\\s*$")
+status_re = re.compile(r"^\s*(\S+):\s+([a-z_ ]+)\s*$")
 raw_statuses: dict[str, str] = {}
 for line in raw_path.read_text(encoding="utf-8").splitlines():
     match = status_re.match(line)
@@ -163,7 +163,7 @@ for line in raw_path.read_text(encoding="utf-8").splitlines():
     mutant_id, status = match.groups()
     raw_statuses[mutant_id] = status.strip().replace(" ", "_")
 
-assignment_re = re.compile(r"mutants_[^\\[]+\\['([^']+__mutmut_\\d+)'\\]")
+assignment_re = re.compile(r"mutants_[^\[]+\['([^']+__mutmut_\d+)'\]")
 all_mutants: set[str] = set()
 for source in Path("mutants").rglob("*.py"):
     relative = source.relative_to("mutants").with_suffix("")
