@@ -495,20 +495,22 @@ runs:
       shell: bash
       run: |
         set -euo pipefail
-        if [[ "${TRIVY_SHARED_CACHE:-false}" == "true" && -n "${TRIVY_CACHE_DIR:-}" ]]; then
-          mkdir -p "$TRIVY_CACHE_DIR"
-          test -w "$TRIVY_CACHE_DIR"
-          echo "path=$TRIVY_CACHE_DIR" >> "$GITHUB_OUTPUT"
-          echo "action-cache=false" >> "$GITHUB_OUTPUT"
-          echo "Using shared Trivy cache: $TRIVY_CACHE_DIR"
-        else
-          LOCAL_CACHE="$GITHUB_WORKSPACE/.cache/trivy"
-          mkdir -p "$LOCAL_CACHE"
-          echo "path=$LOCAL_CACHE" >> "$GITHUB_OUTPUT"
-          echo "action-cache=true" >> "$GITHUB_OUTPUT"
-          echo "Using local Trivy cache: $LOCAL_CACHE"
-        fi
+        LOCAL_CACHE="${RUNNER_TEMP:-$GITHUB_WORKSPACE}/trivy-cache"
+        rm -rf "$LOCAL_CACHE"
+        mkdir -p "$LOCAL_CACHE"
 
+        SHARED_DB="${TRIVY_SHARED_DB_DIR:-}"
+        if [[ -n "$SHARED_DB" && -s "$SHARED_DB/db/trivy.db" && -s "$SHARED_DB/db/metadata.json" ]]; then
+          ln -s "$SHARED_DB/db" "$LOCAL_CACHE/db"
+          echo "shared-db=true" >> "$GITHUB_OUTPUT"
+          echo "action-cache=false" >> "$GITHUB_OUTPUT"
+          echo "Using read-only shared Trivy vulnerability DB: $SHARED_DB/db"
+        else
+          echo "shared-db=false" >> "$GITHUB_OUTPUT"
+          echo "action-cache=true" >> "$GITHUB_OUTPUT"
+          echo "Shared Trivy DB unavailable; using local DB cache"
+        fi
+        echo "path=$LOCAL_CACHE" >> "$GITHUB_OUTPUT"
     - name: Prepare Trivy report
       if: inputs.scan == 'true'
       shell: bash
@@ -527,6 +529,8 @@ runs:
         # Plain-HTTP registry (registry-plain-http=true): allow non-TLS pulls.
         TRIVY_INSECURE: ${{ inputs.registry-plain-http == 'true' && 'true' || 'false' }}
         TRIVY_SKIP_VERSION_CHECK: "true"
+        TRIVY_CACHE_BACKEND: "memory"
+        TRIVY_SKIP_DB_UPDATE: ${{ steps.trivy-cache.outputs.shared-db == 'true' && 'true' || 'false' }}
       with:
         version: "v0.70.0"
         skip-setup-trivy: ${{ steps.trivy-runtime.outputs.skip-setup || 'false' }}
