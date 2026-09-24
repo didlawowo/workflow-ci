@@ -202,6 +202,7 @@ runs:
 
     - name: Upload test artifacts
       uses: actions/upload-artifact@v6
+      continue-on-error: true
       if: always()
       with:
         name: node-test-results

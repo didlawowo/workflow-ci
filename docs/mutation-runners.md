@@ -19,3 +19,13 @@ runner when needed. No mutation threshold or evidence check is relaxed.
 
 Existing published tags are unchanged. Consumers pinned to an older tag
 only receive the fix through a maintainer-published release containing it.
+
+## ARC runner image contract
+
+The workflow fast paths target the ARC worker image declared by `.arc-runner-version`.
+For this release the contract is **v1.3.3**. The image deployment itself is owned by
+`continuous-delivery`; workflow-ci only declares the expected toolchain and keeps
+portable fallbacks for tools such as Trivy, Cosign and TruffleHog.
+
+Do not update the cluster runner image implicitly from this repository. Validate the
+workflow-ci release first, then update or roll back the ARC image in continuous-delivery.

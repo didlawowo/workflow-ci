@@ -130,6 +130,10 @@ def test_quality_reporter_does_not_depend_on_consumer_python_tooling():
     assert "uv run --no-project --python 3.12 python" in content
     assert "include-hidden-files: true" in content
     assert '--output-json "$GITHUB_WORKSPACE/.quality/quality-report.json"' in content
+    assert "for attempt in 1 2 3" in content
+    assert "HTTP Error (429|5[0-9]{2})" in content
+    assert "Transient quality reporter transport failure" in content
+    assert "HTTP Error 403" not in content
 
 
 def test_mutation_policy_does_not_turn_non_body_pr_edits_into_missing_evidence():

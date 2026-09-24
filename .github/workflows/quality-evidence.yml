@@ -305,14 +305,20 @@ jobs:
         shell: bash
         env:
           REPORT_FILE: ${{ needs.mutation.outputs.report-file }}
-          REPORT_B64: ${{ needs.mutation.outputs.report-b64 }}
         run: |
           set -euo pipefail
           test -n "$REPORT_FILE"
-          test -n "$REPORT_B64"
           mkdir -p .mutation-evidence
-          printf '%s' "$REPORT_B64" | base64 -d > ".mutation-evidence/$REPORT_FILE"
-
+          REPORT_B64_FILE="${RUNNER_TEMP:-/tmp}/trusted-mutation-${GITHUB_RUN_ID}.b64"
+          trap 'rm -f "$REPORT_B64_FILE"' EXIT
+          cat > "$REPORT_B64_FILE" <<'B64_REPORT'
+          ${{ needs.mutation.outputs.report-b64 }}
+          B64_REPORT
+          if ! grep -q '[^[:space:]]' "$REPORT_B64_FILE"; then
+            echo "::error::Trusted mutation report output is empty."
+            exit 1
+          fi
+          base64 -d "$REPORT_B64_FILE" > ".mutation-evidence/$REPORT_FILE"
       - name: Publish trusted quality evidence
         if: always()
         uses: $/.github/actions/quality-report
@@ -352,14 +358,14 @@ jobs:
           MUTATION_RESULT: ${{ needs.mutation.result }}
           MUTATION_REQUIRED: ${{ needs.mutation.outputs.required }}
           INLINE_RESULT: ${{ steps.mutation-evidence-inline.outcome }}
-          REPORT_B64: ${{ needs.mutation.outputs.report-b64 }}
+          REPORT_PRESENT: ${{ needs.mutation.outputs.report-b64 != '' }}
         run: |
           set -euo pipefail
           test "$MUTATION_RESULT" = success
           case "$MUTATION_REQUIRED" in
             true)
               test "$INLINE_RESULT" = success
-              test -n "$REPORT_B64"
+              test "$REPORT_PRESENT" = true
               ;;
             false) ;;
             *) echo '::error::Mutation classification is missing'; exit 1 ;;

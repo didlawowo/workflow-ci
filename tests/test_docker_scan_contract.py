@@ -170,15 +170,30 @@ def test_prepare_removes_stale_report_without_error_on_first_use(tmp_path, conte
 @pytest.mark.parametrize(
     "name",
     [
-        "Build and push Docker image",
         "Prepare Trivy report",
         "Run Trivy vulnerability scanner",
         "Analyze scan results",
-        "Upload scan artifacts",
     ],
 )
-def test_required_steps_cannot_swallow_failures(name):
+def test_required_scan_steps_cannot_swallow_failures(name):
     assert "continue-on-error:" not in STEPS[name]
+
+
+def test_diagnostic_scan_artifact_is_best_effort():
+    assert "continue-on-error: true" in STEPS["Upload scan artifacts"]
+
+
+def test_native_remote_buildkit_retries_once_and_then_fails_closed():
+    primary = STEPS["Build and push Docker image"]
+    retry = STEPS["Retry native remote BuildKit once"]
+    enforce = STEPS["Enforce native Docker build result"]
+
+    assert "continue-on-error: ${{ inputs.native-multiarch == 'true' }}" in primary
+    assert "steps.build.outcome == 'failure'" in retry
+    assert "builder: native" in retry
+    assert "steps.build-retry.outcome != 'success'" in enforce
+    assert "failed twice" in enforce
+    assert "steps.build.outputs.digest || steps.build-retry.outputs.digest" in TEXT
 
 
 @pytest.mark.parametrize(

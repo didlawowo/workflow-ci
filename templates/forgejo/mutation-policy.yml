@@ -422,6 +422,7 @@ jobs:
       - name: Upload untrusted mutation evidence
         if: always() && steps.policy.outputs.required == 'true' && steps.evidence.outputs.path != ''
         uses: actions/upload-artifact@v6
+        continue-on-error: true
         with:
           name: mutation-evidence-${{ github.run_id }}
           path: |
@@ -956,6 +957,7 @@ jobs:
       - name: Upload scoped mutation evidence
         if: always() && steps.policy.outputs.required == 'true' && steps.validate.outcome == 'success'
         uses: actions/upload-artifact@v6
+        continue-on-error: true
         with:
           name: scoped-mutation-evidence-${{ github.run_id }}
           path: ${{ steps.validate.outputs.path }}
