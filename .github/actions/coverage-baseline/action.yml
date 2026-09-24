@@ -1,0 +1,118 @@
+name: "Coverage baseline"
+description: "Compare PR coverage against the baseline committed on protected main, or write a new main baseline"
+
+inputs:
+  mode:
+    description: "compare or write"
+    required: true
+  coverage-percentage:
+    description: "Current coverage percentage"
+    required: true
+  baseline-path:
+    description: "Repository-relative baseline JSON path"
+    required: false
+    default: ".ci/coverage-main.json"
+  base-sha:
+    description: "Protected base commit used for comparison"
+    required: false
+    default: ""
+  source-sha:
+    description: "Source commit represented by a written baseline"
+    required: false
+    default: ""
+
+outputs:
+  baseline-percentage:
+    description: "Coverage percentage stored on main"
+    value: ${{ steps.baseline.outputs.baseline-percentage }}
+  delta:
+    description: "Current minus baseline percentage"
+    value: ${{ steps.baseline.outputs.delta }}
+  changed:
+    description: "Whether write mode changed the baseline file"
+    value: ${{ steps.baseline.outputs.changed }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Compare or write coverage baseline
+      id: baseline
+      shell: bash
+      env:
+        MODE: ${{ inputs.mode }}
+        CURRENT: ${{ inputs.coverage-percentage }}
+        BASELINE_PATH: ${{ inputs.baseline-path }}
+        BASE_SHA: ${{ inputs.base-sha }}
+        SOURCE_SHA: ${{ inputs.source-sha }}
+      run: |
+        set -euo pipefail
+        case "$MODE" in
+          compare)
+            test -n "$BASE_SHA"
+            TMP="${RUNNER_TEMP:-/tmp}/coverage-main-${GITHUB_RUN_ID}.json"
+            if ! git show "$BASE_SHA:$BASELINE_PATH" > "$TMP"; then
+              echo "::error::Coverage baseline '$BASELINE_PATH' is missing from protected base $BASE_SHA."
+              exit 1
+            fi
+            python3 - "$TMP" "$CURRENT" "$GITHUB_OUTPUT" <<'PY'
+        import json
+        import sys
+        from decimal import Decimal, InvalidOperation
+
+        path, current_raw, output = sys.argv[1:]
+        data = json.load(open(path, encoding="utf-8"))
+        try:
+            baseline = Decimal(str(data["coverage_percentage"]))
+            current = Decimal(current_raw)
+        except (KeyError, InvalidOperation) as exc:
+            raise SystemExit(f"invalid coverage baseline: {exc}")
+
+        delta = current - baseline
+        with open(output, "a", encoding="utf-8") as handle:
+            handle.write(f"baseline-percentage={baseline}\n")
+            handle.write(f"delta={delta}\n")
+            handle.write("changed=false\n")
+
+        if current < baseline:
+            raise SystemExit(
+                f"::error::Coverage decreased from {baseline}% on main to {current}% on the PR."
+            )
+        print(f"Coverage preserved: {baseline}% -> {current}% ({delta:+}%)")
+        PY
+            ;;
+          write)
+            test -n "$SOURCE_SHA"
+            mkdir -p "$(dirname "$BASELINE_PATH")"
+            TMP="${RUNNER_TEMP:-/tmp}/coverage-baseline-new-${GITHUB_RUN_ID}.json"
+            python3 - "$CURRENT" "$SOURCE_SHA" > "$TMP" <<'PY'
+        import json
+        import sys
+
+        coverage, source_sha = sys.argv[1:]
+        print(
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "source_sha": source_sha,
+                    "coverage_percentage": coverage,
+                },
+                indent=2,
+                sort_keys=True,
+            )
+        )
+        PY
+            printf '\n' >> "$TMP"
+            if [[ -f "$BASELINE_PATH" ]] && cmp -s "$TMP" "$BASELINE_PATH"; then
+              echo "changed=false" >> "$GITHUB_OUTPUT"
+            else
+              mv "$TMP" "$BASELINE_PATH"
+              echo "changed=true" >> "$GITHUB_OUTPUT"
+            fi
+            echo "baseline-percentage=$CURRENT" >> "$GITHUB_OUTPUT"
+            echo "delta=0" >> "$GITHUB_OUTPUT"
+            ;;
+          *)
+            echo "::error::Unsupported coverage baseline mode '$MODE'."
+            exit 1
+            ;;
+        esac
