@@ -190,6 +190,7 @@ runs:
 
     - name: Upload reports
       uses: actions/upload-artifact@v6
+      continue-on-error: true
       if: always()
       with:
         name: python-quality-reports
