@@ -25,6 +25,18 @@ def test_quality_evidence_cancels_stale_caller_revisions():
     assert "cancel-in-progress: true" in header
 
 
+def test_quality_report_publisher_concurrency_is_scoped_per_consumer():
+    content = WORKFLOW.read_text()
+    publisher = content.split("  publish-evidence:", 1)[1]
+
+    assert (
+        "group: quality-report-${{ github.repository }}-"
+        "${{ github.event.pull_request.number || github.ref_name }}-"
+        "${{ inputs.repo-type }}-${{ inputs.working-directory }}"
+    ) in publisher
+    assert "cancel-in-progress: false" in publisher
+
+
 def test_quality_evidence_requires_explicit_runner_and_same_commit_actions():
     content = WORKFLOW.read_text()
 
