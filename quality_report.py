@@ -9,7 +9,6 @@ import glob
 import json
 import os
 import subprocess
-import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -421,31 +420,6 @@ def diff_stats(base: str | None, head: str | None) -> dict[str, Any]:
     }
 
 
-def _urlopen_with_retry(
-    request: urllib.request.Request,
-    *,
-    timeout: float = 20,
-    attempts: int = 3,
-) -> Any:
-    """Retry only transient transport/server failures; permission errors stay fatal."""
-    last_error: BaseException | None = None
-    for attempt in range(1, attempts + 1):
-        try:
-            return urllib.request.urlopen(request, timeout=timeout)
-        except urllib.error.HTTPError as exc:
-            last_error = exc
-            if exc.code != 429 and exc.code < 500:
-                raise
-        except (urllib.error.URLError, TimeoutError) as exc:
-            last_error = exc
-
-        if attempt < attempts:
-            time.sleep(0.5 * attempt)
-
-    assert last_error is not None
-    raise last_error
-
-
 def _api_json(url: str, token: str) -> Any:
     request = urllib.request.Request(
         url,
@@ -455,7 +429,7 @@ def _api_json(url: str, token: str) -> Any:
             "X-GitHub-Api-Version": "2022-11-28",
         },
     )
-    with _urlopen_with_retry(request) as response:
+    with urllib.request.urlopen(request, timeout=20) as response:
         return json.loads(response.read().decode("utf-8"))
 
 
@@ -918,7 +892,7 @@ def upsert_comment(
         },
     )
     try:
-        with _urlopen_with_retry(request):
+        with urllib.request.urlopen(request, timeout=20):
             pass
     except urllib.error.HTTPError as exc:
         response_body = exc.read().decode("utf-8", errors="replace").strip()
