@@ -650,8 +650,8 @@ jobs:
           trap 'rm -f "$EVIDENCE_B64_FILE" "$RESULTS_B64_FILE"' EXIT
 
           cat > "$EVIDENCE_B64_FILE" <<'B64_EVIDENCE'
-${{ needs.mutation-run.outputs.evidence-b64 }}
-B64_EVIDENCE
+          ${{ needs.mutation-run.outputs.evidence-b64 }}
+          B64_EVIDENCE
           if ! grep -q '[^[:space:]]' "$EVIDENCE_B64_FILE"; then
             echo "::error::Mandatory mutation evidence output is empty."
             exit 1
@@ -659,8 +659,8 @@ B64_EVIDENCE
           base64 -d "$EVIDENCE_B64_FILE" > ".mutation-evidence/$EVIDENCE_FILE"
 
           cat > "$RESULTS_B64_FILE" <<'B64_RESULTS'
-${{ needs.mutation-run.outputs.results-b64 }}
-B64_RESULTS
+          ${{ needs.mutation-run.outputs.results-b64 }}
+          B64_RESULTS
           if grep -q '[^[:space:]]' "$RESULTS_B64_FILE"; then
             base64 -d "$RESULTS_B64_FILE" > .mutation-evidence/mutmut-results.txt
           fi
