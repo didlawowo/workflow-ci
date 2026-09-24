@@ -312,8 +312,8 @@ jobs:
           REPORT_B64_FILE="${RUNNER_TEMP:-/tmp}/trusted-mutation-${GITHUB_RUN_ID}.b64"
           trap 'rm -f "$REPORT_B64_FILE"' EXIT
           cat > "$REPORT_B64_FILE" <<'B64_REPORT'
-${{ needs.mutation.outputs.report-b64 }}
-B64_REPORT
+          ${{ needs.mutation.outputs.report-b64 }}
+          B64_REPORT
           if ! grep -q '[^[:space:]]' "$REPORT_B64_FILE"; then
             echo "::error::Trusted mutation report output is empty."
             exit 1
