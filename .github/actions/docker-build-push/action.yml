@@ -454,7 +454,7 @@ runs:
         provenance: ${{ inputs.provenance == 'true' && 'mode=max' || 'false' }}
 
     - name: Enforce native Docker build result
-      if: inputs.native-multiarch == 'true' && steps.build.outcome == 'failure' && steps.build-retry.outcome != 'success'
+      if: failure() && inputs.native-multiarch == 'true' && steps.build.outcome == 'failure' && steps.build-retry.outcome != 'success'
       shell: bash
       run: |
         echo "::error::Remote BuildKit build failed twice; refusing to hide a persistent build failure."
