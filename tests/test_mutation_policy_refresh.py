@@ -171,7 +171,7 @@ def test_dependabot_high_risk_label_still_requires_mutation(monkeypatch, tmp_pat
             "number": 135,
             "changed_files": 2,
             "user": {"login": "dependabot[bot]"},
-            "labels": [{"name": "priority:high"}],
+            "labels": [{"name": "complexity:medium"}],
             "body": "",
         },
     }
@@ -188,7 +188,7 @@ def test_dependabot_high_risk_label_still_requires_mutation(monkeypatch, tmp_pat
     assert mutation_policy.classify(event) == 0
     rendered = output.read_text()
     assert "required=true" in rendered
-    assert "labels=priority:high" in rendered
+    assert "labels=complexity:medium" in rendered
 
 
 def test_dependabot_with_production_code_is_not_dependency_only(monkeypatch):
