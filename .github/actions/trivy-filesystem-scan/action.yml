@@ -72,9 +72,12 @@ runs:
         fi
     - name: Run Trivy vulnerability scan
       uses: aquasecurity/trivy-action@v0.36.0
+      env:
+        TRIVY_SKIP_VERSION_CHECK: "true"
       with:
         version: "v0.70.0"
         skip-setup-trivy: ${{ steps.trivy-runtime.outputs.skip-setup || 'false' }}
+        timeout: "15m"
         cache: ${{ steps.trivy-cache.outputs.action-cache }}
         cache-dir: ${{ steps.trivy-cache.outputs.path }}
         scan-type: "fs"
@@ -89,9 +92,12 @@ runs:
 
     - name: Run Trivy misconfiguration scan
       uses: aquasecurity/trivy-action@v0.36.0
+      env:
+        TRIVY_SKIP_VERSION_CHECK: "true"
       with:
         version: "v0.70.0"
         skip-setup-trivy: ${{ steps.trivy-runtime.outputs.skip-setup || 'false' }}
+        timeout: "15m"
         cache: ${{ steps.trivy-cache.outputs.action-cache }}
         cache-dir: ${{ steps.trivy-cache.outputs.path }}
         scan-type: "fs"
@@ -105,9 +111,12 @@ runs:
 
     - name: Run Trivy license scan
       uses: aquasecurity/trivy-action@v0.36.0
+      env:
+        TRIVY_SKIP_VERSION_CHECK: "true"
       with:
         version: "v0.70.0"
         skip-setup-trivy: ${{ steps.trivy-runtime.outputs.skip-setup || 'false' }}
+        timeout: "15m"
         cache: ${{ steps.trivy-cache.outputs.action-cache }}
         cache-dir: ${{ steps.trivy-cache.outputs.path }}
         scan-type: "fs"
@@ -145,9 +154,12 @@ runs:
     - name: Check for critical issues
       if: inputs.fail-on-critical == 'true'
       uses: aquasecurity/trivy-action@v0.36.0
+      env:
+        TRIVY_SKIP_VERSION_CHECK: "true"
       with:
         version: "v0.70.0"
         skip-setup-trivy: ${{ steps.trivy-runtime.outputs.skip-setup || 'false' }}
+        timeout: "15m"
         cache: ${{ steps.trivy-cache.outputs.action-cache }}
         cache-dir: ${{ steps.trivy-cache.outputs.path }}
         scan-type: "fs"
