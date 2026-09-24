@@ -386,21 +386,22 @@ def classify(event: dict) -> int:
             event,
             lambda number: _api_request("GET", f"issues/{number}") or {},
         )
-        production = production_change_reasons(event)
-        automatic = automatic_complexity_reasons(event)
-
-        if "changed-files-unverified" in production or "changed-files-unverified" in automatic:
-            reasons = ("changed-files-unverified",)
-        elif automatic:
-            reasons = ("complexity:high", *automatic, *production)
-        elif explicit == ("complexity:low",):
-            reasons = ()
-        elif explicit:
-            reasons = (*explicit, *production)
-        elif production:
-            reasons = ("complexity:medium(default)", *production)
+        if explicit in {("complexity:medium",), ("complexity:high",)}:
+            reasons = explicit
         else:
-            reasons = ()
+            production = production_change_reasons(event)
+            automatic = automatic_complexity_reasons(event)
+
+            if "changed-files-unverified" in production or "changed-files-unverified" in automatic:
+                reasons = ("changed-files-unverified",)
+            elif automatic:
+                reasons = ("complexity:high", *automatic, *production)
+            elif explicit == ("complexity:low",):
+                reasons = ()
+            elif production:
+                reasons = ("complexity:medium(default)", *production)
+            else:
+                reasons = ()
 
     required = bool(reasons)
     _write_output("required", "true" if required else "false")
