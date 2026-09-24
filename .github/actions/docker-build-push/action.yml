@@ -639,6 +639,7 @@ runs:
     - name: Upload scan artifacts
       if: ${{ !cancelled() && inputs.scan == 'true' && (steps.trivy.outcome == 'success' || steps.trivy.outcome == 'failure') }}
       uses: actions/upload-artifact@v6
+      continue-on-error: true
       with:
         name: ${{ steps.meta.outputs.artifact-name }}
         path: ${{ steps.meta.outputs.sarif-file }}
