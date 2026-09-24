@@ -305,6 +305,23 @@ class QualityReportTests(unittest.TestCase):
         self.assertEqual(mocked.call_count, 1)
         sleep.assert_not_called()
 
+    def test_api_json_builds_authenticated_request_and_decodes_json(self):
+        url = "https://api.github.com/repos/example/repo"
+        response = io.BytesIO(b'{"ok": true, "count": 2}')
+
+        with patch.object(
+            quality_report, "_urlopen_with_retry", return_value=response
+        ) as mocked:
+            result = quality_report._api_json(url, "secret-token")
+
+        self.assertEqual(result, {"ok": True, "count": 2})
+        mocked.assert_called_once()
+        request = mocked.call_args.args[0]
+        self.assertEqual(request.full_url, url)
+        self.assertEqual(request.get_header("Accept"), "application/vnd.github+json")
+        self.assertEqual(request.get_header("Authorization"), "Bearer secret-token")
+        self.assertEqual(request.get_header("X-github-api-version"), "2022-11-28")
+
     def test_upsert_comment_fails_closed_on_forbidden_write(self):
         report = {
             "schema_version": 1,
