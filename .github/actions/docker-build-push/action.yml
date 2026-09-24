@@ -526,11 +526,13 @@ runs:
       env:
         # Plain-HTTP registry (registry-plain-http=true): allow non-TLS pulls.
         TRIVY_INSECURE: ${{ inputs.registry-plain-http == 'true' && 'true' || 'false' }}
+        TRIVY_SKIP_VERSION_CHECK: "true"
       with:
         version: "v0.70.0"
         skip-setup-trivy: ${{ steps.trivy-runtime.outputs.skip-setup || 'false' }}
         cache: ${{ steps.trivy-cache.outputs.action-cache }}
         cache-dir: ${{ steps.trivy-cache.outputs.path }}
+        timeout: "15m"
         scanners: "vuln"
         image-ref: ${{ steps.meta.outputs.full-name }}
         format: "sarif"
