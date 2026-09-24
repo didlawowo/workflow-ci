@@ -75,3 +75,15 @@ def test_trusted_report_reuses_job_outputs_instead_of_executing_tests():
     assert "run-python-tests" not in report
     assert "run-go-tests" not in report
     assert "run-node-tests" not in report
+
+
+
+def test_coverage_bootstrap_and_protected_main_failure_are_explicit():
+    tests = section("tests", "quality")
+    baseline = section("commit-main-coverage", "summary")
+
+    assert "coverage-baseline-missing" in tests
+    assert "bootstrap pending" in TEXT
+    assert "Coverage baseline push blocked" in baseline
+    assert "github-actions[bot]" in baseline
+    assert "git push origin HEAD:main" in baseline
