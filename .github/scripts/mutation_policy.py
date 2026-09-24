@@ -12,7 +12,11 @@ from typing import Callable
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
-MUTATION_REQUIRED_LABELS = ("complexity:high", "priority:high")
+COMPLEXITY_LABELS = ("complexity:low", "complexity:medium", "complexity:high")
+MUTATION_REQUIRED_LABELS = ("complexity:medium", "complexity:high")
+COMPLEXITY_ORDER = {label: index for index, label in enumerate(COMPLEXITY_LABELS)}
+AUTO_HIGH_CHANGED_CODE_LINES = 500
+AUTO_HIGH_CHANGED_CODE_FILES = 15
 DEPENDABOT_LOGIN = "dependabot[bot]"
 COMMENT_MARKER = "<!-- github-manager:mutation-policy:v1 -->"
 
@@ -41,7 +45,7 @@ _LINKED_ISSUE_RE = re.compile(
 MUTATION_GUIDANCE = f"""{COMMENT_MARKER}
 ### Mutation testing required
 
-This issue is classified as high risk. Mutation testing is mandatory before the pull request can pass the policy gate.
+This issue is classified as medium/high complexity. Mutation testing is mandatory before the pull request can pass the policy gate.
 
 - Add or strengthen automated tests for the changed production code.
 - Add `.ci/mutation.sh` if the repository does not already have one.
@@ -86,7 +90,11 @@ def mutation_reasons(
     event: dict,
     fetch_issue: Callable[[int], dict],
 ) -> tuple[str, ...]:
-    """Return high-risk labels inherited from the PR and its linked issues."""
+    """Return the highest explicit complexity inherited from the PR/issues.
+
+    Priority labels are intentionally ignored: urgency is not technical risk.
+    """
+
     pull_request = event.get("pull_request") or {}
     labels = label_names(pull_request.get("labels"))
 
@@ -94,7 +102,11 @@ def mutation_reasons(
         issue = fetch_issue(number)
         labels.update(label_names(issue.get("labels")))
 
-    return tuple(label for label in MUTATION_REQUIRED_LABELS if label in labels)
+    complexity = [label for label in COMPLEXITY_LABELS if label in labels]
+    if not complexity:
+        return ()
+    highest = max(complexity, key=COMPLEXITY_ORDER.__getitem__)
+    return (highest,)
 
 
 def _is_dependency_only_path(path: str) -> bool:
@@ -106,8 +118,8 @@ def _is_dependency_only_path(path: str) -> bool:
     return any(pattern.fullmatch(normalized) for pattern in _DEPENDENCY_ONLY_PATTERNS)
 
 
-def _pull_request_files(event: dict) -> list[str] | None:
-    """Return the complete changed-file list, or None when completeness is unknown."""
+def _pull_request_file_entries(event: dict) -> list[dict] | None:
+    """Return complete PR file metadata, or None when completeness is unknown."""
     pull_request = event.get("pull_request") or {}
     number = pull_request.get("number") or event.get("number")
     if not isinstance(number, int):
@@ -117,24 +129,29 @@ def _pull_request_files(event: dict) -> list[str] | None:
     if isinstance(changed_count, int) and changed_count < 0:
         return None
 
-    files: list[str] = []
+    entries: list[dict] = []
     page = 1
     while True:
         suffix = "per_page=100" if page == 1 else f"per_page=100&page={page}"
         payload = _api_request("GET", f"pulls/{number}/files?{suffix}") or []
-        if not isinstance(payload, list):
+        if not isinstance(payload, list) or any(not isinstance(item, dict) for item in payload):
             return None
 
-        page_files = [
-            str(item.get("filename") or "")
-            for item in payload
-            if isinstance(item, dict)
-        ]
-        if len(page_files) != len(payload) or any(not path for path in page_files):
-            return None
-        files.extend(page_files)
+        page_entries: list[dict] = []
+        for item in payload:
+            filename = str(item.get("filename") or "")
+            if not filename:
+                return None
+            page_entries.append(
+                {
+                    "filename": filename,
+                    "additions": max(0, int(item.get("additions") or 0)),
+                    "deletions": max(0, int(item.get("deletions") or 0)),
+                }
+            )
+        entries.extend(page_entries)
 
-        if isinstance(changed_count, int) and len(files) >= changed_count:
+        if isinstance(changed_count, int) and len(entries) >= changed_count:
             break
         if len(payload) < 100:
             break
@@ -142,9 +159,16 @@ def _pull_request_files(event: dict) -> list[str] | None:
         if page > 100:
             return None
 
-    if isinstance(changed_count, int) and len(files) != changed_count:
+    if isinstance(changed_count, int) and len(entries) != changed_count:
         return None
-    return files
+    return entries
+
+
+def _pull_request_files(event: dict) -> list[str] | None:
+    entries = _pull_request_file_entries(event)
+    if entries is None:
+        return None
+    return [str(entry["filename"]) for entry in entries]
 
 
 def _is_python_production_path(path: str) -> bool:
@@ -188,16 +212,41 @@ def _is_go_production_path(path: str) -> bool:
     return bool(parts) and parts[0] not in {"vendor", "testdata", "tests"}
 
 
+def _is_supported_production_path(path: str) -> bool:
+    return _is_python_production_path(path) or _is_go_production_path(path)
+
+
 def production_change_reasons(event: dict) -> tuple[str, ...]:
-    """Automatically require mutation for supported production source changes."""
+    """Return supported production-language reasons without deciding complexity."""
     files = _pull_request_files(event)
     if files is None:
         return ("changed-files-unverified",)
+    reasons: list[str] = []
     if any(_is_python_production_path(path) for path in files):
-        return ("python-production-change",)
+        reasons.append("python-production-change")
     if any(_is_go_production_path(path) for path in files):
-        return ("go-production-change",)
-    return ()
+        reasons.append("go-production-change")
+    return tuple(reasons)
+
+
+def automatic_complexity_reasons(event: dict) -> tuple[str, ...]:
+    """Force high complexity for large supported production-code changes."""
+    entries = _pull_request_file_entries(event)
+    if entries is None:
+        return ("changed-files-unverified",)
+
+    production = [
+        entry for entry in entries if _is_supported_production_path(str(entry["filename"]))
+    ]
+    changed_lines = sum(
+        int(entry["additions"]) + int(entry["deletions"]) for entry in production
+    )
+    reasons: list[str] = []
+    if len(production) > AUTO_HIGH_CHANGED_CODE_FILES:
+        reasons.append(f"auto-high:files>{AUTO_HIGH_CHANGED_CODE_FILES}")
+    if changed_lines > AUTO_HIGH_CHANGED_CODE_LINES:
+        reasons.append(f"auto-high:lines>{AUTO_HIGH_CHANGED_CODE_LINES}")
+    return tuple(reasons)
 
 
 def _dependabot_dependency_only(event: dict) -> bool:
@@ -293,23 +342,46 @@ def notify(event: dict) -> int:
 
 
 def classify(event: dict) -> int:
-    """Expose whether the PR must run mutation testing."""
+    """Expose whether the PR must run mutation testing.
+
+    - explicit complexity:low skips mutation unless the change auto-promotes high;
+    - explicit complexity:medium/high requires mutation;
+    - no complexity label defaults to medium for supported production code;
+    - priority labels never affect technical complexity;
+    - large production changes auto-promote to high.
+    """
+
     if _dependabot_dependency_only(event):
-        reasons = ()
+        reasons: tuple[str, ...] = ()
         print("Mutation testing skipped for dependency-only Dependabot PR")
     else:
-        label_reasons = mutation_reasons(
+        explicit = mutation_reasons(
             event,
             lambda number: _api_request("GET", f"issues/{number}") or {},
         )
-        reasons = label_reasons or production_change_reasons(event)
+        production = production_change_reasons(event)
+        automatic = automatic_complexity_reasons(event)
+
+        if "changed-files-unverified" in production or "changed-files-unverified" in automatic:
+            reasons = ("changed-files-unverified",)
+        elif automatic:
+            reasons = ("complexity:high", *automatic, *production)
+        elif explicit == ("complexity:low",):
+            reasons = ()
+        elif explicit:
+            reasons = (*explicit, *production)
+        elif production:
+            reasons = ("complexity:medium(default)", *production)
+        else:
+            reasons = ()
+
     required = bool(reasons)
     _write_output("required", "true" if required else "false")
     _write_output("labels", ",".join(reasons))
     if required:
         print(f"Mutation testing required by: {', '.join(reasons)}")
     else:
-        print("Mutation testing not required: no high-risk label or supported production code change")
+        print("Mutation testing not required: low complexity or no supported production code change")
     return 0
 
 
