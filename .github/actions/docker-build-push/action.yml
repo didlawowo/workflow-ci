@@ -142,7 +142,7 @@ inputs:
 outputs:
   digest:
     description: "Built image digest"
-    value: ${{ steps.build.outputs.digest }}
+    value: ${{ steps.build.outputs.digest || steps.build-retry.outputs.digest }}
   image-full-name:
     description: "Full image name with tag"
     value: ${{ steps.meta.outputs.full-name }}
@@ -385,6 +385,7 @@ runs:
 
     - name: Build and push Docker image
       id: build
+      continue-on-error: ${{ inputs.native-multiarch == 'true' }}
       uses: docker/build-push-action@v7
       with:
         # Use the native remote builder when enabled; otherwise the default
@@ -431,10 +432,38 @@ runs:
         sbom: ${{ inputs.sbom }}
         provenance: ${{ inputs.provenance == 'true' && 'mode=max' || 'false' }}
 
+    - name: Retry native remote BuildKit once
+      id: build-retry
+      if: inputs.native-multiarch == 'true' && steps.build.outcome == 'failure'
+      uses: docker/build-push-action@v7
+      with:
+        builder: native
+        context: ${{ inputs.context }}
+        file: ${{ inputs.dockerfile }}
+        target: ${{ inputs.dockerfile-target || '' }}
+        platforms: ${{ inputs.push == 'true' && inputs.platforms || '' }}
+        push: ${{ inputs.push }}
+        load: ${{ inputs.push != 'true' }}
+        outputs: ${{ inputs.push == 'true' && inputs.registry-plain-http == 'true' && 'type=image,push=true,registry.insecure=true' || '' }}
+        tags: ${{ steps.meta.outputs.tags }}
+        labels: ${{ inputs.labels }}
+        build-args: ${{ inputs.build-args }}
+        cache-from: type=registry,ref=${{ inputs.image-name }}:buildcache-${{ inputs.cache-scope }}
+        cache-to: ${{ inputs.push == 'true' && format('type=registry,mode=max,image-manifest=true,oci-mediatypes=true,ignore-error=true,ref={0}:buildcache-{1}', inputs.image-name, inputs.cache-scope) || '' }}
+        sbom: ${{ inputs.sbom }}
+        provenance: ${{ inputs.provenance == 'true' && 'mode=max' || 'false' }}
+
+    - name: Enforce native Docker build result
+      if: inputs.native-multiarch == 'true' && steps.build.outcome == 'failure' && steps.build-retry.outcome != 'success'
+      shell: bash
+      run: |
+        echo "::error::Remote BuildKit build failed twice; refusing to hide a persistent build failure."
+        exit 1
+
     - name: Sign image with Cosign
       if: inputs.sign == 'true' && inputs.push == 'true'
       shell: bash
-      run: cosign sign --yes ${{ inputs.registry-plain-http == 'true' && '--allow-http-registry' || '' }} "${{ inputs.image-name }}@${{ steps.build.outputs.digest }}"
+      run: cosign sign --yes ${{ inputs.registry-plain-http == 'true' && '--allow-http-registry' || '' }} "${{ inputs.image-name }}@${{ steps.build.outputs.digest || steps.build-retry.outputs.digest }}"
 
     - name: Verify signature
       if: inputs.sign == 'true' && inputs.push == 'true'
@@ -443,7 +472,7 @@ runs:
         cosign verify ${{ inputs.registry-plain-http == 'true' && '--allow-http-registry' || '' }} \
           --certificate-identity-regexp="https://github.com/${{ github.repository_owner }}/" \
           --certificate-oidc-issuer="https://token.actions.githubusercontent.com" \
-          "${{ inputs.image-name }}@${{ steps.build.outputs.digest }}"
+          "${{ inputs.image-name }}@${{ steps.build.outputs.digest || steps.build-retry.outputs.digest }}"
 
     # Prefer the Trivy binary baked into the ARC runner. GitHub-hosted runners
     # keep the upstream setup-trivy fallback for portability.
