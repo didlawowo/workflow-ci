@@ -115,7 +115,9 @@ def test_mutation_policy_separates_untrusted_execution_from_trusted_verification
     assert "job.workflow_repository" in content
     assert "job.workflow_sha" in content
     assert "needs: [mutation-run]" in content
-    assert "actions/download-artifact@v6" in content
+    assert "Expose trusted mutation evidence" in content
+    assert "report-b64" in content
+    assert "continue-on-error: true" in content
 
 
 def test_central_go_mutation_runner_is_pinned_and_strict():
@@ -472,7 +474,8 @@ def test_quality_evidence_separates_read_only_execution_from_privileged_publicat
 
     assert "needs: [independent-verification, mutation]" in publisher
     assert "scope-key: ${{ format('{0}-{1}', inputs.repo-type, inputs.working-directory) }}" in content
-    assert "Download trusted mutation evidence" in publisher
+    assert "Materialize trusted mutation evidence" in publisher
+    assert "needs.mutation.outputs.report-b64" in publisher
     assert "needs.mutation.outputs.report-file" in publisher
     assert "format('.mutation-evidence/{0}', needs.mutation.outputs.report-file)" in publisher
     assert "mutation-required: ${{ needs.mutation.outputs.required || 'unknown' }}" in publisher

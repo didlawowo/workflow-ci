@@ -13,17 +13,18 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 @pytest.mark.parametrize(
-    "result,required,download,success",
+    "result,required,inline,report_b64,success",
     [
-        ("success", "false", "skipped", True),
-        ("success", "true", "success", True),
-        ("success", "true", "failure", False),
-        ("success", "", "skipped", False),
-        ("failure", "false", "skipped", False),
-        ("cancelled", "false", "success", False),
+        ("success", "false", "skipped", "", True),
+        ("success", "true", "success", "e30=", True),
+        ("success", "true", "failure", "e30=", False),
+        ("success", "true", "success", "", False),
+        ("success", "", "skipped", "", False),
+        ("failure", "false", "skipped", "", False),
+        ("cancelled", "false", "success", "", False),
     ],
 )
-def test_publication_guard(result, required, download, success):
+def test_publication_guard(result, required, inline, report_b64, success):
     data = yaml.safe_load((ROOT / ".github/workflows/quality-evidence.yml").read_text())
     steps = data["jobs"]["publish-evidence"]["steps"]
     guard = next(
@@ -35,7 +36,8 @@ def test_publication_guard(result, required, download, success):
             **os.environ,
             "MUTATION_RESULT": result,
             "MUTATION_REQUIRED": required,
-            "DOWNLOAD_RESULT": download,
+            "INLINE_RESULT": inline,
+            "REPORT_B64": report_b64,
         },
         check=False,
         capture_output=True,
@@ -46,11 +48,12 @@ def test_publication_guard(result, required, download, success):
 def test_workflow_propagates_result_independently_and_publishes_missing_artifacts():
     data = yaml.safe_load((ROOT / ".github/workflows/quality-evidence.yml").read_text())
     steps = data["jobs"]["publish-evidence"]["steps"]
-    download = next(s for s in steps if s.get("id") == "mutation-evidence-download")
+    materialize = next(s for s in steps if s.get("id") == "mutation-evidence-inline")
     publisher = next(
         s for s in steps if s.get("name") == "Publish trusted quality evidence"
     )
-    assert download["continue-on-error"] is True
+    assert materialize["if"] == "needs.mutation.outputs.required == 'true'"
+    assert materialize["env"]["REPORT_B64"] == "${{ needs.mutation.outputs.report-b64 }}"
     assert publisher["if"] == "always()"
     assert (
         publisher["with"]["mutation-result"]

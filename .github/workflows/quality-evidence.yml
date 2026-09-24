@@ -299,14 +299,19 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
-      - name: Download trusted mutation evidence
-        id: mutation-evidence-download
-        continue-on-error: true
-        if: needs.mutation.outputs.required == 'true' && needs.mutation.outputs.artifact-name != ''
-        uses: actions/download-artifact@v6
-        with:
-          name: ${{ needs.mutation.outputs.artifact-name }}
-          path: .mutation-evidence
+      - name: Materialize trusted mutation evidence
+        id: mutation-evidence-inline
+        if: needs.mutation.outputs.required == 'true'
+        shell: bash
+        env:
+          REPORT_FILE: ${{ needs.mutation.outputs.report-file }}
+          REPORT_B64: ${{ needs.mutation.outputs.report-b64 }}
+        run: |
+          set -euo pipefail
+          test -n "$REPORT_FILE"
+          test -n "$REPORT_B64"
+          mkdir -p .mutation-evidence
+          printf '%s' "$REPORT_B64" | base64 -d > ".mutation-evidence/$REPORT_FILE"
 
       - name: Publish trusted quality evidence
         if: always()
@@ -346,12 +351,16 @@ jobs:
         env:
           MUTATION_RESULT: ${{ needs.mutation.result }}
           MUTATION_REQUIRED: ${{ needs.mutation.outputs.required }}
-          DOWNLOAD_RESULT: ${{ steps.mutation-evidence-download.outcome }}
+          INLINE_RESULT: ${{ steps.mutation-evidence-inline.outcome }}
+          REPORT_B64: ${{ needs.mutation.outputs.report-b64 }}
         run: |
           set -euo pipefail
           test "$MUTATION_RESULT" = success
           case "$MUTATION_REQUIRED" in
-            true) test "$DOWNLOAD_RESULT" = success ;;
+            true)
+              test "$INLINE_RESULT" = success
+              test -n "$REPORT_B64"
+              ;;
             false) ;;
             *) echo '::error::Mutation classification is missing'; exit 1 ;;
           esac

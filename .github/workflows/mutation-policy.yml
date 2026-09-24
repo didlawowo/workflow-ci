@@ -21,8 +21,11 @@ on:
         description: "Trusted scoped mutation evidence artifact"
         value: ${{ jobs.mutation-verify.outputs.artifact-name }}
       report-file:
-        description: "Mutation report filename inside the trusted artifact"
+        description: "Mutation report filename"
         value: ${{ jobs.mutation-verify.outputs.report-file }}
+      report-b64:
+        description: "Base64 trusted scoped mutation report"
+        value: ${{ jobs.mutation-verify.outputs.report-b64 }}
   pull_request:
     types: [opened, synchronize, reopened, labeled, unlabeled, edited]
 
@@ -43,6 +46,9 @@ jobs:
     outputs:
       required: ${{ steps.policy.outputs.required }}
       labels: ${{ steps.policy.outputs.labels }}
+      evidence-file: ${{ steps.inline-evidence.outputs.file }}
+      evidence-b64: ${{ steps.inline-evidence.outputs.evidence-b64 }}
+      results-b64: ${{ steps.inline-evidence.outputs.results-b64 }}
     steps:
       - name: Fetch central workflow implementation without submodule traversal
         env:
@@ -406,9 +412,38 @@ jobs:
             exit 1
           fi
 
+      - name: Expose raw mutation evidence
+        id: inline-evidence
+        if: always() && steps.policy.outputs.required == 'true' && steps.evidence.outputs.path != ''
+        shell: bash
+        run: |
+          set -euo pipefail
+          EVIDENCE="${{ steps.evidence.outputs.path }}"
+          RESULTS="pr/.quality/mutmut-results.txt"
+          test -s "$EVIDENCE"
+          FILE="$(basename "$EVIDENCE")"
+          EVIDENCE_B64="$(base64 -w0 "$EVIDENCE")"
+          if [[ "${#EVIDENCE_B64}" -gt 700000 ]]; then
+            echo "::error::Mutation evidence is too large for trusted job outputs."
+            exit 1
+          fi
+          echo "file=$FILE" >> "$GITHUB_OUTPUT"
+          echo "evidence-b64=$EVIDENCE_B64" >> "$GITHUB_OUTPUT"
+          if [[ -s "$RESULTS" ]]; then
+            RESULTS_B64="$(base64 -w0 "$RESULTS")"
+            if [[ "${#RESULTS_B64}" -gt 700000 ]]; then
+              echo "::error::Mutation diagnostics are too large for trusted job outputs."
+              exit 1
+            fi
+            echo "results-b64=$RESULTS_B64" >> "$GITHUB_OUTPUT"
+          else
+            echo "results-b64=" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Upload untrusted mutation evidence
         if: always() && steps.policy.outputs.required == 'true' && steps.evidence.outputs.path != ''
         uses: actions/upload-artifact@v6
+        continue-on-error: true
         with:
           name: mutation-evidence-${{ github.run_id }}
           path: |
@@ -438,6 +473,7 @@ jobs:
     outputs:
       artifact-name: ${{ steps.trusted-output.outputs.artifact-name }}
       report-file: ${{ steps.trusted-output.outputs.report-file }}
+      report-b64: ${{ steps.trusted-output.outputs.report-b64 }}
     steps:
       - name: Fetch central workflow implementation without submodule traversal
         env:
@@ -599,12 +635,22 @@ jobs:
 
           echo "Mutation checkout ready for exact scope $MUTATION_BASE_SHA...$MUTATION_HEAD_SHA."
 
-      - name: Download mutation evidence
+      - name: Materialize mutation evidence from job outputs
         if: steps.policy.outputs.required == 'true'
-        uses: actions/download-artifact@v6
-        with:
-          name: mutation-evidence-${{ github.run_id }}
-          path: .mutation-evidence
+        shell: bash
+        env:
+          EVIDENCE_FILE: ${{ needs.mutation-run.outputs.evidence-file }}
+          EVIDENCE_B64: ${{ needs.mutation-run.outputs.evidence-b64 }}
+          RESULTS_B64: ${{ needs.mutation-run.outputs.results-b64 }}
+        run: |
+          set -euo pipefail
+          test -n "$EVIDENCE_FILE"
+          test -n "$EVIDENCE_B64"
+          mkdir -p .mutation-evidence
+          printf '%s' "$EVIDENCE_B64" | base64 -d > ".mutation-evidence/$EVIDENCE_FILE"
+          if [[ -n "$RESULTS_B64" ]]; then
+            printf '%s' "$RESULTS_B64" | base64 -d > .mutation-evidence/mutmut-results.txt
+          fi
 
       - name: Validate mutation evidence for changed Python functions
         id: validate
@@ -970,6 +1016,7 @@ jobs:
       - name: Upload scoped mutation evidence
         if: always() && steps.policy.outputs.required == 'true' && steps.validate.outcome == 'success'
         uses: actions/upload-artifact@v6
+        continue-on-error: true
         with:
           name: scoped-mutation-evidence-${{ github.run_id }}
           path: ${{ steps.validate.outputs.path }}
@@ -983,11 +1030,20 @@ jobs:
         shell: bash
         run: |
           if [[ "${{ steps.policy.outputs.required }}" == "true" && "${{ steps.validate.outcome }}" == "success" ]]; then
+            REPORT="${{ steps.validate.outputs.path }}"
+            test -s "$REPORT"
+            REPORT_B64="$(base64 -w0 "$REPORT")"
+            if [[ "${#REPORT_B64}" -gt 700000 ]]; then
+              echo "::error::Trusted mutation report is too large for workflow outputs."
+              exit 1
+            fi
             echo "artifact-name=scoped-mutation-evidence-${{ github.run_id }}" >> "$GITHUB_OUTPUT"
-            echo "report-file=$(basename "${{ steps.validate.outputs.path }}")" >> "$GITHUB_OUTPUT"
+            echo "report-file=$(basename "$REPORT")" >> "$GITHUB_OUTPUT"
+            echo "report-b64=$REPORT_B64" >> "$GITHUB_OUTPUT"
           else
             echo "artifact-name=" >> "$GITHUB_OUTPUT"
             echo "report-file=" >> "$GITHUB_OUTPUT"
+            echo "report-b64=" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Confirm mutation testing is not required
