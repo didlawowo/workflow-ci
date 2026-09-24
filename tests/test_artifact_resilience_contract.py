@@ -20,10 +20,8 @@ BEST_EFFORT_ARTIFACT_FILES = (
 
 
 def _upload_blocks(text: str) -> list[str]:
-    return re.findall(
-        r"(?ms)^\s*- name: .*?\n(?:(?!^\s*- name: ).)*?uses: actions/upload-artifact@v6.*?(?=^\s*- name: |\Z)",
-        text,
-    )
+    steps = re.split(r"(?m)^[ \t]*- name: ", text)[1:]
+    return [step for step in steps if "uses: actions/upload-artifact@v6" in step]
 
 
 def test_diagnostic_artifact_uploads_are_best_effort():
