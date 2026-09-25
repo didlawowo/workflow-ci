@@ -36,7 +36,6 @@ def test_quality_report_publisher_concurrency_is_scoped_per_consumer():
     ) in publisher
     assert "cancel-in-progress: false" in publisher
 
-
 def test_quality_evidence_requires_explicit_runner_and_same_commit_actions():
     content = WORKFLOW.read_text()
 
@@ -471,10 +470,13 @@ def test_forgejo_mutation_policy_template_matches_label_refresh_contract():
         assert job in forgejo
 
 
-def test_quality_evidence_separates_read_only_execution_from_privileged_publication():
+def test_quality_evidence_separates_blocking_gate_from_best_effort_publication():
     content = WORKFLOW.read_text()
 
     execution = content.split("  independent-verification:", 1)[1].split(
+        "  trusted-gate:", 1
+    )[0]
+    gate = content.split("  trusted-gate:", 1)[1].split(
         "  publish-evidence:", 1
     )[0]
     publisher = content.split("  publish-evidence:", 1)[1]
@@ -485,9 +487,20 @@ def test_quality_evidence_separates_read_only_execution_from_privileged_publicat
     assert "uses: $/.github/actions/quality-report" not in execution
     assert "repository: didlawowo/workflow-ci" not in execution
 
-    assert "needs: [independent-verification, mutation]" in publisher
+    assert 'name: "Trusted quality gate"' in gate
+    assert "needs: [independent-verification, mutation]" in gate
+    assert 'QUALITY_RESULT: ${{ needs.independent-verification.result }}' in gate
+    assert 'MUTATION_RESULT: ${{ needs.mutation.result }}' in gate
+    assert 'echo "status=pass" >> "$GITHUB_OUTPUT"' in gate
+    assert 'echo "status=fail" >> "$GITHUB_OUTPUT"' in gate
+    assert "pull-requests: write" not in gate
+
+    assert "needs: [trusted-gate, independent-verification, mutation]" in publisher
     assert "scope-key: ${{ format('{0}-{1}', inputs.repo-type, inputs.working-directory) }}" in content
+    assert "Configure writable reporter cache" in publisher
+    assert 'CACHE="${RUNNER_TEMP:-/tmp}/quality-reporter-uv-cache"' in publisher
     assert "Materialize trusted mutation evidence" in publisher
+    assert "continue-on-error: true" in publisher
     assert "needs.mutation.outputs.report-b64" in publisher
     assert "needs.mutation.outputs.report-file" in publisher
     assert "format('.mutation-evidence/{0}', needs.mutation.outputs.report-file)" in publisher
@@ -499,7 +512,9 @@ def test_quality_evidence_separates_read_only_execution_from_privileged_publicat
     assert "repository: didlawowo/workflow-ci" not in publisher
     assert 'junit-glob: "${{ runner.temp }}/quality-evidence/no-junit.xml"' in publisher
     assert 'coverage-glob: "${{ runner.temp }}/quality-evidence/no-coverage.xml"' in publisher
-
+    assert "Report publication warning" in publisher
+    assert "Reporting failures do not override the blocking trusted gate verdict." in publisher
+    assert "Enforce mutation evidence publication" not in publisher
 
 def test_consumer_selftest_grants_reusable_publisher_pr_write_permission():
     root = Path(__file__).resolve().parents[1]

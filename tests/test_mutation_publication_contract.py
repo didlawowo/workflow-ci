@@ -13,37 +13,38 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 @pytest.mark.parametrize(
-    "result,required,inline,report_present,success",
+    "quality_result,mutation_result,required,report_file,report_present,success",
     [
-        ("success", "false", "skipped", "false", True),
-        ("success", "true", "success", "true", True),
-        ("success", "true", "failure", "true", False),
-        ("success", "true", "success", "false", False),
-        ("success", "", "skipped", "false", False),
-        ("failure", "false", "skipped", "false", False),
-        ("cancelled", "false", "success", "false", False),
+        ("success", "success", "false", "", "false", True),
+        ("success", "success", "true", "scoped-mutation.json", "true", True),
+        ("failure", "success", "false", "", "false", False),
+        ("success", "failure", "false", "", "false", False),
+        ("success", "success", "true", "", "true", False),
+        ("success", "success", "true", "scoped-mutation.json", "false", False),
+        ("success", "success", "", "", "false", False),
     ],
 )
-def test_publication_guard(result, required, inline, report_present, success):
+def test_trusted_gate_is_independent_from_publication(
+    quality_result, mutation_result, required, report_file, report_present, success
+):
     data = yaml.safe_load((ROOT / ".github/workflows/quality-evidence.yml").read_text())
-    steps = data["jobs"]["publish-evidence"]["steps"]
-    guard = next(
-        s for s in steps if s.get("name") == "Enforce mutation evidence publication"
-    )
+    steps = data["jobs"]["trusted-gate"]["steps"]
+    gate = next(s for s in steps if s.get("name") == "Enforce trusted execution verdict")
     completed = subprocess.run(
-        ["bash", "-c", guard["run"]],
+        ["bash", "-c", gate["run"]],
         env={
             **os.environ,
-            "MUTATION_RESULT": result,
+            "QUALITY_RESULT": quality_result,
+            "MUTATION_RESULT": mutation_result,
             "MUTATION_REQUIRED": required,
-            "INLINE_RESULT": inline,
-            "REPORT_PRESENT": report_present,
+            "MUTATION_REPORT_FILE": report_file,
+            "MUTATION_REPORT_PRESENT": report_present,
+            "GITHUB_OUTPUT": os.devnull,
         },
         check=False,
         capture_output=True,
     )
     assert (completed.returncode == 0) is success
-
 
 def test_workflow_propagates_result_independently_and_publishes_missing_artifacts():
     data = yaml.safe_load((ROOT / ".github/workflows/quality-evidence.yml").read_text())
@@ -56,7 +57,9 @@ def test_workflow_propagates_result_independently_and_publishes_missing_artifact
     assert "REPORT_B64" not in materialize.get("env", {})
     assert "${{ needs.mutation.outputs.report-b64 }}" in materialize["run"]
     assert "B64_REPORT" in materialize["run"]
+    assert materialize["continue-on-error"] is True
     assert publisher["if"] == "always()"
+    assert publisher["continue-on-error"] is True
     assert (
         publisher["with"]["mutation-result"]
         == "${{ needs.mutation.result || 'unknown' }}"
