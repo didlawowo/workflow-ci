@@ -1,0 +1,33 @@
+{
+  "schema_version": 1,
+  "evaluators": {
+    "ioniq-control/calibration": {
+      "repository": "didlawowo/ioniq-control",
+      "entrypoint": "hidden-evaluators/ioniq-control/calibration/evaluator.py",
+      "paths": [
+        "src/radar/calibration.py",
+        "src/radar/negative_control_policy.py",
+        "src/dataset/calibration_readiness.py",
+        "src/dataset/calibration_selection.py",
+        "scripts/auto_geometric_calibration.py",
+        "scripts/auto_geometric_calibration_strict.py",
+        "scripts/auto_geometric_operational_holdout.py",
+        "scripts/auto_geometric_finalize.py"
+      ]
+    }
+  },
+  "planned": {
+    "keryx/conversation-runtime": {
+      "repository": "didlawowo/keryx",
+      "issue": "didlawowo/keryx#469"
+    },
+    "jet-racer-v2/control-safety": {
+      "repository": "didlawowo/jet-racer-v2",
+      "issue": "didlawowo/jet-racer-v2#58"
+    },
+    "solar-monitoring/energy-routing": {
+      "repository": "didlawowo/solar-monitoring",
+      "issue": "didlawowo/solar-monitoring#256"
+    }
+  }
+}
