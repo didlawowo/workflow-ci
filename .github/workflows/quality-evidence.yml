@@ -71,6 +71,10 @@ on:
         required: false
         type: boolean
         default: true
+    outputs:
+      trusted-status:
+        description: "Blocking trusted gate verdict independent from report publication"
+        value: ${{ jobs.trusted-gate.outputs.status }}
     secrets:
       SONAR_TOKEN:
         description: "Token allowed to analyze the SonarQube project. Project key comes from protected vars.SONAR_PROJECT_KEY."
@@ -278,11 +282,70 @@ jobs:
 
           exit "$FAILED"
 
+  trusted-gate:
+    name: "Trusted quality gate"
+    if: always()
+    needs: [independent-verification, mutation]
+    runs-on: ${{ inputs.runner }}
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      status: ${{ steps.gate.outputs.status }}
+    steps:
+      - name: Enforce trusted execution verdict
+        id: gate
+        shell: bash
+        env:
+          QUALITY_RESULT: ${{ needs.independent-verification.result }}
+          MUTATION_RESULT: ${{ needs.mutation.result }}
+          MUTATION_REQUIRED: ${{ needs.mutation.outputs.required }}
+          MUTATION_REPORT_FILE: ${{ needs.mutation.outputs.report-file }}
+          MUTATION_REPORT_PRESENT: ${{ needs.mutation.outputs.report-b64 != '' }}
+        run: |
+          set -euo pipefail
+          FAILED=0
+
+          if [[ "$QUALITY_RESULT" != "success" ]]; then
+            echo "::error::Independent quality execution did not succeed: $QUALITY_RESULT"
+            FAILED=1
+          fi
+
+          if [[ "$MUTATION_RESULT" != "success" ]]; then
+            echo "::error::Mutation gate did not succeed: $MUTATION_RESULT"
+            FAILED=1
+          fi
+
+          case "$MUTATION_REQUIRED" in
+            true)
+              if [[ -z "$MUTATION_REPORT_FILE" || "$MUTATION_REPORT_PRESENT" != "true" ]]; then
+                echo "::error::Mandatory mutation evidence is missing."
+                FAILED=1
+              fi
+              ;;
+            false) ;;
+            *)
+              echo "::error::Mutation classification is missing."
+              FAILED=1
+              ;;
+          esac
+
+          if [[ "$FAILED" -eq 0 ]]; then
+            echo "status=pass" >> "$GITHUB_OUTPUT"
+            echo "Trusted gate: PASS"
+            exit 0
+          fi
+
+          echo "status=fail" >> "$GITHUB_OUTPUT"
+          echo "Trusted gate: FAIL"
+          exit 1
+
   publish-evidence:
     name: "Publish trusted quality evidence"
     timeout-minutes: 10
     if: always()
-    needs: [independent-verification, mutation]
+    needs: [trusted-gate, independent-verification, mutation]
     concurrency:
       group: quality-report-${{ github.repository }}-${{ github.event.pull_request.number || github.ref_name }}-${{ inputs.repo-type }}-${{ inputs.working-directory }}
       cancel-in-progress: false
@@ -299,9 +362,18 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
+      - name: Configure writable reporter cache
+        shell: bash
+        run: |
+          set -euo pipefail
+          CACHE="${RUNNER_TEMP:-/tmp}/quality-reporter-uv-cache"
+          mkdir -p "$CACHE"
+          echo "UV_CACHE_DIR=$CACHE" >> "$GITHUB_ENV"
+
       - name: Materialize trusted mutation evidence
         id: mutation-evidence-inline
         if: needs.mutation.outputs.required == 'true'
+        continue-on-error: true
         shell: bash
         env:
           REPORT_FILE: ${{ needs.mutation.outputs.report-file }}
@@ -320,7 +392,9 @@ jobs:
           fi
           base64 -d "$REPORT_B64_FILE" > ".mutation-evidence/$REPORT_FILE"
       - name: Publish trusted quality evidence
+        id: publish-report
         if: always()
+        continue-on-error: true
         uses: $/.github/actions/quality-report
         with:
           # Never parse report files from the PR checkout in the privileged
@@ -351,22 +425,24 @@ jobs:
           comment: ${{ inputs.comment }}
           artifact-suffix: ${{ inputs.repo-type }}
 
-      - name: Enforce mutation evidence publication
+      - name: Report publication warning
         if: always()
         shell: bash
         env:
-          MUTATION_RESULT: ${{ needs.mutation.result }}
-          MUTATION_REQUIRED: ${{ needs.mutation.outputs.required }}
-          INLINE_RESULT: ${{ steps.mutation-evidence-inline.outcome }}
-          REPORT_PRESENT: ${{ needs.mutation.outputs.report-b64 != '' }}
+          GATE_STATUS: ${{ needs.trusted-gate.outputs.status || 'fail' }}
+          MATERIALIZE_RESULT: ${{ steps.mutation-evidence-inline.outcome || 'skipped' }}
+          PUBLISH_RESULT: ${{ steps.publish-report.outcome || 'skipped' }}
         run: |
           set -euo pipefail
-          test "$MUTATION_RESULT" = success
-          case "$MUTATION_REQUIRED" in
-            true)
-              test "$INLINE_RESULT" = success
-              test "$REPORT_PRESENT" = true
-              ;;
-            false) ;;
-            *) echo '::error::Mutation classification is missing'; exit 1 ;;
-          esac
+          if [[ "$MATERIALIZE_RESULT" == "failure" || "$PUBLISH_RESULT" == "failure" ]]; then
+            echo "::warning::Trusted gate=$GATE_STATUS but evidence reporting was incomplete (materialize=$MATERIALIZE_RESULT publish=$PUBLISH_RESULT)."
+            {
+              echo "## Trusted reporting warning"
+              echo ""
+              echo "- blocking gate: **$GATE_STATUS**"
+              echo "- mutation materialization: **$MATERIALIZE_RESULT**"
+              echo "- report publication: **$PUBLISH_RESULT**"
+              echo ""
+              echo "Reporting failures do not override the blocking trusted gate verdict."
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
