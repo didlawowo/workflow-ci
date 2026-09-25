@@ -95,9 +95,20 @@ jobs:
           chmod 700 "$ASKPASS"
 
           URL="${GITHUB_SERVER_URL}/${MUTATION_FETCH_REPOSITORY}.git"
-          if ! GIT_ASKPASS="$ASKPASS" GIT_TERMINAL_PROMPT=0 \
-            git -C "$DEST" fetch --no-tags "$URL" "$MUTATION_FETCH_SHA"; then
-            echo "::error::Mutation checkout failure: unable to fetch trusted base $MUTATION_FETCH_SHA."
+          fetched=false
+          for attempt in 1 2 3; do
+            if GIT_ASKPASS="$ASKPASS" GIT_TERMINAL_PROMPT=0 \
+              git -C "$DEST" fetch --no-tags "$URL" "$MUTATION_FETCH_SHA"; then
+              fetched=true
+              break
+            fi
+            if [[ "$attempt" -lt 3 ]]; then
+              echo "::warning::Trusted base fetch attempt $attempt/3 failed; retrying."
+              sleep "$attempt"
+            fi
+          done
+          if [[ "$fetched" != "true" ]]; then
+            echo "::error::Mutation checkout failure: unable to fetch trusted base $MUTATION_FETCH_SHA after 3 attempts."
             exit 1
           fi
           if ! git -C "$DEST" checkout --detach "$MUTATION_FETCH_SHA"; then
@@ -162,11 +173,19 @@ jobs:
             local sha="$2"
             local label="$3"
             local url="${GITHUB_SERVER_URL}/${repository}.git"
-            if ! GIT_ASKPASS="$ASKPASS" GIT_TERMINAL_PROMPT=0 \
-              git -C "$DEST" fetch --no-tags "$url" "$sha"; then
-              echo "::error::Mutation checkout failure: unable to fetch $label commit $sha from $repository."
-              exit 1
-            fi
+            local attempt
+            for attempt in 1 2 3; do
+              if GIT_ASKPASS="$ASKPASS" GIT_TERMINAL_PROMPT=0 \
+                git -C "$DEST" fetch --no-tags "$url" "$sha"; then
+                return 0
+              fi
+              if [[ "$attempt" -lt 3 ]]; then
+                echo "::warning::Mutation fetch for $label attempt $attempt/3 failed; retrying."
+                sleep "$attempt"
+              fi
+            done
+            echo "::error::Mutation checkout failure: unable to fetch $label commit $sha from $repository after 3 attempts."
+            exit 1
           }
 
           fetch_commit "$MUTATION_HEAD_REPOSITORY" "$MUTATION_HEAD_SHA" "head"
@@ -522,9 +541,20 @@ jobs:
           chmod 700 "$ASKPASS"
 
           URL="${GITHUB_SERVER_URL}/${MUTATION_FETCH_REPOSITORY}.git"
-          if ! GIT_ASKPASS="$ASKPASS" GIT_TERMINAL_PROMPT=0 \
-            git -C "$DEST" fetch --no-tags "$URL" "$MUTATION_FETCH_SHA"; then
-            echo "::error::Mutation checkout failure: unable to fetch trusted base $MUTATION_FETCH_SHA."
+          fetched=false
+          for attempt in 1 2 3; do
+            if GIT_ASKPASS="$ASKPASS" GIT_TERMINAL_PROMPT=0 \
+              git -C "$DEST" fetch --no-tags "$URL" "$MUTATION_FETCH_SHA"; then
+              fetched=true
+              break
+            fi
+            if [[ "$attempt" -lt 3 ]]; then
+              echo "::warning::Trusted base fetch attempt $attempt/3 failed; retrying."
+              sleep "$attempt"
+            fi
+          done
+          if [[ "$fetched" != "true" ]]; then
+            echo "::error::Mutation checkout failure: unable to fetch trusted base $MUTATION_FETCH_SHA after 3 attempts."
             exit 1
           fi
           if ! git -C "$DEST" checkout --detach "$MUTATION_FETCH_SHA"; then
@@ -599,11 +629,19 @@ jobs:
             local sha="$2"
             local label="$3"
             local url="${GITHUB_SERVER_URL}/${repository}.git"
-            if ! GIT_ASKPASS="$ASKPASS" GIT_TERMINAL_PROMPT=0 \
-              git -C "$DEST" fetch --no-tags "$url" "$sha"; then
-              echo "::error::Mutation checkout failure: unable to fetch $label commit $sha from $repository."
-              exit 1
-            fi
+            local attempt
+            for attempt in 1 2 3; do
+              if GIT_ASKPASS="$ASKPASS" GIT_TERMINAL_PROMPT=0 \
+                git -C "$DEST" fetch --no-tags "$url" "$sha"; then
+                return 0
+              fi
+              if [[ "$attempt" -lt 3 ]]; then
+                echo "::warning::Mutation fetch for $label attempt $attempt/3 failed; retrying."
+                sleep "$attempt"
+              fi
+            done
+            echo "::error::Mutation checkout failure: unable to fetch $label commit $sha from $repository after 3 attempts."
+            exit 1
           }
 
           fetch_commit "$MUTATION_HEAD_REPOSITORY" "$MUTATION_HEAD_SHA" "head"

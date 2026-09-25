@@ -130,6 +130,9 @@ def test_mutation_policy_separates_untrusted_execution_from_trusted_verification
     assert "Expose trusted mutation evidence" in content
     assert "report-b64" in content
     assert "continue-on-error: true" in content
+    assert "for attempt in 1 2 3; do" in content
+    assert "Trusted base fetch attempt $attempt/3 failed; retrying." in content
+    assert "Mutation fetch for $label attempt $attempt/3 failed; retrying." in content
 
 
 def test_central_go_mutation_runner_is_pinned_and_strict():

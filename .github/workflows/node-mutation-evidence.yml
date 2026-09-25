@@ -50,6 +50,13 @@ jobs:
       status: ${{ steps.collect.outputs.status }}
       report-b64: ${{ steps.collect.outputs.report-b64 }}
     steps:
+      - name: Checkout exact candidate
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
       - name: Fetch central workflow implementation
         env:
           WORKFLOW_REPOSITORY: ${{ job.workflow_repository }}
@@ -63,13 +70,6 @@ jobs:
           git -C "$DEST" init -q
           git -C "$DEST" fetch --no-tags "${GITHUB_SERVER_URL}/${WORKFLOW_REPOSITORY}.git" "$WORKFLOW_SHA"
           git -C "$DEST" checkout -q --detach "$WORKFLOW_SHA"
-
-      - name: Checkout exact candidate
-        uses: actions/checkout@v7
-        with:
-          ref: ${{ github.event.pull_request.head.sha }}
-          fetch-depth: 0
-          persist-credentials: false
 
       - name: Classify mutation depth
         id: policy
