@@ -14,16 +14,27 @@
         "scripts/auto_geometric_operational_holdout.py",
         "scripts/auto_geometric_finalize.py"
       ]
+    },
+    "jet-racer-v2/control-safety": {
+      "repository": "didlawowo/jet-racer-v2",
+      "entrypoint": "hidden-evaluators/jet-racer-v2/control-safety/evaluator.py",
+      "paths": [
+        "src/jetracer/safety.py",
+        "src/jetracer/teleop.py",
+        "src/jetracer/input/**",
+        "src/jetracer/hw/**",
+        "src/jetracer/collection/**",
+        "src/jetracer/inference/**",
+        "src/jetracer/camera/**",
+        "src/jetracer/training/**",
+        "native/camera/**"
+      ]
     }
   },
   "planned": {
     "keryx/conversation-runtime": {
       "repository": "didlawowo/keryx",
       "issue": "didlawowo/keryx#469"
-    },
-    "jet-racer-v2/control-safety": {
-      "repository": "didlawowo/jet-racer-v2",
-      "issue": "didlawowo/jet-racer-v2#58"
     },
     "solar-monitoring/energy-routing": {
       "repository": "didlawowo/solar-monitoring",
