@@ -1,0 +1,124 @@
+name: Trusted policy integrity
+
+on:
+  workflow_call:
+    inputs:
+      runner:
+        description: "Runner label used for the base-anchored policy check"
+        required: true
+        type: string
+
+jobs:
+  policy-integrity:
+    name: "Trusted policy integrity"
+    runs-on: ${{ inputs.runner }}
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - name: Require protected pull request context
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "${{ github.event_name }}" = "pull_request_target" || {
+            echo "::error::Trusted policy integrity must be called from pull_request_target."
+            exit 1
+          }
+          test -n "${{ github.event.pull_request.base.sha }}"
+          test -n "${{ github.event.pull_request.head.sha }}"
+
+      - name: Checkout trusted workflow-ci policy
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: .workflow-ci-policy
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Checkout protected base
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ github.repository }}
+          ref: ${{ github.event.pull_request.base.sha }}
+          path: .policy-base
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Checkout untrusted candidate without executing it
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ github.event.pull_request.head.repo.full_name }}
+          ref: ${{ github.event.pull_request.head.sha }}
+          path: .policy-candidate
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Verify checkout identities
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git -C .workflow-ci-policy rev-parse HEAD)" = "${{ job.workflow_sha }}"
+          test "$(git -C .policy-base rev-parse HEAD)" = "${{ github.event.pull_request.base.sha }}"
+          test "$(git -C .policy-candidate rev-parse HEAD)" = "${{ github.event.pull_request.head.sha }}"
+
+      - name: Enforce protected policy integrity
+        id: integrity
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -euo pipefail
+          REPORT="${RUNNER_TEMP:-/tmp}/trusted-policy-integrity.json"
+          python3 .workflow-ci-policy/.github/scripts/policy_integrity.py \
+            --base .policy-base \
+            --candidate .policy-candidate \
+            --report "$REPORT"
+
+      - name: Publish policy integrity summary
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          REPORT="${RUNNER_TEMP:-/tmp}/trusted-policy-integrity.json"
+          {
+            echo "## Trusted policy integrity"
+            echo ""
+            if [[ ! -s "$REPORT" ]]; then
+              echo "- status: **error**"
+              echo "- base anchored: **yes**"
+              echo "- candidate code executed: **no**"
+              exit 0
+            fi
+            python3 - "$REPORT" <<'PY'
+          import json
+          import sys
+          value = json.load(open(sys.argv[1], encoding="utf-8"))
+          print(f"- status: **{value.get('status', 'error')}**")
+          print("- base anchored: **yes**")
+          print("- candidate code executed: **no**")
+          allowed = value.get("allowed") or []
+          violations = value.get("violations") or []
+          if allowed:
+              print("")
+              print("### Allowed migration")
+              for item in allowed:
+                  print(f"- `{item['path']}`: {item['reason']}")
+          if violations:
+              print("")
+              print("### Violations")
+              for item in violations:
+                  print(f"- `{item['path']}`: {item['reason']}")
+          PY
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Enforce integrity verdict
+        if: always()
+        shell: bash
+        env:
+          RESULT: ${{ steps.integrity.outcome }}
+        run: |
+          set -euo pipefail
+          if [[ "$RESULT" != "success" ]]; then
+            echo "::error::Trusted policy integrity failed."
+            exit 1
+          fi
