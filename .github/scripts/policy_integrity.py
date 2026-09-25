@@ -21,15 +21,15 @@ PROTECTED_PATHS = (
 WRAPPER = ".github/workflows/trusted-quality-evidence.yml"
 
 ACTION_REF_RE = re.compile(
-    r"(didlawowo/workflow-ci/[^@\\s\"']+@)"
-    r"(v\\d+\\.\\d+\\.\\d+)"
+    r"(didlawowo/workflow-ci/[^@\s\"']+@)"
+    r"(v\d+\.\d+\.\d+)"
 )
 INPUT_REF_RE = re.compile(
-    r"(?m)^(\\s*workflow-ci-ref:\\s*[\"']?)"
-    r"(v\\d+\\.\\d+\\.\\d+)"
-    r"([\"']?\\s*(?:#.*)?)$"
+    r"(?m)^(\s*workflow-ci-ref:\s*[\"']?)"
+    r"(v\d+\.\d+\.\d+)"
+    r"([\"']?\s*(?:#.*)?)$"
 )
-SEMVER_RE = re.compile(r"^v(\\d+)\\.(\\d+)\\.(\\d+)$")
+SEMVER_RE = re.compile(r"^v(\d+)\.(\d+)\.(\d+)$")
 
 
 def _read(root: Path, relative: str) -> str | None:
@@ -46,8 +46,8 @@ def _versions(text: str) -> list[str]:
 
 
 def _normalize_wrapper(text: str) -> str:
-    text = ACTION_REF_RE.sub(r"\\1__WORKFLOW_CI_VERSION__", text)
-    return INPUT_REF_RE.sub(r"\\1__WORKFLOW_CI_VERSION__\\3", text)
+    text = ACTION_REF_RE.sub(r"\1__WORKFLOW_CI_VERSION__", text)
+    return INPUT_REF_RE.sub(r"\1__WORKFLOW_CI_VERSION__\3", text)
 
 
 def _semver(value: str) -> tuple[int, int, int]:
