@@ -241,6 +241,7 @@ def test_python_production_change_requires_mutation_outside_src(monkeypatch, tmp
     rendered = output.read_text()
     assert "required=true" in rendered
     assert "labels=complexity:medium(default),python-production-change" in rendered
+    assert "depth=medium" in rendered
 
 
 def test_root_python_production_change_requires_mutation(monkeypatch, tmp_path):
@@ -297,6 +298,7 @@ def test_go_production_change_requires_mutation_without_labels(monkeypatch, tmp_
     rendered = output.read_text()
     assert "required=true" in rendered
     assert "labels=complexity:medium(default),go-production-change" in rendered
+    assert "depth=medium" in rendered
 
 
 def test_tests_docs_and_workflows_do_not_auto_require_mutation(monkeypatch, tmp_path):
@@ -358,7 +360,8 @@ def test_incomplete_changed_file_listing_fails_closed(monkeypatch, tmp_path):
     assert mutation_policy.classify(event) == 0
     rendered = output.read_text()
     assert "required=true" in rendered
-    assert "labels=changed-files-unverified" in rendered
+    assert "labels=complexity:high,changed-files-unverified" in rendered
+    assert "depth=high" in rendered
 
 
 def test_dependabot_dependency_listing_paginates_before_exemption(monkeypatch):
@@ -435,7 +438,7 @@ def test_explicit_medium_requires_mutation_without_file_api(monkeypatch, tmp_pat
     monkeypatch.setenv("GITHUB_OUTPUT", str(output))
 
     assert mutation_policy.classify(event) == 0
-    assert output.read_text() == "required=true\nlabels=complexity:medium\n"
+    assert output.read_text() == "required=true\nlabels=complexity:medium\ndepth=medium\n"
 
 
 def test_priority_high_does_not_influence_mutation(monkeypatch, tmp_path):
@@ -460,7 +463,7 @@ def test_priority_high_does_not_influence_mutation(monkeypatch, tmp_path):
     monkeypatch.setenv("GITHUB_OUTPUT", str(output))
 
     assert mutation_policy.classify(event) == 0
-    assert output.read_text() == "required=false\nlabels=\n"
+    assert output.read_text() == "required=false\nlabels=\ndepth=none\n"
 
 
 def test_large_production_diff_auto_promotes_low_to_high(monkeypatch, tmp_path):
@@ -489,6 +492,7 @@ def test_large_production_diff_auto_promotes_low_to_high(monkeypatch, tmp_path):
     assert "required=true" in rendered
     assert "complexity:high" in rendered
     assert "auto-high:lines>500" in rendered
+    assert "depth=high" in rendered
 
 
 def test_many_production_files_auto_promote_to_high(monkeypatch, tmp_path):
@@ -519,6 +523,7 @@ def test_many_production_files_auto_promote_to_high(monkeypatch, tmp_path):
     assert "required=true" in rendered
     assert "complexity:high" in rendered
     assert "auto-high:files>15" in rendered
+    assert "depth=high" in rendered
 
 
 def test_node_production_change_defaults_to_medium(monkeypatch, tmp_path):
@@ -549,3 +554,4 @@ def test_node_production_change_defaults_to_medium(monkeypatch, tmp_path):
     assert "required=true" in rendered
     assert "complexity:medium(default)" in rendered
     assert "node-production-change" in rendered
+    assert "depth=medium" in rendered

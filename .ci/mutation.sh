@@ -3,6 +3,11 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PYTHON_VERSION="${MUTATION_PYTHON_VERSION:-3.12}"
+MUTATION_DEPTH="${MUTATION_DEPTH:-medium}"
+case "$MUTATION_DEPTH" in
+  medium|high) ;;
+  *) echo "::error::Unsupported MUTATION_DEPTH=$MUTATION_DEPTH"; exit 1 ;;
+esac
 
 bootstrap_error() {
   echo "::error::Mutation bootstrap failure: $*" >&2
@@ -53,7 +58,7 @@ if [[ -n "${MUTATION_BASE_SHA:-}" || -n "${MUTATION_HEAD_SHA:-}" ]]; then
 
   TARGETS_FILE="$(mktemp)"
   trap 'rm -f "$TARGETS_FILE"' EXIT
-  if ! "$PYTHON" "$SCRIPT_DIR/mutation_scope.py" --repo "$PWD" --base "$MUTATION_BASE_SHA" --head "$MUTATION_HEAD_SHA" > "$TARGETS_FILE"; then
+  if ! "$PYTHON" "$SCRIPT_DIR/mutation_scope.py" --repo "$PWD" --base "$MUTATION_BASE_SHA" --head "$MUTATION_HEAD_SHA" --depth "$MUTATION_DEPTH" > "$TARGETS_FILE"; then
     echo "::error::Mutation scope failure: unable to compute changed Python functions." >&2
     exit 1
   fi
@@ -91,7 +96,7 @@ PY
     exit 0
   fi
 
-  printf 'Mutation targets for %s...%s:\n' "$MUTATION_BASE_SHA" "$MUTATION_HEAD_SHA"
+  printf 'Mutation targets (%s) for %s...%s:\n' "$MUTATION_DEPTH" "$MUTATION_BASE_SHA" "$MUTATION_HEAD_SHA"
   printf '  - %s\n' "${MUTATION_TARGETS[@]}"
 else
   echo "::notice::No PR base/head scope supplied; running the full configured mutation scope."
@@ -132,6 +137,23 @@ fi
 
 mutmut export-cicd-stats
 test -f mutants/mutmut-cicd-stats.json
+
+python_args=("$MUTATION_DEPTH" "${MUTATION_BASE_SHA:-}" "${MUTATION_HEAD_SHA:-}")
+"$PYTHON" - "${python_args[@]}" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+path = Path("mutants/mutmut-cicd-stats.json")
+payload = json.loads(path.read_text(encoding="utf-8"))
+payload["depth"] = sys.argv[1]
+payload["scope"] = {
+    "base_sha": sys.argv[2],
+    "head_sha": sys.argv[3],
+    "no_targets": False,
+}
+path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+PY
 
 # mutmut 3.x 'results' intentionally omits killed mutants from its text output.
 # The trusted verifier needs per-mutant statuses, so reconstruct the omitted

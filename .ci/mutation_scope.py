@@ -153,8 +153,18 @@ class _ChangedFunctionVisitor(ast.NodeVisitor):
         self.stack.pop()
 
 
-def mutation_targets(repo: Path, base: str, head: str) -> tuple[str, ...]:
-    """Return mutmut wildcard targets for changed functions in trusted source paths."""
+def mutation_targets(
+    repo: Path, base: str, head: str, *, depth: str = "medium"
+) -> tuple[str, ...]:
+    """Return mutmut target globs for the exact trusted PR scope.
+
+    medium mutates only changed functions. high broadens to every function in
+    each changed production Python module so a large/high-risk refactor also
+    exercises unchanged helpers in the touched files.
+    """
+    if depth not in {"medium", "high"}:
+        raise ValueError(f"unsupported mutation depth: {depth}")
+
     source_paths = mutation_source_paths(repo)
     changed = _changed_lines(repo, base, head)
     targets: set[str] = set()
@@ -167,6 +177,14 @@ def mutation_targets(repo: Path, base: str, head: str) -> tuple[str, ...]:
         if not path.is_file() or path.suffix != ".py":
             continue
 
+        module = _module_name(relative)
+        if not module:
+            continue
+
+        if depth == "high":
+            targets.add(f"{module}.*__mutmut_*")
+            continue
+
         try:
             tree = ast.parse(path.read_text(encoding="utf-8"))
         except (SyntaxError, UnicodeDecodeError):
@@ -174,33 +192,23 @@ def mutation_targets(repo: Path, base: str, head: str) -> tuple[str, ...]:
 
         visitor = _ChangedFunctionVisitor(lines)
         visitor.visit(tree)
-
-        module = _module_name(relative)
-        if not module:
-            continue
-
         for qualified in visitor.functions:
-            # Mutmut filters the generated mutant identifier with fnmatch. Anchor
-            # the module and the __mutmut suffix so similarly named modules or
-            # functions cannot leak into the PR scope.
-            targets.add(
-                f"{module}.*{'*'.join(qualified)}__mutmut_*"
-            )
+            targets.add(f"{module}.*{'*'.join(qualified)}__mutmut_*")
 
     return tuple(sorted(targets))
-
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--repo", type=Path, default=Path.cwd())
     parser.add_argument("--base", required=True)
     parser.add_argument("--head", required=True)
+    parser.add_argument("--depth", choices=("medium", "high"), default="medium")
     return parser.parse_args()
 
 
 def main() -> int:
     args = parse_args()
-    for target in mutation_targets(args.repo.resolve(), args.base, args.head):
+    for target in mutation_targets(args.repo.resolve(), args.base, args.head, depth=args.depth):
         print(target)
     return 0
 
