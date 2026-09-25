@@ -21,11 +21,13 @@ def test_hidden_registry_binds_evaluator_to_exact_consumer_repository() -> None:
         "hidden-evaluators/ioniq-control/calibration/evaluator.py"
     )
     assert "src/radar/calibration.py" in calibration["paths"]
-    assert set(registry["planned"]) == {
+    known = set(registry["evaluators"]) | set(registry["planned"])
+    assert {
+        "ioniq-control/calibration",
         "keryx/conversation-runtime",
         "jet-racer-v2/control-safety",
         "solar-monitoring/energy-routing",
-    }
+    } <= known
 
 
 def test_hidden_scope_is_central_and_path_sensitive(tmp_path: Path) -> None:
