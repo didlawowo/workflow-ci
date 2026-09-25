@@ -67,3 +67,14 @@ def test_node_mutation_diagnostic_artifact_is_best_effort() -> None:
     assert "continue-on-error: true" in block
     assert "actions/upload-artifact@v6" in block
     assert "if-no-files-found: ignore" in block
+
+def test_node_mutation_materializes_central_workflow_after_candidate_checkout() -> None:
+    workflow = WORKFLOW.read_text(encoding="utf-8")
+
+    checkout = workflow.index("- name: Checkout exact candidate")
+    central = workflow.index("- name: Fetch central workflow implementation")
+    classify = workflow.index("- name: Classify mutation depth")
+
+    assert checkout < central < classify
+    assert 'DEST="$GITHUB_WORKSPACE/.workflow-ci"' in workflow
+
