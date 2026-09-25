@@ -1,0 +1,171 @@
+name: Trusted Node mutation evidence
+
+on:
+  workflow_call:
+    inputs:
+      runner:
+        description: "Exact trusted runner label"
+        required: true
+        type: string
+      working-directory:
+        description: "Node project directory"
+        required: false
+        type: string
+        default: "."
+      package-manager:
+        description: "bun or npm"
+        required: false
+        type: string
+        default: "npm"
+      test-command:
+        description: "Optional Stryker command-runner test command"
+        required: false
+        type: string
+        default: ""
+    outputs:
+      required:
+        description: "Whether Node mutation was required"
+        value: ${{ jobs.node-mutation.outputs.required }}
+      status:
+        description: "pass, fail or skipped"
+        value: ${{ jobs.node-mutation.outputs.status }}
+      report-b64:
+        description: "Normalized Stryker report"
+        value: ${{ jobs.node-mutation.outputs.report-b64 }}
+
+concurrency:
+  group: node-mutation-${{ github.repository }}-${{ github.event.pull_request.number || github.run_id }}-${{ inputs.working-directory }}
+  cancel-in-progress: true
+
+jobs:
+  node-mutation:
+    runs-on: ${{ inputs.runner }}
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      issues: read
+      pull-requests: read
+    outputs:
+      required: ${{ steps.policy.outputs.required }}
+      status: ${{ steps.collect.outputs.status }}
+      report-b64: ${{ steps.collect.outputs.report-b64 }}
+    steps:
+      - name: Fetch central workflow implementation
+        env:
+          WORKFLOW_REPOSITORY: ${{ job.workflow_repository }}
+          WORKFLOW_SHA: ${{ job.workflow_sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          DEST="$GITHUB_WORKSPACE/.workflow-ci"
+          rm -rf "$DEST"
+          mkdir -p "$DEST"
+          git -C "$DEST" init -q
+          git -C "$DEST" fetch --no-tags "${GITHUB_SERVER_URL}/${WORKFLOW_REPOSITORY}.git" "$WORKFLOW_SHA"
+          git -C "$DEST" checkout -q --detach "$WORKFLOW_SHA"
+
+      - name: Checkout exact candidate
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Classify mutation depth
+        id: policy
+        env:
+          POLICY_PROVIDER: github
+          POLICY_API_URL: ${{ github.api_url }}
+          POLICY_REPOSITORY: ${{ github.repository }}
+          POLICY_TOKEN: ${{ github.token }}
+          POLICY_EVENT_PATH: ${{ github.event_path }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 .workflow-ci/.github/scripts/mutation_policy.py classify
+
+      - name: Skip when Node mutation is not required
+        if: steps.policy.outputs.required != 'true' || !contains(steps.policy.outputs.labels, 'node-production-change')
+        shell: bash
+        run: echo 'Node mutation not required for this PR.'
+
+      - name: Setup Bun
+        if: steps.policy.outputs.required == 'true' && contains(steps.policy.outputs.labels, 'node-production-change') && inputs.package-manager == 'bun'
+        uses: oven-sh/setup-bun@v2
+
+      - name: Setup Node
+        if: steps.policy.outputs.required == 'true' && contains(steps.policy.outputs.labels, 'node-production-change') && inputs.package-manager != 'bun'
+        uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+
+      - name: Install project dependencies
+        if: steps.policy.outputs.required == 'true' && contains(steps.policy.outputs.labels, 'node-production-change')
+        working-directory: ${{ inputs.working-directory }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          case "${{ inputs.package-manager }}" in
+            bun) bun install --frozen-lockfile ;;
+            npm) npm ci ;;
+            *) echo "::error::Unsupported package manager: ${{ inputs.package-manager }}"; exit 1 ;;
+          esac
+
+      - name: Run central Stryker gate
+        id: execute
+        if: steps.policy.outputs.required == 'true' && contains(steps.policy.outputs.labels, 'node-production-change')
+        continue-on-error: true
+        shell: bash
+        env:
+          MUTATION_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          MUTATION_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          MUTATION_DEPTH: ${{ steps.policy.outputs.depth }}
+          MUTATION_WORKING_DIRECTORY: ${{ inputs.working-directory }}
+          MUTATION_NODE_TEST_COMMAND: ${{ inputs.test-command }}
+        run: bash .workflow-ci/.ci/mutation-node.sh
+
+      - name: Collect Node mutation verdict
+        id: collect
+        if: always()
+        shell: bash
+        env:
+          REQUIRED: ${{ steps.policy.outputs.required }}
+          LABELS: ${{ steps.policy.outputs.labels }}
+          EXECUTION: ${{ steps.execute.outcome || 'skipped' }}
+        run: |
+          set -euo pipefail
+          REPORT=".quality/stryker.json"
+          if [[ "$REQUIRED" != "true" || "$LABELS" != *node-production-change* ]]; then
+            echo 'status=skipped' >> "$GITHUB_OUTPUT"
+            echo 'report-b64=' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [[ "$EXECUTION" != "success" || ! -s "$REPORT" ]]; then
+            echo 'status=fail' >> "$GITHUB_OUTPUT"
+            echo 'report-b64=' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo 'status=pass' >> "$GITHUB_OUTPUT"
+          echo "report-b64=$(base64 -w0 "$REPORT")" >> "$GITHUB_OUTPUT"
+
+      - name: Upload Node mutation diagnostics
+        if: always()
+        continue-on-error: true
+        uses: actions/upload-artifact@v6
+        with:
+          name: node-mutation-${{ github.event.pull_request.number }}-${{ github.run_id }}
+          path: .quality/stryker.json
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: Enforce Node mutation verdict
+        if: always()
+        shell: bash
+        env:
+          STATUS: ${{ steps.collect.outputs.status }}
+        run: |
+          set -euo pipefail
+          case "$STATUS" in
+            pass|skipped) exit 0 ;;
+            *) echo "::error::Trusted Node mutation failed."; exit 1 ;;
+          esac
