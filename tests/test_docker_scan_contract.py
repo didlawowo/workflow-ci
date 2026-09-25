@@ -326,6 +326,26 @@ def test_qemu_is_skipped_for_native_single_arch_builds():
     assert "steps.execution-mode.outputs.needs-qemu == 'true'" in qemu
 
 
+def test_preinstalled_binfmt_skips_qemu_setup_image_pull_only_when_fix_binary_is_enabled():
+    detect = STEPS["Detect whether QEMU is required"]
+    assert 'handler="qemu-aarch64"' in detect
+    assert 'handler="qemu-x86_64"' in detect
+    assert 'handler="qemu-arm"' in detect
+    assert 'handler_path="/proc/sys/fs/binfmt_misc/$handler"' in detect
+    assert "grep -qx 'enabled' \"$handler_path\"" in detect
+    assert "grep -Eq '^flags:.*F' \"$handler_path\"" in detect
+    assert "qemu-preinstalled=$qemu_preinstalled" in detect
+
+    qemu = STEPS["Set up QEMU"]
+    assert "steps.execution-mode.outputs.qemu-preinstalled != 'true'" in qemu
+
+
+def test_unknown_foreign_platform_keeps_qemu_fallback():
+    detect = STEPS["Detect whether QEMU is required"]
+    assert '*) handler="" ;;' in detect
+    assert '[ -z "$handler" ]' in detect
+
+
 def test_remote_buildkit_only_adds_requested_architectures():
     remote = STEPS["Set up native multi-arch Buildx (remote BuildKit)"]
     assert 'case "$target" in' in remote
