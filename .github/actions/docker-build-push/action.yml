@@ -208,6 +208,7 @@ runs:
         esac
 
         needs_qemu=false
+        qemu_preinstalled=true
         if [ "$PUSH_IMAGE" = "true" ]; then
           IFS=',' read -ra targets <<< "$REQUESTED_PLATFORMS"
           for target in "${targets[@]}"; do
@@ -215,15 +216,33 @@ runs:
             [ -n "$target" ] || continue
             if [ -z "$native_platform" ] || [ "$target" != "$native_platform" ]; then
               needs_qemu=true
-              break
+              case "$target" in
+                linux/arm64) handler="qemu-aarch64" ;;
+                linux/amd64) handler="qemu-x86_64" ;;
+                linux/arm/*) handler="qemu-arm" ;;
+                *) handler="" ;;
+              esac
+              handler_path="/proc/sys/fs/binfmt_misc/$handler"
+              if [ -z "$handler" ] || [ ! -r "$handler_path" ] \
+                 || ! grep -qx 'enabled' "$handler_path" \
+                 || ! grep -Eq '^flags:.*F' "$handler_path"; then
+                qemu_preinstalled=false
+              fi
             fi
           done
         fi
+        if [ "$needs_qemu" != "true" ]; then
+          qemu_preinstalled=false
+        fi
         echo "native-platform=$native_platform" >> "$GITHUB_OUTPUT"
         echo "needs-qemu=$needs_qemu" >> "$GITHUB_OUTPUT"
+        echo "qemu-preinstalled=$qemu_preinstalled" >> "$GITHUB_OUTPUT"
+        if [ "$qemu_preinstalled" = "true" ]; then
+          echo "QEMU binfmt handlers already registered on the runner node; setup image pull is unnecessary."
+        fi
 
     - name: Set up QEMU
-      if: inputs.native-multiarch != 'true' && steps.execution-mode.outputs.needs-qemu == 'true'
+      if: inputs.native-multiarch != 'true' && steps.execution-mode.outputs.needs-qemu == 'true' && steps.execution-mode.outputs.qemu-preinstalled != 'true'
       uses: docker/setup-qemu-action@v4
       with:
         image: ${{ inputs.qemu-image }}
