@@ -216,3 +216,45 @@ def test_changed_lines_compares_exact_base_and_head_trees():
         capture_output=True,
         text=True,
     )
+
+
+def test_high_depth_mutates_all_functions_in_touched_module(tmp_path: Path):
+    repo = _init_repo(tmp_path)
+    source = repo / "src" / "service.py"
+    source.write_text(
+        "def changed(value):\n"
+        "    return value + 1\n\n"
+        "def helper(value):\n"
+        "    return value * 2\n",
+        encoding="utf-8",
+    )
+    base = _commit(repo, "initial")
+
+    source.write_text(
+        "def changed(value):\n"
+        "    return value + 2\n\n"
+        "def helper(value):\n"
+        "    return value * 2\n",
+        encoding="utf-8",
+    )
+    head = _commit(repo, "change one function")
+
+    medium = mutation_scope.mutation_targets(repo, base, head, depth="medium")
+    high = mutation_scope.mutation_targets(repo, base, head, depth="high")
+
+    assert medium == ("service.*changed__mutmut_*",)
+    assert high == ("service.*__mutmut_*",)
+
+
+def test_scope_rejects_unknown_depth(tmp_path: Path):
+    repo = _init_repo(tmp_path)
+    source = repo / "src" / "service.py"
+    source.write_text("def compute():\n    return 1\n", encoding="utf-8")
+    base = _commit(repo, "initial")
+    source.write_text("def compute():\n    return 2\n", encoding="utf-8")
+    head = _commit(repo, "change")
+
+    import pytest
+
+    with pytest.raises(ValueError, match="unsupported mutation depth"):
+        mutation_scope.mutation_targets(repo, base, head, depth="extreme")

@@ -369,13 +369,14 @@ def notify(event: dict) -> int:
 
 
 def classify(event: dict) -> int:
-    """Expose whether the PR must run mutation testing.
+    """Expose whether mutation is required and the requested execution depth.
 
     - explicit complexity:low skips mutation unless the change auto-promotes high;
-    - explicit complexity:medium/high requires mutation;
+    - explicit complexity:medium requires targeted mutation;
+    - explicit complexity:high requires deep mutation;
     - no complexity label defaults to medium for supported production code;
     - priority labels never affect technical complexity;
-    - large production changes auto-promote to high.
+    - large or unverifiable production changes auto-promote to high.
     """
 
     if _dependabot_dependency_only(event):
@@ -393,7 +394,7 @@ def classify(event: dict) -> int:
             automatic = automatic_complexity_reasons(event)
 
             if "changed-files-unverified" in production or "changed-files-unverified" in automatic:
-                reasons = ("changed-files-unverified",)
+                reasons = ("complexity:high", "changed-files-unverified")
             elif automatic:
                 reasons = ("complexity:high", *automatic, *production)
             elif explicit == ("complexity:low",):
@@ -404,15 +405,24 @@ def classify(event: dict) -> int:
                 reasons = ()
 
     required = bool(reasons)
+    if not required:
+        depth = "none"
+    elif any(
+        reason == "complexity:high" or reason.startswith("auto-high:")
+        for reason in reasons
+    ):
+        depth = "high"
+    else:
+        depth = "medium"
+
     _write_output("required", "true" if required else "false")
     _write_output("labels", ",".join(reasons))
+    _write_output("depth", depth)
     if required:
-        print(f"Mutation testing required by: {', '.join(reasons)}")
+        print(f"Mutation testing required ({depth}): {', '.join(reasons)}")
     else:
         print("Mutation testing not required: low complexity or no supported production code change")
     return 0
-
-
 
 def _open_pull_requests() -> list[dict]:
     payload = _api_request("GET", "pulls?state=open&per_page=100") or []

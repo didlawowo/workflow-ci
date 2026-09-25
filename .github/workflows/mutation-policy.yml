@@ -17,6 +17,9 @@ on:
       required:
         description: "Whether mutation testing is mandatory for this PR"
         value: ${{ jobs.mutation-run.outputs.required }}
+      depth:
+        description: "Mutation execution depth: none, medium or high"
+        value: ${{ jobs.mutation-run.outputs.depth }}
       artifact-name:
         description: "Trusted scoped mutation evidence artifact"
         value: ${{ jobs.mutation-verify.outputs.artifact-name }}
@@ -46,6 +49,7 @@ jobs:
     outputs:
       required: ${{ steps.policy.outputs.required }}
       labels: ${{ steps.policy.outputs.labels }}
+      depth: ${{ steps.policy.outputs.depth }}
       evidence-file: ${{ steps.inline-evidence.outputs.file }}
       evidence-b64: ${{ steps.inline-evidence.outputs.evidence-b64 }}
       results-b64: ${{ steps.inline-evidence.outputs.results-b64 }}
@@ -346,6 +350,7 @@ jobs:
         working-directory: pr
         env:
           MUTATION_POLICY_LABELS: ${{ steps.policy.outputs.labels }}
+          MUTATION_DEPTH: ${{ steps.policy.outputs.depth }}
           MUTATION_VENV: ${{ steps.mutation-python.outputs.venv }}
           MUTATION_BASE_SHA: ${{ github.event.pull_request.base.sha }}
           MUTATION_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
@@ -369,6 +374,7 @@ jobs:
             VIRTUAL_ENV="$MUTATION_VENV" \
             CI=true \
             MUTATION_POLICY_LABELS="$MUTATION_POLICY_LABELS" \
+            MUTATION_DEPTH="$MUTATION_DEPTH" \
             MUTATION_BASE_SHA="$MUTATION_BASE_SHA" \
             MUTATION_HEAD_SHA="$MUTATION_HEAD_SHA" \
             bash "${{ steps.runner.outputs.path }}"

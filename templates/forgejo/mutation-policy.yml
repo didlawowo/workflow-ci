@@ -353,6 +353,7 @@ jobs:
         working-directory: pr
         env:
           MUTATION_POLICY_LABELS: ${{ steps.policy.outputs.labels }}
+          MUTATION_DEPTH: ${{ steps.policy.outputs.depth }}
           MUTATION_VENV: ${{ steps.mutation-python.outputs.venv }}
           MUTATION_BASE_SHA: ${{ github.event.pull_request.base.sha }}
           MUTATION_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
@@ -376,6 +377,7 @@ jobs:
             VIRTUAL_ENV="$MUTATION_VENV" \
             CI=true \
             MUTATION_POLICY_LABELS="$MUTATION_POLICY_LABELS" \
+            MUTATION_DEPTH="$MUTATION_DEPTH" \
             MUTATION_BASE_SHA="$MUTATION_BASE_SHA" \
             MUTATION_HEAD_SHA="$MUTATION_HEAD_SHA" \
             bash "$GITHUB_WORKSPACE/.policy/.ci/mutation.sh"
