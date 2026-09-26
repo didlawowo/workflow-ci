@@ -144,7 +144,11 @@ def test_ioniq_hidden_oracle_uses_independent_reference_projection() -> None:
     assert '"min_inside_box_rate": 0.75' in source
     assert '"max_center_error_median_px": 40.0' in source
     assert "def _assert_trusted_policy_contract" in source
-    assert "dict(readiness.AUTO_RUNTIME_POLICY)" not in source
+    report_builder = source.split("def _valid_auto_report", 1)[1].split(
+        "def _policy_fail_closed", 1
+    )[0]
+    assert "readiness." not in report_builder
+    assert "TRUSTED_AUTO_RUNTIME_POLICY" in report_builder
 
 
 def test_hidden_public_report_uses_opaque_seed_id_and_separate_replay_capsule() -> None:
