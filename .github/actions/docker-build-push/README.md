@@ -56,7 +56,17 @@ These tests execute the actual shell extracted from `action.yml` and verify the 
 
 ## Build bootstrap performance
 
-For a native single-architecture build, QEMU is skipped automatically. With
-`native-multiarch: true`, the remote BuildKit builder now registers only the
-requested architectures, so an amd64-only consumer does not initialize or
-depend on the arm64 BuildKit endpoint.
+`native-multiarch` now defaults to `auto`.
+
+- On ARC runners (`runner.name` starts with `arc-runner-`), supported
+  linux/amd64 and linux/arm64 builds use the persistent native remote BuildKit
+  workers. No QEMU emulation and no per-job binfmt image pull are used.
+- `native-multiarch: true` still forces the native remote workers.
+- `native-multiarch: false` keeps the portable docker-container/QEMU fallback
+  for runners that cannot reach the in-cluster BuildKit services.
+- Non-ARC runners in `auto` keep the portable fallback.
+
+This intentionally treats native BuildKit availability as part of the ARC
+infrastructure contract rather than probing `/proc/sys/fs/binfmt_misc` from
+inside the runner container, where mount namespaces can hide host-global
+handlers and cause false negatives.
