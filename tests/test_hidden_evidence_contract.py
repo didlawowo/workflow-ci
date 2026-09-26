@@ -134,8 +134,9 @@ def test_ioniq_hidden_oracle_uses_independent_reference_projection() -> None:
     assert "def _reference_errors" in source
     assert "calibration.project(" not in source
     assert "calibration.metrics(" not in source
-    assert "calibration.fit_extrinsics(train, intrinsics)" in source
+    assert '"op": "fit_extrinsics"' in source
     assert "_reference_errors(holdout, intrinsics, fitted)" in source
+    assert "CandidateSandbox" in source
 
 
 def test_hidden_public_report_uses_opaque_seed_id_and_separate_replay_capsule() -> None:
@@ -199,10 +200,47 @@ def test_keryx_runtime_evaluator_executes_ephemeral_go_tests() -> None:
         / "conversation-runtime"
         / "evaluator.py"
     ).read_text(encoding="utf-8")
-    assert "workflow_ci_hidden_test.go" in source
-    assert '"go",' in source and '"test",' in source
-    assert "path.unlink(missing_ok=True)" in source
-    assert "TestWorkflowCIHiddenTurnFeedReplay" in source
-    assert "TestWorkflowCIHiddenApprovalChoicesFailClosed" in source
-    assert "TestWorkflowCIHiddenReasoningClamp" in source
-    assert "TestWorkflowCIHiddenRetryIsExactlyOnce" in source
+    assert "GO_BRIDGE" in source
+    assert "CandidateSandbox" in source
+    assert "request_go_test" in source
+    assert "expected_replay" in source
+    assert "approval_validity" in source
+    assert "xhigh_reasoning" in source
+    assert "retry_occurrences" in source
+
+
+def test_hidden_candidate_execution_uses_isolated_sandbox_contract() -> None:
+    sandbox = (
+        ROOT / "hidden-evaluators" / "common" / "sandbox.py"
+    ).read_text(encoding="utf-8")
+
+    assert 'SANDBOX_UID = 65532' in sandbox
+    assert '"unshare", "--net", "--"' in sandbox
+    assert '"setpriv"' in sandbox
+    assert '"--no-new-privs"' in sandbox
+    assert '"--bounding-set=-all"' in sandbox
+    assert '"env",' in sandbox and '"-i",' in sandbox
+    assert "refusing secret-like sandbox environment key" in sandbox
+    assert "TRUSTED_REPO.chmod(0o700)" in sandbox
+    assert "self.original.chmod(0o700)" in sandbox
+
+
+def test_hidden_evaluators_keep_oracle_assertions_outside_candidate_process() -> None:
+    ioniq = (
+        ROOT / "hidden-evaluators" / "ioniq-control" / "calibration" / "evaluator.py"
+    ).read_text(encoding="utf-8")
+    solar = (
+        ROOT / "hidden-evaluators" / "solar-monitoring" / "energy-routing" / "evaluator.py"
+    ).read_text(encoding="utf-8")
+    keryx = (
+        ROOT / "hidden-evaluators" / "keryx" / "conversation-runtime" / "evaluator.py"
+    ).read_text(encoding="utf-8")
+
+    assert "with CandidateSandbox(candidate) as sandbox:" in ioniq
+    assert "sandbox.request_python" in ioniq
+    assert "_reference_project" in ioniq
+    assert "with CandidateSandbox(candidate) as sandbox:" in solar
+    assert "sandbox.request_python" in solar
+    assert "with CandidateSandbox(candidate) as sandbox:" in keryx
+    assert "sandbox.request_go_test" in keryx
+    assert "expected_replay" in keryx

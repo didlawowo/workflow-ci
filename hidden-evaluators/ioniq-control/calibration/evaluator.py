@@ -3,56 +3,114 @@ from __future__ import annotations
 import copy
 import math
 import random
-import sys
 from pathlib import Path
 from statistics import median
 
+from sandbox import CandidateSandbox
 
-def _load_candidate(candidate: Path):
-    sys.path.insert(0, str(candidate))
-    sys.path.insert(0, str(candidate / "src"))
-    from scripts import auto_geometric_finalize as finalize
-    from src.dataset import calibration_readiness as readiness
+BRIDGE = r"""
+import dataclasses
+import json
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path.cwd()))
+sys.path.insert(0, str(Path.cwd() / "src"))
+
+def restore(value):
+    if isinstance(value, dict):
+        if value == {"__workflow_ci_float__": "inf"}:
+            return float("inf")
+        return {key: restore(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [restore(item) for item in value]
+    return value
+
+
+request = restore(json.loads(sys.stdin.read()))
+op = request["op"]
+
+if op == "fit_extrinsics":
     from src.radar import calibration
-    return calibration, readiness, finalize
+
+    intrinsics = calibration.Intrinsics(**request["intrinsics"])
+    rows = []
+    for raw in request["train"]:
+        row = dict(raw)
+        row["radar_xyz_m"] = tuple(row["radar_xyz_m"])
+        row["image_uv_px"] = tuple(row["image_uv_px"])
+        rows.append(calibration.Correspondence(**row))
+    result = dataclasses.asdict(calibration.fit_extrinsics(rows, intrinsics))
+elif op == "readiness_contract":
+    from src.dataset import calibration_readiness as readiness
+
+    result = {
+        "AUTO_METHOD": readiness.AUTO_METHOD,
+        "AUTO_VALIDATION_MODE": readiness.AUTO_VALIDATION_MODE,
+        "AUTO_RUNTIME_POLICY": dict(readiness.AUTO_RUNTIME_POLICY),
+    }
+elif op == "accepted_report_errors_batch":
+    from src.dataset import calibration_readiness as readiness
+
+    result = [readiness.accepted_report_errors(report) for report in request["reports"]]
+elif op == "finalize":
+    from scripts import auto_geometric_finalize as finalize
+
+    result = finalize.finalize(
+        request["report"],
+        request["holdout"],
+        request["target"],
+    )
+else:
+    raise RuntimeError(f"unsupported bridge operation: {op}")
+
+print("__WORKFLOW_CI_RESULT__=" + json.dumps({"result": result}, allow_nan=False))
+"""
+
+
+def _request(sandbox: CandidateSandbox, payload: dict) -> object:
+    value = sandbox.request_python(BRIDGE, payload)
+    if "result" not in value:
+        raise RuntimeError("candidate bridge returned no result")
+    return value["result"]
 
 
 def _signed(rng: random.Random, low: float, high: float) -> float:
     return rng.choice((-1.0, 1.0)) * rng.uniform(low, high)
 
 
-def _reference_project(point, intrinsics, pose):
-    """Independent SE(3) oracle; never calls candidate.project()."""
+def _reference_project(point, intrinsics: dict, pose: dict):
+    """Independent SE(3) oracle; never calls candidate projection code."""
     x, y, z = point
     vx, vy, vz = -y, -z, x
-    cr, sr = math.cos(pose.roll_rad), math.sin(pose.roll_rad)
-    cp, sp = math.cos(pose.pitch_rad), math.sin(pose.pitch_rad)
-    cy, sy = math.cos(pose.yaw_rad), math.sin(pose.yaw_rad)
+    cr, sr = math.cos(pose["roll_rad"]), math.sin(pose["roll_rad"])
+    cp, sp = math.cos(pose["pitch_rad"]), math.sin(pose["pitch_rad"])
+    cy, sy = math.cos(pose["yaw_rad"]), math.sin(pose["yaw_rad"])
     rx = cy * cp * vx + (cy * sp * sr - sy * cr) * vy + (cy * sp * cr + sy * sr) * vz
     ry = sy * cp * vx + (sy * sp * sr + cy * cr) * vy + (sy * sp * cr - cy * sr) * vz
     rz = -sp * vx + cp * sr * vy + cp * cr * vz
-    rx += pose.tx_m
-    ry += pose.ty_m
-    rz += pose.tz_m
+    rx += pose["tx_m"]
+    ry += pose["ty_m"]
+    rz += pose["tz_m"]
     if rz <= 1e-6:
         return None
     return (
-        intrinsics.fx * rx / rz + intrinsics.cx,
-        intrinsics.fy * ry / rz + intrinsics.cy,
+        intrinsics["fx"] * rx / rz + intrinsics["cx"],
+        intrinsics["fy"] * ry / rz + intrinsics["cy"],
     )
 
 
-def _reference_errors(samples, intrinsics, pose):
+def _reference_errors(samples, intrinsics: dict, pose: dict):
     errors = []
     for sample in samples:
-        projected = _reference_project(sample.radar_xyz_m, intrinsics, pose)
+        projected = _reference_project(sample["radar_xyz_m"], intrinsics, pose)
         if projected is None:
             errors.append(1_000_000.0)
             continue
         errors.append(
             math.hypot(
-                projected[0] - sample.image_uv_px[0],
-                projected[1] - sample.image_uv_px[1],
+                projected[0] - sample["image_uv_px"][0],
+                projected[1] - sample["image_uv_px"][1],
             )
         )
     return sorted(errors)
@@ -62,24 +120,34 @@ def _p95(values):
     return values[max(0, math.ceil(0.95 * len(values)) - 1)]
 
 
-def _synthetic_generalization(calibration, rng: random.Random) -> None:
-    intrinsics = calibration.Intrinsics(
-        fx=rng.uniform(1350.0, 1850.0),
-        fy=rng.uniform(1325.0, 1825.0),
-        cx=rng.uniform(930.0, 990.0),
-        cy=rng.uniform(515.0, 565.0),
-    )
+def _zero_pose() -> dict[str, float]:
+    return {
+        "tx_m": 0.0,
+        "ty_m": 0.0,
+        "tz_m": 0.0,
+        "roll_rad": 0.0,
+        "pitch_rad": 0.0,
+        "yaw_rad": 0.0,
+    }
 
-    # Avoid a weak random world where the null pose is accidentally close to truth.
+
+def _synthetic_generalization(sandbox: CandidateSandbox, rng: random.Random) -> None:
+    intrinsics = {
+        "fx": rng.uniform(1350.0, 1850.0),
+        "fy": rng.uniform(1325.0, 1825.0),
+        "cx": rng.uniform(930.0, 990.0),
+        "cy": rng.uniform(515.0, 565.0),
+    }
+
     for _ in range(32):
-        truth = calibration.Extrinsics(
-            tx_m=_signed(rng, 0.08, 0.22),
-            ty_m=_signed(rng, 0.06, 0.20),
-            tz_m=_signed(rng, 0.05, 0.18),
-            roll_rad=_signed(rng, 0.008, 0.028),
-            pitch_rad=_signed(rng, 0.010, 0.032),
-            yaw_rad=_signed(rng, 0.014, 0.040),
-        )
+        truth = {
+            "tx_m": _signed(rng, 0.08, 0.22),
+            "ty_m": _signed(rng, 0.06, 0.20),
+            "tz_m": _signed(rng, 0.05, 0.18),
+            "roll_rad": _signed(rng, 0.008, 0.028),
+            "pitch_rad": _signed(rng, 0.010, 0.032),
+            "yaw_rad": _signed(rng, 0.014, 0.040),
+        }
         probe = [
             (rng.uniform(12.0, 52.0), rng.uniform(-2.2, 2.2), rng.uniform(-0.45, 0.45))
             for _ in range(16)
@@ -87,7 +155,7 @@ def _synthetic_generalization(calibration, rng: random.Random) -> None:
         probe_errors = []
         for point in probe:
             uv = _reference_project(point, intrinsics, truth)
-            null_uv = _reference_project(point, intrinsics, calibration.Extrinsics())
+            null_uv = _reference_project(point, intrinsics, _zero_pose())
             if uv is not None and null_uv is not None:
                 probe_errors.append(math.hypot(uv[0] - null_uv[0], uv[1] - null_uv[1]))
         if probe_errors and median(probe_errors) >= 12.0:
@@ -101,7 +169,7 @@ def _synthetic_generalization(calibration, rng: random.Random) -> None:
 
     def rows(count: int, suffix: str, sigma: float):
         result = []
-        for index in range(count):
+        for _ in range(count):
             point = (
                 rng.uniform(12.0, 52.0),
                 rng.uniform(-2.2, 2.2),
@@ -111,38 +179,36 @@ def _synthetic_generalization(calibration, rng: random.Random) -> None:
             if projected is None:
                 raise AssertionError("trusted reference point projected behind camera")
             result.append(
-                calibration.Correspondence(
-                    observation_id=f"{rng.getrandbits(64):016x}",
-                    session_id=f"{route_token}-{suffix}",
-                    route_id=f"{route_token}-{suffix}",
-                    radar_xyz_m=point,
-                    image_uv_px=(
+                {
+                    "observation_id": f"{rng.getrandbits(64):016x}",
+                    "session_id": f"{route_token}-{suffix}",
+                    "route_id": f"{route_token}-{suffix}",
+                    "radar_xyz_m": list(point),
+                    "image_uv_px": [
                         projected[0] + rng.gauss(0.0, sigma),
                         projected[1] + rng.gauss(0.0, sigma),
-                    ),
-                )
+                    ],
+                }
             )
         return result
 
     train = rows(train_count, "a", 0.35)
     holdout = rows(holdout_count, "b", 0.15)
 
-    # Robustness challenge: corrupt a small unknown subset of training labels only.
     for index in rng.sample(range(len(train)), max(2, len(train) // 13)):
         row = train[index]
-        train[index] = calibration.Correspondence(
-            observation_id=row.observation_id,
-            session_id=row.session_id,
-            route_id=row.route_id,
-            radar_xyz_m=row.radar_xyz_m,
-            image_uv_px=(
-                row.image_uv_px[0] + _signed(rng, 35.0, 90.0),
-                row.image_uv_px[1] + _signed(rng, 25.0, 70.0),
-            ),
-        )
+        row["image_uv_px"] = [
+            row["image_uv_px"][0] + _signed(rng, 35.0, 90.0),
+            row["image_uv_px"][1] + _signed(rng, 25.0, 70.0),
+        ]
 
-    baseline = _reference_errors(holdout, intrinsics, calibration.Extrinsics())
-    fitted = calibration.fit_extrinsics(train, intrinsics)
+    baseline = _reference_errors(holdout, intrinsics, _zero_pose())
+    fitted = _request(
+        sandbox,
+        {"op": "fit_extrinsics", "train": train, "intrinsics": intrinsics},
+    )
+    if not isinstance(fitted, dict):
+        raise AssertionError("candidate fit returned invalid extrinsics")
     after = _reference_errors(holdout, intrinsics, fitted)
 
     baseline_median = median(baseline)
@@ -185,7 +251,7 @@ def _runtime_metrics(rng: random.Random) -> dict:
     }
 
 
-def _valid_auto_report(readiness, rng: random.Random, *, pixel_status: str = "accepted") -> dict:
+def _valid_auto_report(contract: dict, rng: random.Random, *, pixel_status: str = "accepted") -> dict:
     token = f"{rng.getrandbits(48):012x}"
     train_a, train_b = f"train-{token}-a", f"train-{token}-b"
     holdout_route = f"holdout-{token}"
@@ -193,12 +259,16 @@ def _valid_auto_report(readiness, rng: random.Random, *, pixel_status: str = "ac
     return {
         "schema_version": 1,
         "status": pixel_status,
-        "method": readiness.AUTO_METHOD,
+        "method": contract["AUTO_METHOD"],
         "target_route_excluded_from_calibration": target_route,
         "intrinsics": {"fx": 1600.0, "fy": 1595.0, "cx": 960.0, "cy": 540.0},
         "extrinsics": {
-            "tx_m": 0.11, "ty_m": -0.08, "tz_m": 0.07,
-            "roll_rad": 0.011, "pitch_rad": -0.017, "yaw_rad": 0.023,
+            "tx_m": 0.11,
+            "ty_m": -0.08,
+            "tz_m": 0.07,
+            "roll_rad": 0.011,
+            "pitch_rad": -0.017,
+            "yaw_rad": 0.023,
         },
         "split": {
             "train_routes": [train_a, train_b],
@@ -213,24 +283,21 @@ def _valid_auto_report(readiness, rng: random.Random, *, pixel_status: str = "ac
         },
         "thresholds": {"median_px": 8.0, "p95_px": 20.0},
         "validation": {
-            "mode": readiness.AUTO_VALIDATION_MODE,
-            "thresholds": dict(readiness.AUTO_RUNTIME_POLICY),
+            "mode": contract["AUTO_VALIDATION_MODE"],
+            "thresholds": dict(contract["AUTO_RUNTIME_POLICY"]),
             "holdout": {"route": holdout_route, **_runtime_metrics(rng)},
             "target": {"segment": target_route + "--23", **_runtime_metrics(rng)},
         },
     }
 
 
-def _policy_fail_closed(readiness, rng: random.Random) -> None:
-    report = _valid_auto_report(readiness, rng)
-    errors = readiness.accepted_report_errors(report)
-    if errors:
-        raise AssertionError(f"baseline accepted report rejected: {errors[0]}")
-
+def _policy_fail_closed(sandbox: CandidateSandbox, contract: dict, rng: random.Random) -> None:
+    report = _valid_auto_report(contract, rng)
     attacks = []
+
     relaxed = copy.deepcopy(report)
-    key = rng.choice(list(readiness.AUTO_RUNTIME_POLICY))
-    policy = float(readiness.AUTO_RUNTIME_POLICY[key])
+    key = rng.choice(list(contract["AUTO_RUNTIME_POLICY"]))
+    policy = float(contract["AUTO_RUNTIME_POLICY"][key])
     relaxed["validation"]["thresholds"][key] = (
         policy * rng.uniform(0.50, 0.90)
         if key.startswith("min_")
@@ -256,8 +323,8 @@ def _policy_fail_closed(readiness, rng: random.Random) -> None:
     attacks.append(("forged-negative-control", forged))
 
     weak = copy.deepcopy(report)
-    metric = rng.choice(list(readiness.AUTO_RUNTIME_POLICY))
-    boundary = float(readiness.AUTO_RUNTIME_POLICY[metric])
+    metric = rng.choice(list(contract["AUTO_RUNTIME_POLICY"]))
+    boundary = float(contract["AUTO_RUNTIME_POLICY"][metric])
     if metric == "min_frames_with_targets":
         weak["validation"]["target"]["frames_with_targets"] = int(boundary) - 1
     elif metric == "min_matches":
@@ -269,20 +336,35 @@ def _policy_fail_closed(readiness, rng: random.Random) -> None:
     attacks.append((f"runtime-boundary-{metric}", weak))
 
     non_finite = copy.deepcopy(report)
-    non_finite["extrinsics"]["yaw_rad"] = math.inf
+    non_finite["extrinsics"]["yaw_rad"] = {"__workflow_ci_float__": "inf"}
     attacks.append(("non-finite-extrinsics", non_finite))
 
-    for name, candidate in rng.sample(attacks, len(attacks)):
-        if not readiness.accepted_report_errors(candidate):
+    shuffled = rng.sample(attacks, len(attacks))
+    reports = [report] + [candidate for _, candidate in shuffled]
+    errors = _request(
+        sandbox,
+        {"op": "accepted_report_errors_batch", "reports": reports},
+    )
+    if not isinstance(errors, list) or len(errors) != len(reports):
+        raise AssertionError("candidate readiness returned invalid batch result")
+    if errors[0]:
+        raise AssertionError(f"baseline accepted report rejected: {errors[0][0]}")
+    for (name, _), failures in zip(shuffled, errors[1:], strict=True):
+        if not failures:
             raise AssertionError(f"fail-open policy accepted {name}")
 
 
-def _rejected_pixel_gate_never_upgrades(readiness, finalize, rng: random.Random) -> None:
-    report = _valid_auto_report(readiness, rng, pixel_status="rejected")
+def _rejected_pixel_gate_never_upgrades(
+    sandbox: CandidateSandbox, contract: dict, rng: random.Random
+) -> None:
+    report = _valid_auto_report(contract, rng, pixel_status="rejected")
     holdout = copy.deepcopy(report["validation"]["holdout"])
     target = copy.deepcopy(report["validation"]["target"])
-    result = finalize.finalize(report, holdout, target)
-    if result.get("status") != "rejected":
+    result = _request(
+        sandbox,
+        {"op": "finalize", "report": report, "holdout": holdout, "target": target},
+    )
+    if not isinstance(result, dict) or result.get("status") != "rejected":
         raise AssertionError("rejected pixel gate was upgraded by runtime evidence")
 
 
@@ -297,23 +379,27 @@ def _check(name: str, callback) -> dict[str, str]:
 def evaluate(candidate: Path, seed: int) -> list[dict[str, str]]:
     if not (candidate / "src").is_dir():
         raise RuntimeError("candidate does not look like ioniq-control")
-    calibration, readiness, finalize = _load_candidate(candidate)
     rng = random.Random(seed)
 
-    def geometry():
-        for _ in range(3):
-            _synthetic_generalization(calibration, rng)
+    with CandidateSandbox(candidate) as sandbox:
+        contract = _request(sandbox, {"op": "readiness_contract"})
+        if not isinstance(contract, dict):
+            raise RuntimeError("candidate readiness contract is invalid")
 
-    def policy():
-        for _ in range(4):
-            _policy_fail_closed(readiness, rng)
+        def geometry():
+            for _ in range(3):
+                _synthetic_generalization(sandbox, rng)
 
-    def downgrade():
-        for _ in range(2):
-            _rejected_pixel_gate_never_upgrades(readiness, finalize, rng)
+        def policy():
+            for _ in range(4):
+                _policy_fail_closed(sandbox, contract, rng)
 
-    return [
-        _check("independent-geometry-generalization", geometry),
-        _check("fail-closed-publication-policy", policy),
-        _check("rejected-gate-never-upgrades", downgrade),
-    ]
+        def downgrade():
+            for _ in range(2):
+                _rejected_pixel_gate_never_upgrades(sandbox, contract, rng)
+
+        return [
+            _check("independent-geometry-generalization", geometry),
+            _check("fail-closed-publication-policy", policy),
+            _check("rejected-gate-never-upgrades", downgrade),
+        ]
