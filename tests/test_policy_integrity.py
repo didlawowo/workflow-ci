@@ -99,3 +99,17 @@ def test_wrapper_downgrade_is_rejected(tmp_path: Path) -> None:
 
     assert result["status"] == "fail"
     assert "must move forward" in result["violations"][0]["reason"]
+
+def test_policy_integrity_workflow_resolves_annotated_release_tags() -> None:
+    workflow = (
+        Path(__file__).resolve().parents[1]
+        / ".github"
+        / "workflows"
+        / "policy-integrity.yml"
+    ).read_text(encoding="utf-8")
+
+    assert (
+        'test "$(git -C .workflow-ci-policy rev-parse HEAD)" = '
+        '"$(git -C .workflow-ci-policy rev-parse \'${{ job.workflow_sha }}^{commit}\')"'
+        in workflow
+    )
