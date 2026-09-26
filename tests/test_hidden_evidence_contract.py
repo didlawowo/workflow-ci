@@ -136,6 +136,15 @@ def test_ioniq_hidden_oracle_uses_independent_reference_projection() -> None:
     assert "calibration.metrics(" not in source
     assert "calibration.fit_extrinsics(train, intrinsics)" in source
     assert "_reference_errors(holdout, intrinsics, fitted)" in source
+    assert 'TRUSTED_AUTO_METHOD = "automatic_unambiguous_radar_yolo_bootstrap"' in source
+    assert 'TRUSTED_AUTO_VALIDATION_MODE = "operational_independent_routes"' in source
+    assert '"min_frames_with_targets": 40' in source
+    assert '"min_frame_match_rate": 0.80' in source
+    assert '"min_matches": 60' in source
+    assert '"min_inside_box_rate": 0.75' in source
+    assert '"max_center_error_median_px": 40.0' in source
+    assert "def _assert_trusted_policy_contract" in source
+    assert "dict(readiness.AUTO_RUNTIME_POLICY)" not in source
 
 
 def test_hidden_public_report_uses_opaque_seed_id_and_separate_replay_capsule() -> None:
@@ -206,6 +215,14 @@ def test_keryx_runtime_evaluator_executes_ephemeral_go_tests() -> None:
     assert "TestWorkflowCIHiddenApprovalChoicesFailClosed" in source
     assert "TestWorkflowCIHiddenReasoningClamp" in source
     assert "TestWorkflowCIHiddenRetryIsExactlyOnce" in source
+    assert "workflowCITrustedHermes" in source
+    assert "workflowCITrustedAPI" in source
+    assert "workflowCITrustedCreateThread" in source
+    assert "&fakeHermes" not in source
+    assert "newTestAPI(" not in source
+    assert "&fakeTranscriber" not in source
+    assert "createThread(t," not in source
+    assert "completedWith(" not in source
 
 
 def test_hidden_required_skipped_check_cannot_aggregate_to_pass() -> None:
