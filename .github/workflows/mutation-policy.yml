@@ -909,6 +909,22 @@ jobs:
                           return True
                   return False
 
+              # The classifier is the single source of truth for what counts
+              # as production code: test files are never in mutation scope, so
+              # demanding generated mutants for their changed functions makes
+              # the gate impossible to pass.
+              import importlib.util
+
+              _policy_spec = importlib.util.spec_from_file_location(
+                  "workflow_ci_mutation_policy",
+                  policy_root / ".github" / "scripts" / "mutation_policy.py",
+              )
+              _policy_module = importlib.util.module_from_spec(_policy_spec)
+              _policy_spec.loader.exec_module(_policy_module)
+
+              def is_production_python(relative):
+                  return _policy_module._is_python_production_path(relative)
+
               changed_functions = {}
               for relative, lines in changed_lines.items():
                   path = repo / relative
@@ -917,6 +933,7 @@ jobs:
                       or not path.is_file()
                       or path.suffix != ".py"
                       or not in_trusted_source_path(relative)
+                      or not is_production_python(relative)
                   ):
                       continue
                   try:
