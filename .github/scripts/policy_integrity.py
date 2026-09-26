@@ -19,6 +19,15 @@ PROTECTED_PATHS = (
 )
 
 WRAPPER = ".github/workflows/trusted-quality-evidence.yml"
+HIDDEN_WORKFLOW_GLOB = ".github/workflows/hidden-*-evidence.yml"
+REGISTRY = Path(__file__).resolve().parents[2] / "hidden-evaluators" / "registry.json"
+
+HIDDEN_REF_RE = re.compile(
+    r"(?m)^(\s*uses:\s*didlawowo/workflow-ci/\.github/workflows/"
+    r"hidden-evidence\.yml@)(v\d+\.\d+\.\d+)(\s*)$"
+)
+HIDDEN_EVALUATOR_RE = re.compile(r"(?m)^\s*evaluator:\s*([^\s#]+)\s*$")
+HIDDEN_RUNNER_RE = re.compile(r"(?m)^\s*runner:\s*([^\s#]+)\s*$")
 
 ACTION_REF_RE = re.compile(
     r"(didlawowo/workflow-ci/[^@\s\"']+@)"
@@ -75,10 +84,103 @@ def safe_wrapper_upgrade(base_text: str, candidate_text: str) -> tuple[bool, str
     return True, f"allowed workflow-ci migration {old} -> {new}"
 
 
-def evaluate(base: Path, candidate: Path) -> dict[str, Any]:
+def _hidden_enrollment(text: str, repository: str) -> tuple[bool, str]:
+    refs = [match.group(2) for match in HIDDEN_REF_RE.finditer(text)]
+    evaluators = HIDDEN_EVALUATOR_RE.findall(text)
+    runners = HIDDEN_RUNNER_RE.findall(text)
+    if len(refs) != 1 or len(evaluators) != 1 or len(runners) != 1:
+        return False, "hidden enrollment must declare one semantic ref, evaluator and runner"
+
+    evaluator = evaluators[0]
+    runner = runners[0]
+    registry = json.loads(REGISTRY.read_text(encoding="utf-8"))
+    spec = (registry.get("evaluators") or {}).get(evaluator)
+    if not isinstance(spec, dict):
+        return False, f"hidden evaluator is not registered: {evaluator}"
+    if spec.get("repository") != repository:
+        return False, f"hidden evaluator {evaluator} is not bound to {repository}"
+
+    expected_runner = "arc-runner-" + repository.split("/", 1)[-1]
+    if runner != expected_runner:
+        return False, f"hidden runner must be {expected_runner}"
+    return True, f"registered hidden enrollment {evaluator} at {refs[0]}"
+
+
+def _normalize_hidden(text: str) -> str:
+    return HIDDEN_REF_RE.sub(r"\1__WORKFLOW_CI_VERSION__\3", text)
+
+
+def safe_hidden_upgrade(
+    base_text: str, candidate_text: str, repository: str
+) -> tuple[bool, str]:
+    base_ok, base_reason = _hidden_enrollment(base_text, repository)
+    if not base_ok:
+        return False, "protected base hidden enrollment is invalid: " + base_reason
+    candidate_ok, candidate_reason = _hidden_enrollment(candidate_text, repository)
+    if not candidate_ok:
+        return False, candidate_reason
+
+    old = HIDDEN_REF_RE.search(base_text)
+    new = HIDDEN_REF_RE.search(candidate_text)
+    assert old and new
+    old_version = old.group(2)
+    new_version = new.group(2)
+    if _semver(new_version) <= _semver(old_version):
+        return False, f"hidden workflow-ci migration must move forward ({old_version} -> {new_version})"
+    if _normalize_hidden(base_text) != _normalize_hidden(candidate_text):
+        return False, "hidden enrollment changed beyond workflow-ci semantic ref"
+    return True, f"allowed hidden workflow-ci migration {old_version} -> {new_version}"
+
+
+def _hidden_paths(root: Path) -> set[str]:
+    workflows = root / ".github" / "workflows"
+    if not workflows.is_dir():
+        return set()
+    return {
+        path.relative_to(root).as_posix()
+        for path in workflows.glob("hidden-*-evidence.yml")
+        if path.is_file()
+    }
+
+
+def evaluate(base: Path, candidate: Path, repository: str = "") -> dict[str, Any]:
     changed: list[str] = []
     allowed: list[dict[str, str]] = []
     violations: list[dict[str, str]] = []
+
+    hidden_paths = _hidden_paths(base) | _hidden_paths(candidate)
+    for relative in sorted(hidden_paths):
+        before = _read(base, relative)
+        after = _read(candidate, relative)
+        if before == after:
+            continue
+        changed.append(relative)
+
+        if not repository:
+            violations.append({
+                "path": relative,
+                "reason": "repository identity is required to validate hidden enrollment",
+            })
+            continue
+        if before is None and after is not None:
+            ok, reason = _hidden_enrollment(after, repository)
+            if ok:
+                allowed.append({"path": relative, "reason": reason})
+            else:
+                violations.append({"path": relative, "reason": reason})
+            continue
+        if before is not None and after is None:
+            violations.append({
+                "path": relative,
+                "reason": "protected hidden enrollment was removed by the candidate",
+            })
+            continue
+        assert before is not None and after is not None
+        ok, reason = safe_hidden_upgrade(before, after, repository)
+        if ok:
+            allowed.append({"path": relative, "reason": reason})
+        else:
+            violations.append({"path": relative, "reason": reason})
 
     for relative in PROTECTED_PATHS:
         before = _read(base, relative)
@@ -117,9 +219,10 @@ def main() -> int:
     parser.add_argument("--base", required=True, type=Path)
     parser.add_argument("--candidate", required=True, type=Path)
     parser.add_argument("--report", required=True, type=Path)
+    parser.add_argument("--repository", required=True)
     args = parser.parse_args()
 
-    report = evaluate(args.base.resolve(), args.candidate.resolve())
+    report = evaluate(args.base.resolve(), args.candidate.resolve(), args.repository)
     args.report.parent.mkdir(parents=True, exist_ok=True)
     args.report.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     print(json.dumps(report, sort_keys=True))
