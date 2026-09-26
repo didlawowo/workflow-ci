@@ -316,6 +316,12 @@ def test_docker_actions_use_node24_capable_majors():
     assert "docker/build-push-action@v6" not in TEXT
 
 
+def test_reusable_ci_propagates_native_auto_default():
+    reusable = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+    assert "native-multiarch:\n        required: false\n        type: string\n        default: \"auto\"" in reusable
+    assert "native-multiarch: ${{ inputs.native-multiarch }}" in reusable
+
+
 def test_arc_auto_prefers_native_buildkit_and_skips_qemu():
     resolve = STEPS["Resolve Docker build execution mode"]
     qemu = STEPS["Set up QEMU"]
