@@ -324,6 +324,7 @@ def test_arc_auto_prefers_native_buildkit_and_skips_qemu():
 
     assert 'NATIVE_MULTIARCH: ${{ inputs.native-multiarch }}' in resolve
     assert 'RUNNER_NAME: ${{ runner.name }}' in resolve
+    assert '[ "$PUSH_IMAGE" = "true" ]' in resolve
     assert '[[ "$RUNNER_NAME" == arc-runner-* ]]' in resolve
     assert 'echo "use-native=$use_native"' in resolve
     assert "steps.execution-mode.outputs.use-native != 'true'" in qemu
