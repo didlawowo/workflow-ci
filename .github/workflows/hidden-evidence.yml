@@ -61,22 +61,31 @@ jobs:
           fetch-depth: 1
           persist-credentials: false
 
+      - name: Checkout exact protected base
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ github.repository }}
+          ref: ${{ github.event.pull_request.base.sha }}
+          path: base
+          fetch-depth: 1
+          persist-credentials: false
+
       - name: Checkout exact candidate revision
         uses: actions/checkout@v7
         with:
           repository: ${{ github.repository }}
           ref: refs/pull/${{ github.event.pull_request.number }}/head
           path: candidate
-          fetch-depth: 0
+          fetch-depth: 1
           persist-credentials: false
 
-      - name: Verify trusted and candidate identities
+      - name: Verify trusted, base and candidate identities
         shell: bash
         run: |
           set -euo pipefail
           test "$(git -C .workflow-ci-hidden rev-parse HEAD)" = "${{ job.workflow_sha }}"
+          test "$(git -C base rev-parse HEAD)" = "${{ github.event.pull_request.base.sha }}"
           test "$(git -C candidate rev-parse HEAD)" = "${{ github.event.pull_request.head.sha }}"
-          git -C candidate cat-file -e "${{ github.event.pull_request.base.sha }}^{commit}"
 
       - name: Resolve central evaluator scope
         id: scope
@@ -90,7 +99,36 @@ jobs:
           set -euo pipefail
           CHANGED="${RUNNER_TEMP:-/tmp}/hidden-changed-${GITHUB_RUN_ID}.txt"
           SCOPE="${RUNNER_TEMP:-/tmp}/hidden-scope-${GITHUB_RUN_ID}.json"
-          git -C candidate diff --name-only "$BASE_SHA...$HEAD_SHA" > "$CHANGED"
+          python3 - "$CHANGED" <<'PY'
+          import subprocess
+          import sys
+
+          def tracked(root: str) -> dict[str, tuple[str, str]]:
+              raw = subprocess.check_output(
+                  ["git", "-C", root, "ls-files", "-s", "-z"],
+                  text=False,
+              )
+              result: dict[str, tuple[str, str]] = {}
+              for entry in raw.decode("utf-8", errors="surrogateescape").split("\0"):
+                  if not entry:
+                      continue
+                  metadata, path = entry.split("\t", 1)
+                  mode, blob, stage = metadata.split()
+                  if stage == "0":
+                      result[path] = (mode, blob)
+              return result
+
+          base = tracked("base")
+          candidate = tracked("candidate")
+          changed = sorted(
+              path
+              for path in set(base) | set(candidate)
+              if base.get(path) != candidate.get(path)
+          )
+          with open(sys.argv[1], "w", encoding="utf-8") as handle:
+              for path in changed:
+                  handle.write(path + "\n")
+          PY
           python3 .workflow-ci-hidden/hidden-evaluators/run.py scope \
             --evaluator "$EVALUATOR" \
             --repository "$REPOSITORY" \
