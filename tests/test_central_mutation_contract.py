@@ -219,3 +219,66 @@ def test_mutmut_diagnostics_reconstruction_uses_exact_requested_scope(tmp_path):
     assert "service.x_target__mutmut_1: killed" in result
     assert "service.x_target__mutmut_2: survived" in result
     assert "unrelated" not in result
+
+
+def test_mutmut_diagnostics_reconstruction_accepts_full_collection_total_in_scoped_runs(
+    tmp_path,
+):
+    script = (ROOT / ".ci" / "mutation.sh").read_text(encoding="utf-8")
+    marker = (
+        '"$PYTHON" - "$RAW_RESULTS" mutants/mutmut-cicd-stats.json '
+        '.quality/mutmut-results.txt "${MUTATION_TARGETS[@]}" <<\'PY\''
+    )
+    embedded = script.split(marker, 1)[1].split("\nPY\n", 1)[0].lstrip("\n")
+
+    mutants = tmp_path / "mutants"
+    source_dir = mutants / "src"
+    source_dir.mkdir(parents=True)
+    (source_dir / "service.py").write_text(
+        "\n".join(
+            [
+                "mutants_service['x_target__mutmut_1'] = None",
+                "mutants_service['x_target__mutmut_2'] = None",
+                "mutants_service['x_unrelated__mutmut_1'] = None",
+                "mutants_service['x_unrelated__mutmut_2'] = None",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    raw = tmp_path / "raw.txt"
+    raw.write_text("", encoding="utf-8")
+    stats = mutants / "mutmut-cicd-stats.json"
+    stats.write_text(
+        json.dumps(
+            {
+                "total": 4,
+                "killed": 2,
+                "survived": 0,
+                "timeouts": 0,
+                "suspicious": 0,
+            }
+        ),
+        encoding="utf-8",
+    )
+    output = tmp_path / "results.txt"
+
+    subprocess.run(
+        [
+            sys.executable,
+            "-",
+            str(raw),
+            str(stats),
+            str(output),
+            "service.*target__mutmut_*",
+        ],
+        input=embedded,
+        text=True,
+        cwd=tmp_path,
+        check=True,
+    )
+
+    result = output.read_text(encoding="utf-8")
+    assert "service.x_target__mutmut_1: killed" in result
+    assert "service.x_target__mutmut_2: killed" in result
+    assert "unrelated" not in result

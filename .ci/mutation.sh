@@ -213,7 +213,10 @@ for source in Path("mutants").rglob("*.py"):
         if in_scope(mutant_id):
             all_mutants.add(mutant_id)
 
-if expected_total and len(all_mutants) != expected_total:
+# Scoped runs: `mutmut export-cicd-stats` reports total as the full project
+# collection, not the requested target scope, so only full runs can be
+# cross-checked against it; scoped runs are cross-checked via the killed count.
+if not target_patterns and expected_total and len(all_mutants) != expected_total:
     raise SystemExit(
         f"mutmut diagnostics mismatch: generated={len(all_mutants)} total={expected_total}"
     )
