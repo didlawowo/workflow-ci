@@ -156,11 +156,12 @@ def test_python_runner_requests_all_mutmut_statuses():
     assert 'mutmut results --all true > "$RAW_RESULTS"' in script
 
 
-def test_go_runner_executes_from_nested_module_and_keeps_evidence_at_repo_root(
-    tmp_path,
+@pytest.mark.parametrize("project_directory", [".", "src-é"])
+def test_go_runner_handles_raw_unicode_paths_and_keeps_evidence_at_repo_root(
+    tmp_path, project_directory
 ):
     repo = tmp_path / "consumer"
-    module = repo / "src"
+    module = repo if project_directory == "." else repo / project_directory
     tools = tmp_path / "tools"
     module.mkdir(parents=True)
     tools.mkdir()
@@ -169,7 +170,7 @@ def test_go_runner_executes_from_nested_module_and_keeps_evidence_at_repo_root(
     subprocess.run(["git", "-C", repo, "config", "user.email", "ci@example.test"], check=True)
     subprocess.run(["git", "-C", repo, "config", "user.name", "Mutation self-test"], check=True)
     (module / "go.mod").write_text("module example.test/consumer\ngo 1.25\n")
-    source = module / "calc.go"
+    source = module / "café.go"
     source.write_text("package consumer\n\nfunc Add(a, b int) int { return a + b }\n")
     subprocess.run(["git", "-C", repo, "add", "."], check=True)
     subprocess.run(["git", "-C", repo, "commit", "-qm", "base"], check=True)
@@ -189,6 +190,7 @@ def test_go_runner_executes_from_nested_module_and_keeps_evidence_at_repo_root(
     (tools / "gremlins").write_text(
         """#!/bin/sh
 if [ "$1" = --version ]; then echo 0.6.0; exit 0; fi
+[ "$PWD" = "$EXPECTED_GREMLINS_CWD" ] || exit 42
 while [ "$#" -gt 0 ]; do
   if [ "$1" = --output ]; then output="$2"; shift 2; else shift; fi
 done
@@ -210,7 +212,8 @@ JSON
     env["PATH"] = f"{tools}:{env['PATH']}"
     env["MUTATION_BASE_SHA"] = base
     env["MUTATION_HEAD_SHA"] = head
-    env["MUTATION_WORKING_DIRECTORY"] = "src"
+    env["MUTATION_WORKING_DIRECTORY"] = project_directory
+    env["EXPECTED_GREMLINS_CWD"] = str(module)
     completed = subprocess.run(
         ["bash", ROOT / ".ci" / "mutation-go.sh"],
         cwd=repo,
@@ -228,7 +231,8 @@ JSON
         "suspicious": 0,
         "total": 1,
     }
-    assert not (module / ".quality").exists()
+    if module != repo:
+        assert not (module / ".quality").exists()
 
 
 def test_mutmut_diagnostics_reconstruction_uses_exact_requested_scope(tmp_path):

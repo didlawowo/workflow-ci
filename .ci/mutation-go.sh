@@ -83,12 +83,17 @@ if [[ -z "$GREMLINS" ]]; then
   fi
 fi
 
-changed_go="$(
-  git -C "$REPO_ROOT" diff --name-only "$BASE_SHA...$HEAD_SHA" -- "$PROJECT_DIRECTORY" |
-    grep -E '\.go$' |
-    grep -Ev '(^|/).*_test\.go$|^(vendor|testdata|tests)/' || true
-)"
-if [[ -z "$changed_go" ]]; then
+CHANGED_GO=()
+while IFS= read -r -d '' path; do
+  case "$path" in
+    *_test.go|vendor/*|testdata/*|tests/*) ;;
+    *.go) CHANGED_GO+=("$path") ;;
+  esac
+done < <(
+  git -C "$REPO_ROOT" diff --name-only -z \
+    "$BASE_SHA...$HEAD_SHA" -- "$PROJECT_DIRECTORY"
+)
+if [[ "${#CHANGED_GO[@]}" -eq 0 ]]; then
   uv run --no-project --python 3.12 python - "$BASE_SHA" "$HEAD_SHA" "$REPORT" <<'PY'
 import json
 import sys

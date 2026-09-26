@@ -298,9 +298,15 @@ jobs:
               ;;
           esac
 
-          mapfile -t CHANGED_GO < <(
-            git -C "$PR_ROOT" diff --name-only "$MUTATION_BASE_SHA...$MUTATION_HEAD_SHA" -- '*.go' |
-              grep -Ev '(^|/).*_test\.go$|^(vendor|testdata|tests)/' || true
+          CHANGED_GO=()
+          while IFS= read -r -d '' path; do
+            case "$path" in
+              *_test.go|vendor/*|testdata/*|tests/*) ;;
+              *.go) CHANGED_GO+=("$path") ;;
+            esac
+          done < <(
+            git -C "$PR_ROOT" diff --name-only -z \
+              "$MUTATION_BASE_SHA...$MUTATION_HEAD_SHA" -- '*.go'
           )
 
           if [[ -f "$PROJECT_ROOT/go.mod" ]]; then

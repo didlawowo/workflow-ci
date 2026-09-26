@@ -134,6 +134,8 @@ def test_github_go_mutation_honors_nested_project_without_shrinking_scope():
     assert "realpath -e \"$PR_ROOT/$REQUESTED_DIRECTORY\"" in workflow
     assert "Mutation working-directory escapes the pull request checkout" in workflow
     assert "Changed Go production file '$path' is outside mutation working-directory" in workflow
+    assert 'git -C "$PR_ROOT" diff --name-only -z' in workflow
+    assert "while IFS= read -r -d '' path" in workflow
     assert "go-version-file: pr/${{ steps.runner.outputs.working-directory }}/go.mod" in workflow
     assert "MUTATION_WORKING_DIRECTORY=\"$MUTATION_WORKING_DIRECTORY\"" in workflow
 
@@ -142,6 +144,8 @@ def test_github_go_mutation_honors_nested_project_without_shrinking_scope():
     assert 'QUALITY_DIR="$REPO_ROOT/.quality"' in runner
     assert 'cd "$PROJECT_ROOT"' in runner
     assert 'git -C "$REPO_ROOT" diff' in runner
+    assert "diff --name-only -z" in runner
+    assert "while IFS= read -r -d '' path" in runner
     assert '-- "$PROJECT_DIRECTORY"' in runner
 
 
