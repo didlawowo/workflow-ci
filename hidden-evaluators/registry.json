@@ -14,6 +14,21 @@
         "scripts/auto_geometric_operational_holdout.py",
         "scripts/auto_geometric_finalize.py"
       ]
+    },
+    "solar-monitoring/energy-routing": {
+      "repository": "didlawowo/solar-monitoring",
+      "entrypoint": "hidden-evaluators/solar-monitoring/energy-routing/evaluator.py",
+      "paths": [
+        "src/controllers/**",
+        "src/core/**",
+        "src/providers/**",
+        "src/zendure.py",
+        "src/zendure_ble.py",
+        "src/zappi.py",
+        "src/water_heater.py",
+        "src/enphase.py",
+        "src/ioniq5.py"
+      ]
     }
   },
   "planned": {
@@ -24,10 +39,6 @@
     "jet-racer-v2/control-safety": {
       "repository": "didlawowo/jet-racer-v2",
       "issue": "didlawowo/jet-racer-v2#58"
-    },
-    "solar-monitoring/energy-routing": {
-      "repository": "didlawowo/solar-monitoring",
-      "issue": "didlawowo/solar-monitoring#256"
     }
   }
 }
