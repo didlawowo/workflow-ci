@@ -122,14 +122,15 @@ inputs:
     default: ""
   native-multiarch:
     description: |
-      Build each platform on NATIVE hardware via remote BuildKit nodes instead of
-      QEMU emulation. When 'true', skips setup-qemu/setup-buildx and creates a buildx
-      builder with two remote nodes (amd64 + arm64) — arm64 builds run on native arm64
-      hardware (no QEMU). Requires the buildkitd-amd64/buildkitd-arm64 services to be
-      reachable (see continuous-delivery: infrastructure-crds/rke2-infra/buildkitd-remote.yaml).
-      Default 'false' keeps the QEMU path (rollback-safe).
+      Select the Docker build execution mode.
+      - 'auto' (default): ARC runners use the native remote BuildKit workers for
+        linux/amd64 and linux/arm64; other runners keep the portable local/QEMU path.
+      - 'true': force native remote BuildKit.
+      - 'false': force the legacy local docker-container/QEMU path.
+      Native mode avoids QEMU emulation and the per-job binfmt image pull entirely.
+      Requires buildkitd-amd64/buildkitd-arm64 in arc-system.
     required: false
-    default: "false"
+    default: "auto"
   buildkit-amd64-endpoint:
     description: "Remote BuildKit endpoint for linux/amd64 (native-multiarch=true)."
     required: false
@@ -184,23 +185,59 @@ runs:
         Builds continue but may hit the 100/6h-per-IP anonymous rate limit shared by the cluster runners. \
         Check DOCKERHUB_USERNAME/DOCKERHUB_TOKEN if this persists."
 
-    # setup-qemu-action runs `docker run <image> --install all` to install
-    # binfmt handlers. By default that image is tonistiigi/binfmt:latest on
-    # Docker Hub, where anonymous pulls are rate-limited per IP. We point it
-    # at the oci-storage mirror to avoid even depending on Docker Hub for
-    # QEMU setup. Authenticated Docker Hub login (above) is a separate
-    # defense covering FROM directives in user Dockerfiles.
-    # QEMU + docker-container Buildx: the emulated multi-arch path. Skipped when
-    # native-multiarch=true (remote BuildKit nodes handle each arch natively).
-    - name: Detect whether QEMU is required
+    # Resolve the effective build mode once. ARC runners live in arc-system and
+    # can reach the persistent native BuildKit workers, so 'auto' deliberately
+    # avoids QEMU there. Other runners retain the portable QEMU fallback.
+    #
+    # Do not probe /proc/sys/fs/binfmt_misc from the runner container: handlers
+    # are host-global but that procfs view is not a reliable capability signal
+    # across ARC runner/dind mount namespaces.
+    - name: Resolve Docker build execution mode
       id: execution-mode
-      if: inputs.native-multiarch != 'true'
       shell: bash
       env:
         REQUESTED_PLATFORMS: ${{ inputs.platforms }}
         PUSH_IMAGE: ${{ inputs.push }}
+        NATIVE_MULTIARCH: ${{ inputs.native-multiarch }}
+        RUNNER_NAME: ${{ runner.name }}
       run: |
         set -euo pipefail
+
+        case "$NATIVE_MULTIARCH" in
+          auto|true|false) ;;
+          *)
+            echo "::error title=Invalid native-multiarch::Expected auto, true or false; got '$NATIVE_MULTIARCH'"
+            exit 1
+            ;;
+        esac
+
+        use_native=false
+        if [ "$NATIVE_MULTIARCH" = "true" ]; then
+          use_native=true
+        elif [ "$NATIVE_MULTIARCH" = "auto" ] && [ "$PUSH_IMAGE" = "true" ] && [[ "$RUNNER_NAME" == arc-runner-* ]]; then
+          supported=true
+          IFS=',' read -ra targets <<< "$REQUESTED_PLATFORMS"
+          for target in "${targets[@]}"; do
+            target="$(echo "$target" | xargs)"
+            case "$target" in
+              linux/amd64|linux/arm64|"") ;;
+              *) supported=false ;;
+            esac
+          done
+          if [ "$supported" = "true" ]; then
+            use_native=true
+          fi
+        fi
+
+        echo "use-native=$use_native" >> "$GITHUB_OUTPUT"
+
+        if [ "$use_native" = "true" ]; then
+          echo "needs-qemu=false" >> "$GITHUB_OUTPUT"
+          echo "qemu-preinstalled=false" >> "$GITHUB_OUTPUT"
+          echo "Using native remote BuildKit workers; QEMU setup disabled."
+          exit 0
+        fi
+
         case "$(uname -m)" in
           x86_64) native_platform="linux/amd64" ;;
           aarch64|arm64) native_platform="linux/arm64" ;;
@@ -234,6 +271,7 @@ runs:
         if [ "$needs_qemu" != "true" ]; then
           qemu_preinstalled=false
         fi
+
         echo "native-platform=$native_platform" >> "$GITHUB_OUTPUT"
         echo "needs-qemu=$needs_qemu" >> "$GITHUB_OUTPUT"
         echo "qemu-preinstalled=$qemu_preinstalled" >> "$GITHUB_OUTPUT"
@@ -242,7 +280,7 @@ runs:
         fi
 
     - name: Set up QEMU
-      if: inputs.native-multiarch != 'true' && steps.execution-mode.outputs.needs-qemu == 'true' && steps.execution-mode.outputs.qemu-preinstalled != 'true'
+      if: steps.execution-mode.outputs.use-native != 'true' && steps.execution-mode.outputs.needs-qemu == 'true' && steps.execution-mode.outputs.qemu-preinstalled != 'true'
       uses: docker/setup-qemu-action@v4
       with:
         image: ${{ inputs.qemu-image }}
@@ -262,7 +300,7 @@ runs:
         cat "$CONFIG"
 
     - name: Set up Docker Buildx
-      if: inputs.native-multiarch != 'true'
+      if: steps.execution-mode.outputs.use-native != 'true'
       uses: docker/setup-buildx-action@v4
       with:
         driver-opts: image=moby/buildkit:buildx-stable-1
@@ -271,7 +309,7 @@ runs:
     # Native multi-arch: one remote BuildKit node per arch (no QEMU). buildx routes
     # linux/amd64 -> amd64 node, linux/arm64 -> arm64 node (native hardware).
     - name: Set up native multi-arch Buildx (remote BuildKit)
-      if: inputs.native-multiarch == 'true'
+      if: steps.execution-mode.outputs.use-native == 'true'
       shell: bash
       env:
         REQUESTED_PLATFORMS: ${{ inputs.platforms }}
@@ -404,12 +442,12 @@ runs:
 
     - name: Build and push Docker image
       id: build
-      continue-on-error: ${{ inputs.native-multiarch == 'true' }}
+      continue-on-error: ${{ steps.execution-mode.outputs.use-native == 'true' }}
       uses: docker/build-push-action@v7
       with:
         # Use the native remote builder when enabled; otherwise the default
         # (docker-container) builder from setup-buildx-action above.
-        builder: ${{ inputs.native-multiarch == 'true' && 'native' || '' }}
+        builder: ${{ steps.execution-mode.outputs.use-native == 'true' && 'native' || '' }}
         context: ${{ inputs.context }}
         file: ${{ inputs.dockerfile }}
         target: ${{ inputs.dockerfile-target || '' }}
@@ -432,7 +470,7 @@ runs:
         # a ClusterIP Service without a 443 port returns. Result: "Head https://
         # <svc>/v2/…: dial tcp <svc-ip>:443: no route to host" (solar-monitoring
         # v0.34.2, 2026-09-02). buildx folds `push: true` into this image output.
-        outputs: ${{ inputs.push == 'true' && inputs.registry-plain-http == 'true' && inputs.native-multiarch == 'true' && 'type=image,push=true,registry.insecure=true' || '' }}
+        outputs: ${{ inputs.push == 'true' && inputs.registry-plain-http == 'true' && steps.execution-mode.outputs.use-native == 'true' && 'type=image,push=true,registry.insecure=true' || '' }}
         tags: ${{ steps.meta.outputs.tags }}
         labels: ${{ inputs.labels }}
         build-args: ${{ inputs.build-args }}
@@ -453,7 +491,7 @@ runs:
 
     - name: Retry native remote BuildKit once
       id: build-retry
-      if: inputs.native-multiarch == 'true' && steps.build.outcome == 'failure'
+      if: steps.execution-mode.outputs.use-native == 'true' && steps.build.outcome == 'failure'
       uses: docker/build-push-action@v7
       with:
         builder: native
@@ -473,7 +511,7 @@ runs:
         provenance: ${{ inputs.provenance == 'true' && 'mode=max' || 'false' }}
 
     - name: Enforce native Docker build result
-      if: failure() && inputs.native-multiarch == 'true' && steps.build.outcome == 'failure' && steps.build-retry.outcome != 'success'
+      if: failure() && steps.execution-mode.outputs.use-native == 'true' && steps.build.outcome == 'failure' && steps.build-retry.outcome != 'success'
       shell: bash
       run: |
         echo "::error::Remote BuildKit build failed twice; refusing to hide a persistent build failure."
