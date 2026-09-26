@@ -238,6 +238,17 @@ jobs:
           NEW_VERSION: ${{ steps.bump.outputs.version }}
         run: |
           set -euo pipefail
+          requested="${UV_CACHE_DIR:-}"
+          cache="${RUNNER_TEMP:-/tmp}/uv-cache"
+          if [[ -n "$requested" ]] && mkdir -p "$requested" 2>/dev/null && \
+            probe="$(mktemp "$requested/.workflow-ci-write-test.XXXXXX" 2>/dev/null)"; then
+            rm -f "$probe"
+            cache="$requested"
+          fi
+          mkdir -p "$cache"
+          probe="$(mktemp "$cache/.workflow-ci-write-test.XXXXXX")"
+          rm -f "$probe"
+          export UV_CACHE_DIR="$cache"
           echo "Running post-bump command:"
           echo "$POST_BUMP_COMMAND"
           bash -euo pipefail -c "$POST_BUMP_COMMAND"
