@@ -153,7 +153,7 @@ def test_config_changes_are_rejected_before_git_or_execution(tmp_path, monkeypat
 
 def test_python_runner_requests_all_mutmut_statuses():
     script = (ROOT / ".ci" / "mutation.sh").read_text(encoding="utf-8")
-    assert 'mutmut results --all > "$RAW_RESULTS"' in script
+    assert 'mutmut results --all true > "$RAW_RESULTS"' in script
 
 
 def test_mutmut_diagnostics_reconstruction_uses_exact_requested_scope(tmp_path):
