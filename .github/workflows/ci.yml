@@ -89,8 +89,8 @@ on:
         default: "linux/amd64"
       native-multiarch:
         required: false
-        type: boolean
-        default: false
+        type: string
+        default: "auto"
     secrets:
       OCI_USERNAME:
         required: false
