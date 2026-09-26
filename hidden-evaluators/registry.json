@@ -29,13 +29,24 @@
         "src/enphase.py",
         "src/ioniq5.py"
       ]
+    },
+    "keryx/conversation-runtime": {
+      "repository": "didlawowo/keryx",
+      "entrypoint": "hidden-evaluators/keryx/conversation-runtime/evaluator.py",
+      "paths": [
+        "pkg/handlers/**",
+        "pkg/hermes/**",
+        "pkg/llm/**",
+        "pkg/store/**",
+        "pkg/web/**",
+        "web/src/App.tsx",
+        "web/src/hooks/**",
+        "web/src/lib/**",
+        "web/src/types.ts"
+      ]
     }
   },
   "planned": {
-    "keryx/conversation-runtime": {
-      "repository": "didlawowo/keryx",
-      "issue": "didlawowo/keryx#469"
-    },
     "jet-racer-v2/control-safety": {
       "repository": "didlawowo/jet-racer-v2",
       "issue": "didlawowo/jet-racer-v2#58"
