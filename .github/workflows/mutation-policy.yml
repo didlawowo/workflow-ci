@@ -13,6 +13,11 @@ on:
         required: false
         type: string
         default: ""
+      working-directory:
+        description: "Project directory containing the language manifest"
+        required: false
+        type: string
+        default: "."
     outputs:
       required:
         description: "Whether mutation testing is mandatory for this PR"
@@ -227,6 +232,10 @@ jobs:
         id: runner
         if: steps.policy.outputs.required == 'true'
         shell: bash
+        env:
+          MUTATION_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          MUTATION_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          MUTATION_WORKING_DIRECTORY: ${{ inputs.working-directory }}
         run: |
           set -euo pipefail
           CUSTOM="$GITHUB_WORKSPACE/.policy/.ci/mutation.sh"
@@ -273,12 +282,54 @@ jobs:
             echo "::warning::Protected .ci/mutation.sh runs a mutation engine but publishes no supported trusted evidence; falling back to the central runner."
           fi
 
-          if [[ -f "$GITHUB_WORKSPACE/pr/go.mod" ]]; then
-            echo "path=$GITHUB_WORKSPACE/.workflow-ci/.ci/mutation-go.sh" >> "$GITHUB_OUTPUT"
-            echo "source=workflow-ci-go" >> "$GITHUB_OUTPUT"
+          PR_ROOT="$(realpath -e "$GITHUB_WORKSPACE/pr")"
+          REQUESTED_DIRECTORY="${MUTATION_WORKING_DIRECTORY:-.}"
+          if [[ "$REQUESTED_DIRECTORY" == /* ]]; then
+            echo "::error::Mutation working-directory must be relative to the repository root."
+            exit 1
+          fi
+          PROJECT_ROOT="$(realpath -e "$PR_ROOT/$REQUESTED_DIRECTORY")"
+          case "$PROJECT_ROOT" in
+            "$PR_ROOT") PROJECT_DIRECTORY="." ;;
+            "$PR_ROOT"/*) PROJECT_DIRECTORY="${PROJECT_ROOT#"$PR_ROOT"/}" ;;
+            *)
+              echo "::error::Mutation working-directory escapes the pull request checkout."
+              exit 1
+              ;;
+          esac
+
+          mapfile -t CHANGED_GO < <(
+            git -C "$PR_ROOT" diff --name-only "$MUTATION_BASE_SHA...$MUTATION_HEAD_SHA" -- '*.go' |
+              grep -Ev '(^|/).*_test\.go$|^(vendor|testdata|tests)/' || true
+          )
+
+          if [[ -f "$PROJECT_ROOT/go.mod" ]]; then
+            if [[ "$PROJECT_DIRECTORY" != "." ]]; then
+              for path in "${CHANGED_GO[@]}"; do
+                case "$path" in
+                  "$PROJECT_DIRECTORY"/*) ;;
+                  *)
+                    echo "::error::Changed Go production file '$path' is outside mutation working-directory '$PROJECT_DIRECTORY'."
+                    exit 1
+                    ;;
+                esac
+              done
+            fi
+            {
+              echo "path=$GITHUB_WORKSPACE/.workflow-ci/.ci/mutation-go.sh"
+              echo "source=workflow-ci-go"
+              echo "working-directory=$PROJECT_DIRECTORY"
+            } >> "$GITHUB_OUTPUT"
           elif [[ -f "$GITHUB_WORKSPACE/pr/pyproject.toml" || -f "$GITHUB_WORKSPACE/pr/setup.cfg" ]] || find "$GITHUB_WORKSPACE/pr" -type f -name '*.py' -not -path '*/.venv/*' -print -quit | grep -q .; then
-            echo "path=$GITHUB_WORKSPACE/.workflow-ci/.ci/mutation.sh" >> "$GITHUB_OUTPUT"
-            echo "source=workflow-ci-python" >> "$GITHUB_OUTPUT"
+            if [[ "${#CHANGED_GO[@]}" -gt 0 ]]; then
+              echo "::error::The selected mutation working-directory '$PROJECT_DIRECTORY' has no go.mod for changed Go production files."
+              exit 1
+            fi
+            {
+              echo "path=$GITHUB_WORKSPACE/.workflow-ci/.ci/mutation.sh"
+              echo "source=workflow-ci-python"
+              echo "working-directory=."
+            } >> "$GITHUB_OUTPUT"
           else
             echo "::error::No central mutation runner is available for this repository type."
             echo "::error::Add a protected-base .ci/mutation.sh that publishes supported evidence for an unsupported language."
@@ -336,7 +387,7 @@ jobs:
         if: steps.policy.outputs.required == 'true' && steps.runner.outputs.source == 'workflow-ci-go'
         uses: actions/setup-go@v6
         with:
-          go-version-file: pr/go.mod
+          go-version-file: pr/${{ steps.runner.outputs.working-directory }}/go.mod
           cache: false
 
       - name: Prepare isolated Python mutation environment
@@ -373,6 +424,7 @@ jobs:
           MUTATION_VENV: ${{ steps.mutation-python.outputs.venv }}
           MUTATION_BASE_SHA: ${{ github.event.pull_request.base.sha }}
           MUTATION_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          MUTATION_WORKING_DIRECTORY: ${{ steps.runner.outputs.working-directory }}
         run: |
           set -euo pipefail
           MUTATION_PATH="$PATH"
@@ -396,6 +448,7 @@ jobs:
             MUTATION_DEPTH="$MUTATION_DEPTH" \
             MUTATION_BASE_SHA="$MUTATION_BASE_SHA" \
             MUTATION_HEAD_SHA="$MUTATION_HEAD_SHA" \
+            MUTATION_WORKING_DIRECTORY="$MUTATION_WORKING_DIRECTORY" \
             bash "${{ steps.runner.outputs.path }}"
 
       - name: Capture mutmut diagnostics
