@@ -95,3 +95,19 @@ contrat consumer.
    partie de l'oracle ;
 5. privilégier une implémentation de référence indépendante pour générer/mesurer les
    données synthétiques.
+
+
+## Candidate isolation
+
+Hidden evaluators keep the oracle, raw seed and expected invariants in the trusted
+process. Candidate code executes only in a disposable copy under UID/GID 65532
+with an empty allowlisted environment, dropped capabilities and a separate network
+namespace. The trusted workflow checkout and original candidate checkout are made
+non-traversable to the sandbox UID while evaluation runs.
+
+The sandbox receives only a narrow domain bridge request and returns observations.
+It receives no GitHub token, Kubernetes/service-account credential, workflow command
+file, trusted checkout path or raw oracle source. Dependency bootstrap that requires
+network access is separated from candidate test execution; the candidate test itself
+runs with networking disabled. Missing sandbox primitives, timeout, protocol errors
+or child crashes fail closed as hidden evaluator `error`.
