@@ -128,6 +128,82 @@ else
   fi
 fi
 
+if [[ -n "${MUTATION_REPLAY_IDS_FILE:-}" ]]; then
+  REPLAY_IDS=()
+  while IFS= read -r mutant_id; do
+    [[ -n "$mutant_id" ]] && REPLAY_IDS+=("$mutant_id")
+  done < "$MUTATION_REPLAY_IDS_FILE"
+
+  if [[ "${#REPLAY_IDS[@]}" -eq 0 ]]; then
+    echo "::error::Trusted mutation replay selected no Mutmut IDs."
+    exit 1
+  fi
+
+  rm -rf mutants
+  mkdir -p .quality
+  START_MS="$(date +%s%3N)"
+  for mutant_id in "${REPLAY_IDS[@]}"; do
+    set +e
+    mutmut run "$mutant_id"
+    replay_rc=$?
+    set -e
+    if [[ "$replay_rc" -ne 0 ]]; then
+      echo "::warning::Mutmut replay command returned $replay_rc for $mutant_id; validating engine metadata."
+    fi
+  done
+  END_MS="$(date +%s%3N)"
+
+  "$PYTHON" - "$MUTATION_REPLAY_IDS_FILE" "$((END_MS - START_MS))" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+selected = [
+    line.strip()
+    for line in Path(sys.argv[1]).read_text(encoding="utf-8").splitlines()
+    if line.strip()
+]
+duration_ms = int(sys.argv[2])
+status_by_code = {
+    0: "survived",
+    1: "killed",
+    -24: "timeout",
+    5: "no_tests",
+    33: "no_tests",
+}
+observed = {}
+for meta in Path("mutants").rglob("*.meta"):
+    data = json.loads(meta.read_text(encoding="utf-8"))
+    for mutant_id, code in (data.get("exit_code_by_key") or {}).items():
+        if mutant_id not in selected:
+            continue
+        if code is None:
+            observed[mutant_id] = "untested"
+        else:
+            observed[mutant_id] = status_by_code.get(int(code), "suspicious")
+
+missing = sorted(set(selected) - set(observed))
+if missing:
+    raise SystemExit("trusted replay could not resolve Mutmut IDs: " + ", ".join(missing))
+
+Path(".quality/mutation-replay.json").write_text(
+    json.dumps(
+        {
+            "schema_version": 1,
+            "engine": "mutmut",
+            "mutants": observed,
+            "duration_ms": duration_ms,
+        },
+        indent=2,
+        sort_keys=True,
+    )
+    + "\n",
+    encoding="utf-8",
+)
+PY
+  exit 0
+fi
+
 rm -rf mutants
 if [[ "${#MUTATION_TARGETS[@]}" -gt 0 ]]; then
   mutmut run "${MUTATION_TARGETS[@]}"

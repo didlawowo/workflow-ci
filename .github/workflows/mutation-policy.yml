@@ -13,6 +13,16 @@ on:
         required: false
         type: string
         default: ""
+      attestation-percent:
+        description: "Trusted random mutant replay percentage"
+        required: false
+        type: number
+        default: 10
+      attestation-max:
+        description: "Maximum number of mutants replayed by trusted attestation"
+        required: false
+        type: number
+        default: 5
     outputs:
       required:
         description: "Whether mutation testing is mandatory for this PR"
@@ -1046,6 +1056,8 @@ jobs:
                   )
 
               scoped_payload = {
+                  "engine": {"name": "mutmut"},
+                  "mutants": dict(sorted(scoped.items())),
                   "stats": {
                       "killed": scoped_killed,
                       "survived": scoped_survived,
@@ -1072,6 +1084,128 @@ jobs:
           with output_path.open("a", encoding="utf-8") as handle:
               handle.write(f"path={scoped_path}\n")
           PY
+
+      - name: Select trusted random mutant sample
+        id: attestation-select
+        if: steps.policy.outputs.required == 'true' && steps.validate.outcome == 'success'
+        shell: bash
+        env:
+          REPORT: ${{ steps.validate.outputs.path }}
+          SAMPLE_PERCENT: ${{ inputs.attestation-percent || 10 }}
+          SAMPLE_MAX: ${{ inputs.attestation-max || 5 }}
+        run: |
+          set -euo pipefail
+          IDS="${RUNNER_TEMP:-/tmp}/trusted-mutation-sample-${GITHUB_RUN_ID}.ids"
+          STATE="${RUNNER_TEMP:-/tmp}/trusted-mutation-sample-${GITHUB_RUN_ID}.json"
+          uv run --no-project --python 3.12 python             .workflow-ci/.github/scripts/trusted_mutation_sample.py select             --report "$REPORT"             --ids "$IDS"             --state "$STATE"             --percent "$SAMPLE_PERCENT"             --max "$SAMPLE_MAX"
+          COUNT="$(grep -c '[^[:space:]]' "$IDS" || true)"
+          echo "ids=$IDS" >> "$GITHUB_OUTPUT"
+          echo "state=$STATE" >> "$GITHUB_OUTPUT"
+          echo "count=$COUNT" >> "$GITHUB_OUTPUT"
+
+      - name: Resolve protected replay runner
+        id: attestation-runner
+        if: steps.policy.outputs.required == 'true' && steps.validate.outcome == 'success' && steps.attestation-select.outputs.count != '0'
+        shell: bash
+        run: |
+          set -euo pipefail
+          CUSTOM_REPLAY="$GITHUB_WORKSPACE/.policy/.ci/mutation-replay.sh"
+          CUSTOM_MAIN="$GITHUB_WORKSPACE/.policy/.ci/mutation.sh"
+
+          if [[ -f "$CUSTOM_REPLAY" ]]; then
+            mkdir -p "$GITHUB_WORKSPACE/pr/.workflow-ci-trusted-replay"
+            cp -a "$GITHUB_WORKSPACE/.policy/.ci/." "$GITHUB_WORKSPACE/pr/.workflow-ci-trusted-replay/"
+            RUNNER="$GITHUB_WORKSPACE/pr/.workflow-ci-trusted-replay/mutation-replay.sh"
+            test -f "$RUNNER" && ! test -L "$RUNNER"
+            echo "path=$RUNNER" >> "$GITHUB_OUTPUT"
+            echo "source=consumer-replay" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if [[ -f "$CUSTOM_MAIN" ]]; then
+            if grep -q 'MUTATION_REPLAY_IDS_FILE' "$CUSTOM_MAIN"; then
+              mkdir -p "$GITHUB_WORKSPACE/pr/.workflow-ci-trusted-replay"
+              cp -a "$GITHUB_WORKSPACE/.policy/.ci/." "$GITHUB_WORKSPACE/pr/.workflow-ci-trusted-replay/"
+              RUNNER="$GITHUB_WORKSPACE/pr/.workflow-ci-trusted-replay/mutation.sh"
+              test -f "$RUNNER" && ! test -L "$RUNNER"
+              echo "path=$RUNNER" >> "$GITHUB_OUTPUT"
+              echo "source=consumer-main" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+
+            # workflow-ci bootstraps its own new central replay contract from
+            # the exact reusable-workflow revision under test.
+            if [[ "${{ github.repository }}" == "${{ job.workflow_repository }}" ]]; then
+              echo "path=$GITHUB_WORKSPACE/.workflow-ci/.ci/mutation.sh" >> "$GITHUB_OUTPUT"
+              echo "source=workflow-ci-bootstrap" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+
+            echo "::error::Protected custom mutation runner has no trusted replay contract."
+            echo "::error::Add protected .ci/mutation-replay.sh or support MUTATION_REPLAY_IDS_FILE before adopting this workflow-ci release."
+            exit 1
+          fi
+
+          REPORT="${{ steps.validate.outputs.path }}"
+          ENGINE="$(uv run --no-project --python 3.12 python - "$REPORT" <<'PY'
+          import json
+          import sys
+          value = json.load(open(sys.argv[1], encoding='utf-8'))
+          engine = value.get('engine')
+          if isinstance(engine, dict):
+              print(str(engine.get('name') or ''))
+          else:
+              print('')
+          PY
+          )"
+          case "$ENGINE" in
+            mutmut) RUNNER="$GITHUB_WORKSPACE/.workflow-ci/.ci/mutation.sh" ;;
+            gremlins) RUNNER="$GITHUB_WORKSPACE/.workflow-ci/.ci/mutation-go.sh" ;;
+            stryker) RUNNER="$GITHUB_WORKSPACE/.workflow-ci/.ci/mutation-node.sh" ;;
+            *)
+              echo "::error::No trusted replay runner for mutation engine '$ENGINE'."
+              exit 1
+              ;;
+          esac
+          echo "path=$RUNNER" >> "$GITHUB_OUTPUT"
+          echo "source=workflow-ci-$ENGINE" >> "$GITHUB_OUTPUT"
+
+      - name: Replay trusted random mutant sample
+        id: attestation-replay
+        if: steps.policy.outputs.required == 'true' && steps.validate.outcome == 'success' && steps.attestation-select.outputs.count != '0'
+        shell: bash
+        working-directory: pr
+        env:
+          REPLAY_RUNNER: ${{ steps.attestation-runner.outputs.path }}
+          REPLAY_IDS: ${{ steps.attestation-select.outputs.ids }}
+          MUTATION_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          MUTATION_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          MUTATION_DEPTH: ${{ steps.policy.outputs.depth }}
+        run: |
+          set -euo pipefail
+          HOME_DIR="${RUNNER_TEMP:-/tmp}/trusted-mutation-replay-home"
+          UV_DIR="${RUNNER_TEMP:-/tmp}/trusted-mutation-replay-uv"
+          rm -rf "$HOME_DIR" "$UV_DIR" .quality/mutation-replay.json
+          mkdir -p "$HOME_DIR" "$UV_DIR"
+          env -i             PATH="$PATH"             HOME="$HOME_DIR"             UV_CACHE_DIR="$UV_DIR"             CI=true             MUTATION_REPLAY_IDS_FILE="$REPLAY_IDS"             MUTATION_BASE_SHA="$MUTATION_BASE_SHA"             MUTATION_HEAD_SHA="$MUTATION_HEAD_SHA"             MUTATION_DEPTH="$MUTATION_DEPTH"             RUNNER_TEMP="${RUNNER_TEMP:-/tmp}"             bash "$REPLAY_RUNNER"
+          test -s .quality/mutation-replay.json
+
+      - name: Verify trusted mutation attestation
+        if: steps.policy.outputs.required == 'true' && steps.validate.outcome == 'success'
+        shell: bash
+        env:
+          REPORT: ${{ steps.validate.outputs.path }}
+          STATE: ${{ steps.attestation-select.outputs.state }}
+          COUNT: ${{ steps.attestation-select.outputs.count }}
+        run: |
+          set -euo pipefail
+          if [[ "$COUNT" == "0" ]]; then
+            REPLAY="${RUNNER_TEMP:-/tmp}/trusted-mutation-replay-empty-${GITHUB_RUN_ID}.json"
+            printf '{"mutants":{},"duration_ms":0}\n' > "$REPLAY"
+          else
+            REPLAY="$GITHUB_WORKSPACE/pr/.quality/mutation-replay.json"
+          fi
+          uv run --no-project --python 3.12 python             .workflow-ci/.github/scripts/trusted_mutation_sample.py verify             --report "$REPORT"             --state "$STATE"             --replay "$REPLAY"
 
       - name: Upload scoped mutation evidence
         if: always() && steps.policy.outputs.required == 'true' && steps.validate.outcome == 'success'

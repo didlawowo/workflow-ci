@@ -113,3 +113,15 @@ def test_policy_integrity_workflow_resolves_annotated_release_tags() -> None:
         '"$(git -C .workflow-ci-policy rev-parse \'${{ job.workflow_sha }}^{commit}\')"'
         in workflow
     )
+
+
+def test_mutation_replay_hook_change_fails_closed(tmp_path: Path) -> None:
+    base = tmp_path / "base"
+    candidate = tmp_path / "candidate"
+    write(base, ".ci/mutation-replay.sh", "trusted\n")
+    write(candidate, ".ci/mutation-replay.sh", "candidate\n")
+
+    result = policy_integrity.evaluate(base, candidate)
+
+    assert result["status"] == "fail"
+    assert result["violations"][0]["path"] == ".ci/mutation-replay.sh"
