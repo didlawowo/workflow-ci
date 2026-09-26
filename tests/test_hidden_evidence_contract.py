@@ -177,3 +177,32 @@ def test_solar_routing_evaluator_is_offline_and_owns_safety_limits() -> None:
     assert "providers.tempo" in source
     assert "httpx" not in source
     assert "mqtt" not in source.lower()
+
+
+def test_keryx_runtime_evaluator_is_registered_with_runtime_paths() -> None:
+    registry = json.loads(REGISTRY.read_text(encoding="utf-8"))
+    spec = registry["evaluators"]["keryx/conversation-runtime"]
+    assert spec["repository"] == "didlawowo/keryx"
+    assert spec["entrypoint"] == (
+        "hidden-evaluators/keryx/conversation-runtime/evaluator.py"
+    )
+    assert "pkg/handlers/**" in spec["paths"]
+    assert "pkg/hermes/**" in spec["paths"]
+    assert "web/src/hooks/**" in spec["paths"]
+
+
+def test_keryx_runtime_evaluator_executes_ephemeral_go_tests() -> None:
+    source = (
+        ROOT
+        / "hidden-evaluators"
+        / "keryx"
+        / "conversation-runtime"
+        / "evaluator.py"
+    ).read_text(encoding="utf-8")
+    assert "workflow_ci_hidden_test.go" in source
+    assert '"go",' in source and '"test",' in source
+    assert "path.unlink(missing_ok=True)" in source
+    assert "TestWorkflowCIHiddenTurnFeedReplay" in source
+    assert "TestWorkflowCIHiddenApprovalChoicesFailClosed" in source
+    assert "TestWorkflowCIHiddenReasoningClamp" in source
+    assert "TestWorkflowCIHiddenRetryIsExactlyOnce" in source
