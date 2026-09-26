@@ -206,3 +206,35 @@ def test_keryx_runtime_evaluator_executes_ephemeral_go_tests() -> None:
     assert "TestWorkflowCIHiddenApprovalChoicesFailClosed" in source
     assert "TestWorkflowCIHiddenReasoningClamp" in source
     assert "TestWorkflowCIHiddenRetryIsExactlyOnce" in source
+
+
+def test_hidden_required_skipped_check_cannot_aggregate_to_pass() -> None:
+    source = RUNNER.read_text(encoding="utf-8")
+
+    assert "def aggregate_required_checks" in source
+    assert 'if "skipped" in statuses:' in source
+    assert 'return "error"' in source
+    assert 'if statuses == {"pass"}:' in source
+
+
+def test_hidden_required_check_aggregation_matrix() -> None:
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("hidden_runner", RUNNER)
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    cases = [
+        (["pass", "pass"], "pass"),
+        (["pass", "fail"], "fail"),
+        (["pass", "error"], "error"),
+        (["pass", "skipped"], "error"),
+        (["skipped"], "error"),
+    ]
+    for statuses, expected in cases:
+        checks = [
+            {"name": f"check-{index}", "status": status}
+            for index, status in enumerate(statuses)
+        ]
+        assert module.aggregate_required_checks(checks) == expected
