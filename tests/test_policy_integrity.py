@@ -113,3 +113,114 @@ def test_policy_integrity_workflow_resolves_annotated_release_tags() -> None:
         '"$(git -C .workflow-ci-policy rev-parse \'${{ job.workflow_sha }}^{commit}\')"'
         in workflow
     )
+
+
+def hidden_wrapper(version: str, evaluator: str, runner: str, extra: str = "") -> str:
+    return (
+        "jobs:\n"
+        "  hidden:\n"
+        "    uses: didlawowo/workflow-ci/.github/workflows/"
+        f"hidden-evidence.yml@{version}\n"
+        "    with:\n"
+        f"      evaluator: {evaluator}\n"
+        f"      runner: {runner}\n"
+        f"{extra}"
+    )
+
+
+def test_registered_hidden_enrollment_can_be_added(tmp_path: Path) -> None:
+    base = tmp_path / "base"
+    candidate = tmp_path / "candidate"
+    path = ".github/workflows/hidden-calibration-evidence.yml"
+    write(
+        candidate,
+        path,
+        hidden_wrapper(
+            "v1.14.1",
+            "ioniq-control/calibration",
+            "arc-runner-ioniq-control",
+        ),
+    )
+
+    result = policy_integrity.evaluate(base, candidate, "didlawowo/ioniq-control")
+
+    assert result["status"] == "pass"
+    assert result["allowed"][0]["path"] == path
+
+
+def test_hidden_enrollment_deletion_fails_closed(tmp_path: Path) -> None:
+    base = tmp_path / "base"
+    candidate = tmp_path / "candidate"
+    path = ".github/workflows/hidden-calibration-evidence.yml"
+    write(
+        base,
+        path,
+        hidden_wrapper(
+            "v1.14.1",
+            "ioniq-control/calibration",
+            "arc-runner-ioniq-control",
+        ),
+    )
+
+    result = policy_integrity.evaluate(base, candidate, "didlawowo/ioniq-control")
+
+    assert result["status"] == "fail"
+    assert "removed" in result["violations"][0]["reason"]
+
+
+def test_hidden_evaluator_substitution_fails_closed(tmp_path: Path) -> None:
+    base = tmp_path / "base"
+    candidate = tmp_path / "candidate"
+    path = ".github/workflows/hidden-calibration-evidence.yml"
+    write(
+        base,
+        path,
+        hidden_wrapper(
+            "v1.14.1",
+            "ioniq-control/calibration",
+            "arc-runner-ioniq-control",
+        ),
+    )
+    write(
+        candidate,
+        path,
+        hidden_wrapper(
+            "v1.14.2",
+            "keryx/conversation-runtime",
+            "arc-runner-ioniq-control",
+        ),
+    )
+
+    result = policy_integrity.evaluate(base, candidate, "didlawowo/ioniq-control")
+
+    assert result["status"] == "fail"
+    assert "not bound" in result["violations"][0]["reason"]
+
+
+def test_hidden_semver_only_forward_upgrade_is_allowed(tmp_path: Path) -> None:
+    base = tmp_path / "base"
+    candidate = tmp_path / "candidate"
+    path = ".github/workflows/hidden-conversation-evidence.yml"
+    write(
+        base,
+        path,
+        hidden_wrapper(
+            "v1.14.0",
+            "keryx/conversation-runtime",
+            "arc-runner-keryx",
+        ),
+    )
+    write(
+        candidate,
+        path,
+        hidden_wrapper(
+            "v1.14.1",
+            "keryx/conversation-runtime",
+            "arc-runner-keryx",
+        ),
+    )
+
+    result = policy_integrity.evaluate(base, candidate, "didlawowo/keryx")
+
+    assert result["status"] == "pass"
+    assert "allowed hidden workflow-ci migration" in result["allowed"][0]["reason"]
