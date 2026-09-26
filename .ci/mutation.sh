@@ -129,115 +129,11 @@ else
 fi
 
 if [[ -n "${MUTATION_REPLAY_IDS_FILE:-}" ]]; then
-  mapfile -t REPLAY_IDS < <(grep -v '^[[:space:]]*
-  mutmut run "${MUTATION_TARGETS[@]}"
-else
-  mutmut run
-fi
+  REPLAY_IDS=()
+  while IFS= read -r mutant_id; do
+    [[ -n "$mutant_id" ]] && REPLAY_IDS+=("$mutant_id")
+  done < "$MUTATION_REPLAY_IDS_FILE"
 
-mutmut export-cicd-stats
-test -f mutants/mutmut-cicd-stats.json
-
-python_args=("$MUTATION_DEPTH" "${MUTATION_BASE_SHA:-}" "${MUTATION_HEAD_SHA:-}")
-"$PYTHON" - "${python_args[@]}" <<'PY'
-import json
-import sys
-from pathlib import Path
-
-path = Path("mutants/mutmut-cicd-stats.json")
-payload = json.loads(path.read_text(encoding="utf-8"))
-payload["depth"] = sys.argv[1]
-payload["scope"] = {
-    "base_sha": sys.argv[2],
-    "head_sha": sys.argv[3],
-    "no_targets": False,
-}
-path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-PY
-
-# mutmut 3.x 'results' intentionally omits killed mutants from its text output.
-# The trusted verifier needs per-mutant statuses, so reconstruct the omitted
-# killed rows from the generated mutant registry and cross-check the count
-# against the machine-readable CI/CD stats before publishing diagnostics.
-mkdir -p .quality
-RAW_RESULTS=".quality/mutmut-results.raw.txt"
-mutmut results --all > "$RAW_RESULTS" || true
-"$PYTHON" - "$RAW_RESULTS" mutants/mutmut-cicd-stats.json .quality/mutmut-results.txt "${MUTATION_TARGETS[@]}" <<'PY'
-from fnmatch import fnmatchcase
-import json
-import re
-import sys
-from pathlib import Path
-
-raw_path = Path(sys.argv[1])
-stats_path = Path(sys.argv[2])
-out_path = Path(sys.argv[3])
-target_patterns = tuple(sys.argv[4:])
-
-def in_scope(mutant_id: str) -> bool:
-    return not target_patterns or any(
-        fnmatchcase(mutant_id, pattern) for pattern in target_patterns
-    )
-
-stats = json.loads(stats_path.read_text(encoding="utf-8"))
-expected_total = int(stats.get("total", 0))
-expected_killed = int(stats.get("killed", 0))
-
-status_re = re.compile(r"^\s*(\S+):\s+([a-z_ ]+)\s*$")
-raw_statuses: dict[str, str] = {}
-for line in raw_path.read_text(encoding="utf-8").splitlines():
-    match = status_re.match(line)
-    if not match:
-        continue
-    mutant_id, status = match.groups()
-    if in_scope(mutant_id):
-        raw_statuses[mutant_id] = status.strip().replace(" ", "_")
-
-assignment_re = re.compile(r"mutants_[^\[]+\['([^']+__mutmut_\d+)'\]")
-all_mutants: set[str] = set()
-for source in Path("mutants").rglob("*.py"):
-    relative = source.relative_to("mutants").with_suffix("")
-    parts = list(relative.parts)
-    # Keep the registry IDs aligned with mutation_scope._module_name():
-    # Mutmut stores src-layout files under mutants/src/, but reports IDs
-    # without the leading "src." package prefix.
-    if parts and parts[0] == "src":
-        parts = parts[1:]
-    if parts and parts[-1] == "__init__":
-        parts = parts[:-1]
-    module = ".".join(parts)
-    if not module:
-        continue
-    for local_id in assignment_re.findall(source.read_text(encoding="utf-8")):
-        mutant_id = f"{module}.{local_id}"
-        if in_scope(mutant_id):
-            all_mutants.add(mutant_id)
-
-if expected_total and len(all_mutants) != expected_total:
-    raise SystemExit(
-        f"mutmut diagnostics mismatch: generated={len(all_mutants)} total={expected_total}"
-    )
-
-already_killed = {mid for mid, status in raw_statuses.items() if status == "killed"}
-missing = all_mutants - set(raw_statuses)
-expected_missing_killed = expected_killed - len(already_killed)
-if expected_missing_killed < 0 or len(missing) != expected_missing_killed:
-    raise SystemExit(
-        "mutmut diagnostics mismatch: "
-        f"raw_killed={len(already_killed)} inferred={len(missing)} "
-        f"expected_killed={expected_killed}"
-    )
-
-complete = dict(raw_statuses)
-for mutant_id in missing:
-    complete[mutant_id] = "killed"
-
-with out_path.open("w", encoding="utf-8") as handle:
-    for mutant_id in sorted(complete):
-        handle.write(f"{mutant_id}: {complete[mutant_id]}\\n")
-PY
-rm -f "$RAW_RESULTS"
- "$MUTATION_REPLAY_IDS_FILE")
   if [[ "${#REPLAY_IDS[@]}" -eq 0 ]]; then
     echo "::error::Trusted mutation replay selected no Mutmut IDs."
     exit 1
