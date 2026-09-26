@@ -4,10 +4,12 @@ All notable changes to this project are documented here.
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 and follows the [Conventional Commits](https://www.conventionalcommits.org) spec.
 
-## [1.14.6] - 2026-09-26
+## [1.14.7] - 2026-09-26
 
 ### Bug Fixes
 
-- *(docker)* Rebase native BuildKit auto mode onto 1.14.5 (#128)
+- *(mutation)* Ne cross-checker le total de diagnostics que sur les runs complets (#127)
+
+- *(mutation)* Corriger la collecte mutmut --all (#130)
 
 
