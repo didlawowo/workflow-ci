@@ -80,18 +80,31 @@ def test_hidden_scope_rejects_evaluator_substitution(tmp_path: Path) -> None:
     assert "bound to didlawowo/ioniq-control" in completed.stderr
 
 
-def test_hidden_workflow_checks_out_trusted_oracle_and_exact_candidate() -> None:
+def test_hidden_workflow_checks_out_trusted_base_and_exact_candidate() -> None:
     workflow = WORKFLOW.read_text(encoding="utf-8")
     assert "workflow_call:" in workflow
     assert "repository: ${{ job.workflow_repository }}" in workflow
     assert "ref: ${{ job.workflow_sha }}" in workflow
     assert "path: .workflow-ci-hidden" in workflow
     assert "repository: ${{ github.repository }}" in workflow
+    assert "ref: ${{ github.event.pull_request.base.sha }}" in workflow
+    assert "path: base" in workflow
     assert "ref: refs/pull/${{ github.event.pull_request.number }}/head" in workflow
     assert "path: candidate" in workflow
-    assert workflow.count("persist-credentials: false") >= 2
+    assert workflow.count("persist-credentials: false") >= 3
     assert 'test "$(git -C .workflow-ci-hidden rev-parse HEAD)" = "${{ job.workflow_sha }}"' in workflow
+    assert 'test "$(git -C base rev-parse HEAD)" = "${{ github.event.pull_request.base.sha }}"' in workflow
     assert 'test "$(git -C candidate rev-parse HEAD)" = "${{ github.event.pull_request.head.sha }}"' in workflow
+    assert "git -C candidate cat-file -e" not in workflow
+
+
+def test_hidden_scope_compares_tracked_base_and_candidate_trees() -> None:
+    workflow = WORKFLOW.read_text(encoding="utf-8")
+    assert '["git", "-C", root, "ls-files", "-s", "-z"]' in workflow
+    assert 'base = tracked("base")' in workflow
+    assert 'candidate = tracked("candidate")' in workflow
+    assert "if base.get(path) != candidate.get(path)" in workflow
+    assert 'git -C candidate diff --name-only "$BASE_SHA...$HEAD_SHA"' not in workflow
 
 
 def test_hidden_workflow_is_read_only_and_reporting_is_best_effort() -> None:
