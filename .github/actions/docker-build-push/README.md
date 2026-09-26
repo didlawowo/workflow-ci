@@ -58,9 +58,10 @@ These tests execute the actual shell extracted from `action.yml` and verify the 
 
 `native-multiarch` now defaults to `auto`.
 
-- On ARC runners (`runner.name` starts with `arc-runner-`), supported
+- On ARC runners (`runner.name` starts with `arc-runner-`), published
   linux/amd64 and linux/arm64 builds use the persistent native remote BuildKit
-  workers. No QEMU emulation and no per-job binfmt image pull are used.
+  workers. No QEMU emulation and no per-job binfmt image pull are used. Local
+  non-push validation keeps the local builder and does not need multi-arch QEMU.
 - `native-multiarch: true` still forces the native remote workers.
 - `native-multiarch: false` keeps the portable docker-container/QEMU fallback
   for runners that cannot reach the in-cluster BuildKit services.
