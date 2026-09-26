@@ -95,3 +95,10 @@ contrat consumer.
    partie de l'oracle ;
 5. privilégier une implémentation de référence indépendante pour générer/mesurer les
    données synthétiques.
+
+
+### Required check semantics
+
+Every check returned by an evaluator is required unless a future trusted contract
+explicitly models optional checks. A required `skipped` check is incomplete
+evidence and therefore produces a global `error`, never `pass`.

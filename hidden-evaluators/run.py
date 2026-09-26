@@ -101,6 +101,20 @@ def normalize_checks(value: Any) -> list[dict[str, str]]:
     return checks
 
 
+def aggregate_required_checks(checks: list[dict[str, str]]) -> str:
+    """All required checks must pass; incomplete evidence is an error."""
+    statuses = {check["status"] for check in checks}
+    if "error" in statuses:
+        return "error"
+    if "fail" in statuses:
+        return "fail"
+    if "skipped" in statuses:
+        return "error"
+    if statuses == {"pass"}:
+        return "pass"
+    return "error"
+
+
 def run_evaluator(args: argparse.Namespace) -> int:
     candidate = Path(args.candidate).resolve()
     if not candidate.is_dir():
@@ -119,13 +133,7 @@ def run_evaluator(args: argparse.Namespace) -> int:
     try:
         module = load_evaluator(str(spec["entrypoint"]))
         checks = normalize_checks(module.evaluate(candidate, seed))
-        statuses = {check["status"] for check in checks}
-        if "error" in statuses:
-            status = "error"
-        elif "fail" in statuses:
-            status = "fail"
-        else:
-            status = "pass"
+        status = aggregate_required_checks(checks)
     except AssertionError as exc:
         status = "fail"
         checks = [{"name": "evaluator", "status": "fail", "detail": str(exc)[:600]}]
