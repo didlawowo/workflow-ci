@@ -188,7 +188,7 @@ def test_native_remote_buildkit_retries_once_and_then_fails_closed():
     retry = STEPS["Retry native remote BuildKit once"]
     enforce = STEPS["Enforce native Docker build result"]
 
-    assert "continue-on-error: ${{ inputs.native-multiarch == 'true' }}" in primary
+    assert "continue-on-error: ${{ steps.execution-mode.outputs.use-native == 'true' }}" in primary
     assert "steps.build.outcome == 'failure'" in retry
     assert "builder: native" in retry
     assert "steps.build-retry.outcome != 'success'" in enforce
@@ -316,34 +316,40 @@ def test_docker_actions_use_node24_capable_majors():
     assert "docker/build-push-action@v6" not in TEXT
 
 
-def test_qemu_is_skipped_for_native_single_arch_builds():
-    detect = STEPS["Detect whether QEMU is required"]
-    assert 'native_platform="linux/amd64"' in detect
-    assert 'native_platform="linux/arm64"' in detect
-    assert 'needs_qemu=false' in detect
-
+def test_arc_auto_prefers_native_buildkit_and_skips_qemu():
+    resolve = STEPS["Resolve Docker build execution mode"]
     qemu = STEPS["Set up QEMU"]
+    local = STEPS["Set up Docker Buildx"]
+    remote = STEPS["Set up native multi-arch Buildx (remote BuildKit)"]
+
+    assert 'NATIVE_MULTIARCH: ${{ inputs.native-multiarch }}' in resolve
+    assert 'RUNNER_NAME: ${{ runner.name }}' in resolve
+    assert '[[ "$RUNNER_NAME" == arc-runner-* ]]' in resolve
+    assert 'echo "use-native=$use_native"' in resolve
+    assert "steps.execution-mode.outputs.use-native != 'true'" in qemu
+    assert "steps.execution-mode.outputs.use-native != 'true'" in local
+    assert "steps.execution-mode.outputs.use-native == 'true'" in remote
+    assert 'default: "auto"' in TEXT
+
+
+def test_explicit_false_keeps_portable_qemu_fallback():
+    resolve = STEPS["Resolve Docker build execution mode"]
+    qemu = STEPS["Set up QEMU"]
+
+    assert 'case "$NATIVE_MULTIARCH" in' in resolve
+    assert "auto|true|false" in resolve
+    assert 'handler="qemu-aarch64"' in resolve
+    assert 'handler="qemu-x86_64"' in resolve
+    assert 'handler="qemu-arm"' in resolve
+    assert 'handler_path="/proc/sys/fs/binfmt_misc/$handler"' in resolve
     assert "steps.execution-mode.outputs.needs-qemu == 'true'" in qemu
-
-
-def test_preinstalled_binfmt_skips_qemu_setup_image_pull_only_when_fix_binary_is_enabled():
-    detect = STEPS["Detect whether QEMU is required"]
-    assert 'handler="qemu-aarch64"' in detect
-    assert 'handler="qemu-x86_64"' in detect
-    assert 'handler="qemu-arm"' in detect
-    assert 'handler_path="/proc/sys/fs/binfmt_misc/$handler"' in detect
-    assert "grep -qx 'enabled' \"$handler_path\"" in detect
-    assert "grep -Eq '^flags:.*F' \"$handler_path\"" in detect
-    assert "qemu-preinstalled=$qemu_preinstalled" in detect
-
-    qemu = STEPS["Set up QEMU"]
     assert "steps.execution-mode.outputs.qemu-preinstalled != 'true'" in qemu
 
 
 def test_unknown_foreign_platform_keeps_qemu_fallback():
-    detect = STEPS["Detect whether QEMU is required"]
-    assert '*) handler="" ;;' in detect
-    assert '[ -z "$handler" ]' in detect
+    resolve = STEPS["Resolve Docker build execution mode"]
+    assert '*) handler="" ;;' in resolve
+    assert '[ -z "$handler" ]' in resolve
 
 
 def test_remote_buildkit_only_adds_requested_architectures():
