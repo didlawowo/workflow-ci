@@ -782,9 +782,13 @@ jobs:
                       ]
 
               def in_trusted_source_path(relative):
-                  if not source_paths:
-                      return True
                   candidate = Path(relative)
+                  if not source_paths:
+                      parts = candidate.parts
+                      name = candidate.name
+                      if "tests" in parts or name.startswith("test_") or name.endswith("_test.py"):
+                          return False
+                      return True
                   for raw in source_paths:
                       configured = Path(raw)
                       if candidate == configured:
