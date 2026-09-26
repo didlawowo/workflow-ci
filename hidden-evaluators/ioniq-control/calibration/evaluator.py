@@ -8,6 +8,17 @@ from pathlib import Path
 from statistics import median
 
 
+TRUSTED_AUTO_METHOD = "automatic_unambiguous_radar_yolo_bootstrap"
+TRUSTED_AUTO_VALIDATION_MODE = "operational_independent_routes"
+TRUSTED_AUTO_RUNTIME_POLICY = {
+    "min_frames_with_targets": 40,
+    "min_frame_match_rate": 0.80,
+    "min_matches": 60,
+    "min_inside_box_rate": 0.75,
+    "max_center_error_median_px": 40.0,
+}
+
+
 def _load_candidate(candidate: Path):
     sys.path.insert(0, str(candidate))
     sys.path.insert(0, str(candidate / "src"))
@@ -185,7 +196,7 @@ def _runtime_metrics(rng: random.Random) -> dict:
     }
 
 
-def _valid_auto_report(readiness, rng: random.Random, *, pixel_status: str = "accepted") -> dict:
+def _valid_auto_report(rng: random.Random, *, pixel_status: str = "accepted") -> dict:
     token = f"{rng.getrandbits(48):012x}"
     train_a, train_b = f"train-{token}-a", f"train-{token}-b"
     holdout_route = f"holdout-{token}"
@@ -193,7 +204,7 @@ def _valid_auto_report(readiness, rng: random.Random, *, pixel_status: str = "ac
     return {
         "schema_version": 1,
         "status": pixel_status,
-        "method": readiness.AUTO_METHOD,
+        "method": TRUSTED_AUTO_METHOD,
         "target_route_excluded_from_calibration": target_route,
         "intrinsics": {"fx": 1600.0, "fy": 1595.0, "cx": 960.0, "cy": 540.0},
         "extrinsics": {
@@ -213,8 +224,8 @@ def _valid_auto_report(readiness, rng: random.Random, *, pixel_status: str = "ac
         },
         "thresholds": {"median_px": 8.0, "p95_px": 20.0},
         "validation": {
-            "mode": readiness.AUTO_VALIDATION_MODE,
-            "thresholds": dict(readiness.AUTO_RUNTIME_POLICY),
+            "mode": TRUSTED_AUTO_VALIDATION_MODE,
+            "thresholds": dict(TRUSTED_AUTO_RUNTIME_POLICY),
             "holdout": {"route": holdout_route, **_runtime_metrics(rng)},
             "target": {"segment": target_route + "--23", **_runtime_metrics(rng)},
         },
@@ -222,15 +233,15 @@ def _valid_auto_report(readiness, rng: random.Random, *, pixel_status: str = "ac
 
 
 def _policy_fail_closed(readiness, rng: random.Random) -> None:
-    report = _valid_auto_report(readiness, rng)
+    report = _valid_auto_report(rng)
     errors = readiness.accepted_report_errors(report)
     if errors:
         raise AssertionError(f"baseline accepted report rejected: {errors[0]}")
 
     attacks = []
     relaxed = copy.deepcopy(report)
-    key = rng.choice(list(readiness.AUTO_RUNTIME_POLICY))
-    policy = float(readiness.AUTO_RUNTIME_POLICY[key])
+    key = rng.choice(list(TRUSTED_AUTO_RUNTIME_POLICY))
+    policy = float(TRUSTED_AUTO_RUNTIME_POLICY[key])
     relaxed["validation"]["thresholds"][key] = (
         policy * rng.uniform(0.50, 0.90)
         if key.startswith("min_")
@@ -256,8 +267,8 @@ def _policy_fail_closed(readiness, rng: random.Random) -> None:
     attacks.append(("forged-negative-control", forged))
 
     weak = copy.deepcopy(report)
-    metric = rng.choice(list(readiness.AUTO_RUNTIME_POLICY))
-    boundary = float(readiness.AUTO_RUNTIME_POLICY[metric])
+    metric = rng.choice(list(TRUSTED_AUTO_RUNTIME_POLICY))
+    boundary = float(TRUSTED_AUTO_RUNTIME_POLICY[metric])
     if metric == "min_frames_with_targets":
         weak["validation"]["target"]["frames_with_targets"] = int(boundary) - 1
     elif metric == "min_matches":
@@ -277,13 +288,31 @@ def _policy_fail_closed(readiness, rng: random.Random) -> None:
             raise AssertionError(f"fail-open policy accepted {name}")
 
 
-def _rejected_pixel_gate_never_upgrades(readiness, finalize, rng: random.Random) -> None:
-    report = _valid_auto_report(readiness, rng, pixel_status="rejected")
+def _rejected_pixel_gate_never_upgrades(finalize, rng: random.Random) -> None:
+    report = _valid_auto_report(rng, pixel_status="rejected")
     holdout = copy.deepcopy(report["validation"]["holdout"])
     target = copy.deepcopy(report["validation"]["target"])
     result = finalize.finalize(report, holdout, target)
     if result.get("status") != "rejected":
         raise AssertionError("rejected pixel gate was upgraded by runtime evidence")
+
+
+def _assert_trusted_policy_contract(readiness) -> None:
+    observed_policy = dict(readiness.AUTO_RUNTIME_POLICY)
+    if readiness.AUTO_METHOD != TRUSTED_AUTO_METHOD:
+        raise AssertionError(
+            f"candidate AUTO_METHOD drifted: {readiness.AUTO_METHOD!r} != {TRUSTED_AUTO_METHOD!r}"
+        )
+    if readiness.AUTO_VALIDATION_MODE != TRUSTED_AUTO_VALIDATION_MODE:
+        raise AssertionError(
+            "candidate AUTO_VALIDATION_MODE drifted: "
+            f"{readiness.AUTO_VALIDATION_MODE!r} != {TRUSTED_AUTO_VALIDATION_MODE!r}"
+        )
+    if observed_policy != TRUSTED_AUTO_RUNTIME_POLICY:
+        raise AssertionError(
+            "candidate AUTO_RUNTIME_POLICY drifted from trusted publication policy: "
+            f"{observed_policy!r}"
+        )
 
 
 def _check(name: str, callback) -> dict[str, str]:
@@ -300,6 +329,9 @@ def evaluate(candidate: Path, seed: int) -> list[dict[str, str]]:
     calibration, readiness, finalize = _load_candidate(candidate)
     rng = random.Random(seed)
 
+    def policy_contract():
+        _assert_trusted_policy_contract(readiness)
+
     def geometry():
         for _ in range(3):
             _synthetic_generalization(calibration, rng)
@@ -310,9 +342,10 @@ def evaluate(candidate: Path, seed: int) -> list[dict[str, str]]:
 
     def downgrade():
         for _ in range(2):
-            _rejected_pixel_gate_never_upgrades(readiness, finalize, rng)
+            _rejected_pixel_gate_never_upgrades(finalize, rng)
 
     return [
+        _check("trusted-publication-policy-contract", policy_contract),
         _check("independent-geometry-generalization", geometry),
         _check("fail-closed-publication-policy", policy),
         _check("rejected-gate-never-upgrades", downgrade),
