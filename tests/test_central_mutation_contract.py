@@ -151,6 +151,11 @@ def test_config_changes_are_rejected_before_git_or_execution(tmp_path, monkeypat
 
 
 
+def test_python_runner_requests_all_mutmut_statuses():
+    script = (ROOT / ".ci" / "mutation.sh").read_text(encoding="utf-8")
+    assert 'mutmut results --all > "$RAW_RESULTS"' in script
+
+
 def test_mutmut_diagnostics_reconstruction_uses_exact_requested_scope(tmp_path):
     script = (ROOT / ".ci" / "mutation.sh").read_text(encoding="utf-8")
     marker = (
@@ -175,7 +180,11 @@ def test_mutmut_diagnostics_reconstruction_uses_exact_requested_scope(tmp_path):
         encoding="utf-8",
     )
     raw = tmp_path / "raw.txt"
-    raw.write_text("service.x_target__mutmut_2: survived\n", encoding="utf-8")
+    raw.write_text(
+        "service.x_target__mutmut_1: killed\n"
+        "service.x_target__mutmut_2: survived\n",
+        encoding="utf-8",
+    )
     stats = mutants / "mutmut-cicd-stats.json"
     stats.write_text(
         json.dumps(

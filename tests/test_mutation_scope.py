@@ -119,6 +119,29 @@ def test_scope_ignores_python_changes_outside_trusted_source_paths(tmp_path: Pat
     assert mutation_scope.mutation_targets(repo, base, head) == ()
 
 
+def test_bootstrap_scope_ignores_tests_without_mutmut_config(tmp_path: Path):
+    repo = _init_repo(tmp_path)
+    (repo / "pyproject.toml").write_text(
+        '[project]\nname = "bootstrap"\nversion = "0.0.0"\n',
+        encoding="utf-8",
+    )
+    source = repo / "src" / "service.py"
+    source.write_text("def production():\n    return 1\n", encoding="utf-8")
+    tests = repo / "tests"
+    tests.mkdir()
+    test_file = tests / "test_service.py"
+    test_file.write_text("def test_production():\n    assert True\n", encoding="utf-8")
+    base = _commit(repo, "initial")
+
+    source.write_text("def production():\n    return 2\n", encoding="utf-8")
+    test_file.write_text("def test_production():\n    assert 1 + 1 == 2\n", encoding="utf-8")
+    head = _commit(repo, "bootstrap implementation")
+
+    assert mutation_scope.mutation_targets(repo, base, head) == (
+        "service.*production__mutmut_*",
+    )
+
+
 def test_scope_keeps_class_and_method_identity(tmp_path: Path):
     repo = _init_repo(tmp_path)
     source = repo / "src" / "service.py"

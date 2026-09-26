@@ -161,7 +161,7 @@ PY
 # against the machine-readable CI/CD stats before publishing diagnostics.
 mkdir -p .quality
 RAW_RESULTS=".quality/mutmut-results.raw.txt"
-mutmut results > "$RAW_RESULTS" || true
+mutmut results --all > "$RAW_RESULTS" || true
 "$PYTHON" - "$RAW_RESULTS" mutants/mutmut-cicd-stats.json .quality/mutmut-results.txt "${MUTATION_TARGETS[@]}" <<'PY'
 from fnmatch import fnmatchcase
 import json
