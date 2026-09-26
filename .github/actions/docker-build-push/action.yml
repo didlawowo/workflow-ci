@@ -214,7 +214,7 @@ runs:
         use_native=false
         if [ "$NATIVE_MULTIARCH" = "true" ]; then
           use_native=true
-        elif [ "$NATIVE_MULTIARCH" = "auto" ] && [[ "$RUNNER_NAME" == arc-runner-* ]]; then
+        elif [ "$NATIVE_MULTIARCH" = "auto" ] && [ "$PUSH_IMAGE" = "true" ] && [[ "$RUNNER_NAME" == arc-runner-* ]]; then
           supported=true
           IFS=',' read -ra targets <<< "$REQUESTED_PLATFORMS"
           for target in "${targets[@]}"; do
