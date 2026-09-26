@@ -83,7 +83,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test "$(git -C .workflow-ci-hidden rev-parse HEAD)" = "${{ job.workflow_sha }}"
+          test "$(git -C .workflow-ci-hidden rev-parse HEAD)" = "$(git -C .workflow-ci-hidden rev-parse '${{ job.workflow_sha }}^{commit}')"
           test "$(git -C base rev-parse HEAD)" = "${{ github.event.pull_request.base.sha }}"
           test "$(git -C candidate rev-parse HEAD)" = "${{ github.event.pull_request.head.sha }}"
 
