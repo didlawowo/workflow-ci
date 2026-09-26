@@ -1091,8 +1091,8 @@ jobs:
         shell: bash
         env:
           REPORT: ${{ steps.validate.outputs.path }}
-          SAMPLE_PERCENT: ${{ inputs.attestation-percent }}
-          SAMPLE_MAX: ${{ inputs.attestation-max }}
+          SAMPLE_PERCENT: ${{ inputs.attestation-percent || 10 }}
+          SAMPLE_MAX: ${{ inputs.attestation-max || 5 }}
         run: |
           set -euo pipefail
           IDS="${RUNNER_TEMP:-/tmp}/trusted-mutation-sample-${GITHUB_RUN_ID}.ids"
