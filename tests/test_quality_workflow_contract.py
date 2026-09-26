@@ -231,6 +231,8 @@ def test_mutation_verify_is_read_only_and_scoped_to_changed_functions():
     assert "mutation gate failed for changed functions" in verify
     assert "scoped-mutation-evidence-" in verify
     assert "quality-report@main" not in verify
+    assert '"$GITHUB_WORKSPACE/pr" "$GITHUB_WORKSPACE/.workflow-ci" "$BASE_SHA"' in verify
+    assert '"$GITHUB_WORKSPACE/pr" "$GITHUB_WORKSPACE/.policy" "$BASE_SHA"' not in verify
 
 
 def test_python_security_action_propagates_requested_check_failures():
