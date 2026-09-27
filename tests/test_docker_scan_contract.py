@@ -179,8 +179,15 @@ def test_required_scan_steps_cannot_swallow_failures(name):
     assert "continue-on-error:" not in STEPS[name]
 
 
-def test_diagnostic_scan_artifact_is_best_effort():
-    assert "continue-on-error: true" in STEPS["Upload scan artifacts"]
+def test_diagnostic_scan_artifact_is_best_effort_and_opt_in():
+    upload_input = TEXT.split("  upload-scan-artifacts:\n", 1)[1].split(
+        "  scan-severity:\n", 1
+    )[0]
+    assert '    default: "false"' in upload_input
+
+    archive = STEPS["Upload scan artifacts"]
+    assert "continue-on-error: true" in archive
+    assert "inputs.upload-scan-artifacts == 'true'" in archive
 
 
 def test_native_remote_buildkit_retries_once_and_then_fails_closed():
@@ -239,6 +246,7 @@ def test_validate_before_upload_and_keep_evidence_after_failure():
     archive = STEPS["Upload scan artifacts"]
     condition = (
         "if: ${{ !cancelled() && inputs.scan == 'true' && "
+        "inputs.upload-scan-artifacts == 'true' && "
         "(steps.trivy.outcome == 'success' || steps.trivy.outcome == 'failure') }}"
     )
     assert condition in archive
@@ -371,11 +379,13 @@ def test_remote_buildkit_only_adds_requested_architectures():
 
 def test_trivy_prefers_preinstalled_binary_with_portable_fallback():
     detect = STEPS["Detect preinstalled Trivy"]
+    install = STEPS["Install Trivy when absent"]
     scan = STEPS["Run Trivy vulnerability scanner"]
     assert "Version: 0.70.0" in detect
-    assert "aquasecurity/trivy-action@v0.36.0" in scan
-    assert "skip-setup-trivy:" in scan
-    assert "aquasecurity/trivy-action@master" not in TEXT
+    assert "aquasecurity/setup-trivy@v0.2.6" in install
+    assert 'version: "v0.70.0"' in install
+    assert "trivy image" in scan
+    assert "aquasecurity/trivy-action@" not in scan
 
     filesystem = (
         ROOT / ".github" / "actions" / "trivy-filesystem-scan" / "action.yml"
@@ -388,6 +398,7 @@ def test_trivy_prefers_preinstalled_binary_with_portable_fallback():
     assert 'scanners: "vuln,secret"' not in filesystem
     assert 'TRIVY_CACHE_BACKEND: "memory"' in filesystem
     assert "TRIVY_SKIP_DB_UPDATE:" in filesystem
+    assert "TRIVY_SKIP_JAVA_DB_UPDATE:" in filesystem
     assert "TRIVY_SHARED_DB_DIR" in filesystem
     assert "TRIVY_SHARED_CACHE" not in filesystem
     assert "aquasecurity/trivy-action@master" not in filesystem
@@ -397,17 +408,47 @@ def test_trivy_image_scan_uses_shared_db_with_memory_scan_cache():
     scan = STEPS["Run Trivy vulnerability scanner"]
     cache = STEPS["Resolve Trivy cache"]
 
-    assert 'timeout: "15m"' in scan
-    assert 'scanners: "vuln"' in scan
+    assert "timeout 15m trivy image" in scan
+    assert "--scanners vuln" in scan
     assert 'TRIVY_SKIP_VERSION_CHECK: "true"' in scan
     assert 'TRIVY_CACHE_BACKEND: "memory"' in scan
     assert "TRIVY_SKIP_DB_UPDATE:" in scan
-    assert 'TRIVY_SHARED_DB_DIR' in cache
+    assert "TRIVY_SKIP_JAVA_DB_UPDATE:" in scan
+    assert "TRIVY_SHARED_DB_DIR" in cache
     assert 'ln -s "$SHARED_DB/db" "$LOCAL_CACHE/db"' in cache
-    assert 'action-cache=false' in cache
-    assert 'action-cache=true' in cache
-    assert 'TRIVY_SHARED_CACHE' not in cache
+    assert 'ln -s "$SHARED_DB/java-db" "$LOCAL_CACHE/java-db"' in cache
+    assert '"$SHARED_DB/java-db/trivy-java.db"' in cache
+    assert '"$SHARED_DB/java-db/metadata.json"' in cache
+    assert "shared-java-db=true" in cache
+    assert "shared-java-db=false" in cache
+    assert "action-cache=false" in cache
+    assert "action-cache=true" in cache
+    assert "TRIVY_SHARED_CACHE" not in cache
     assert 'test -w "$TRIVY_CACHE_DIR"' not in cache
+
+
+def test_trivy_image_retry_is_only_for_unexpected_eof_and_bounded():
+    scan = STEPS["Run Trivy vulnerability scanner"]
+    assert 'grep -Fq "unexpected EOF" "$FIRST_LOG"' in scan
+    assert "Non-transient Trivy failure; retry skipped." in scan
+    assert "retrying once" in scan
+    assert "sleep 2" in scan
+    assert scan.count('if run_scan "') == 2
+    assert "The single bounded retry also failed." in scan
+
+
+def test_filesystem_scan_java_db_and_artifact_contract():
+    filesystem = (
+        ROOT / ".github" / "actions" / "trivy-filesystem-scan" / "action.yml"
+    ).read_text(encoding="utf-8")
+    assert 'default: "false"' in filesystem.split(
+        "  upload-scan-artifacts:\n", 1
+    )[1].split("\noutputs:", 1)[0]
+    assert 'ln -s "$SHARED_DB/java-db" "$LOCAL_CACHE/java-db"' in filesystem
+    assert '"$SHARED_DB/java-db/trivy-java.db"' in filesystem
+    assert '"$SHARED_DB/java-db/metadata.json"' in filesystem
+    assert "TRIVY_SKIP_JAVA_DB_UPDATE:" in filesystem
+    assert "inputs.upload-scan-artifacts == 'true' && always()" in filesystem
 
 
 
