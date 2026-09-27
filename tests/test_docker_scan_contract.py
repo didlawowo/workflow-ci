@@ -29,7 +29,12 @@ def shell_for(name: str) -> str:
     return textwrap.dedent(match.group(1))
 
 
-def run_step(name: str, tmp_path: Path, content: str | None):
+def run_step(
+    name: str,
+    tmp_path: Path,
+    content: str | None,
+    extra_env: dict[str, str] | None = None,
+):
     report = tmp_path / "scan report.sarif"
     output = tmp_path / "outputs"
     output.write_text("", encoding="utf-8")
@@ -47,7 +52,12 @@ def run_step(name: str, tmp_path: Path, content: str | None):
             shell_for(name),
         ],
         cwd=tmp_path,
-        env={**os.environ, "SARIF_FILE": str(report), "GITHUB_OUTPUT": str(output)},
+        env={
+            **os.environ,
+            "SARIF_FILE": str(report),
+            "GITHUB_OUTPUT": str(output),
+            **(extra_env or {}),
+        },
         capture_output=True,
         text=True,
         timeout=10,
@@ -425,6 +435,43 @@ def test_trivy_image_scan_uses_shared_db_with_memory_scan_cache():
     assert "action-cache=true" in cache
     assert "TRIVY_SHARED_CACHE" not in cache
     assert 'test -w "$TRIVY_CACHE_DIR"' not in cache
+
+
+@pytest.mark.parametrize(
+    "java_files,expected",
+    [
+        (("trivy-java.db", "metadata.json"), True),
+        (("trivy-java.db",), False),
+        (("metadata.json",), False),
+        ((), False),
+    ],
+)
+def test_shared_java_db_is_used_only_when_complete(tmp_path, java_files, expected):
+    shared = tmp_path / "shared"
+    (shared / "db").mkdir(parents=True)
+    (shared / "db" / "trivy.db").write_text("db", encoding="utf-8")
+    (shared / "db" / "metadata.json").write_text("{}", encoding="utf-8")
+    (shared / "java-db").mkdir()
+    for filename in java_files:
+        (shared / "java-db" / filename).write_text("java", encoding="utf-8")
+
+    runner_temp = tmp_path / "runner-temp"
+    result, output, _ = run_step(
+        "Resolve Trivy cache",
+        tmp_path,
+        None,
+        extra_env={
+            "RUNNER_TEMP": str(runner_temp),
+            "GITHUB_WORKSPACE": str(tmp_path),
+            "TRIVY_SHARED_DB_DIR": str(shared),
+        },
+    )
+
+    assert result.returncode == 0, result.stderr
+    local_java = runner_temp / "trivy-cache" / "java-db"
+    assert ("shared-java-db=true" in output) is expected
+    assert ("shared-java-db=false" in output) is (not expected)
+    assert local_java.is_symlink() is expected
 
 
 def test_trivy_image_retry_is_only_for_unexpected_eof_and_bounded():
