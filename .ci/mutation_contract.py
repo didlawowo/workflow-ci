@@ -3,6 +3,7 @@
 This code belongs to workflow-ci, never to provisioners or consumer repositories.
 It only reads PR code as data; test execution is handled separately in a sandbox.
 """
+
 from __future__ import annotations
 
 import configparser
@@ -26,12 +27,16 @@ def mutation_config(root: Path) -> dict:
     result = {}
     pyproject = root / "pyproject.toml"
     if pyproject.is_file():
-        result["pyproject"] = tomllib.loads(pyproject.read_text()).get("tool", {}).get("mutmut", {})
+        result["pyproject"] = (
+            tomllib.loads(pyproject.read_text()).get("tool", {}).get("mutmut", {})
+        )
     setup = root / "setup.cfg"
     if setup.is_file():
         parser = configparser.ConfigParser()
         parser.read(setup)
-        result["setup"] = dict(parser.items("mutmut")) if parser.has_section("mutmut") else {}
+        result["setup"] = (
+            dict(parser.items("mutmut")) if parser.has_section("mutmut") else {}
+        )
     for name in (".gremlins.yaml", ".gremlins.yml"):
         if (root / name).is_file():
             result[name] = (root / name).read_text()
@@ -42,10 +47,28 @@ def protect_config(trusted: Path, proposed: Path, base: str, head: str) -> None:
     if mutation_config(trusted) != mutation_config(proposed):
         raise ValueError("Mutation configuration differs from the protected base")
     diff = subprocess.run(
-        ["git", "-C", str(proposed), "diff", "--no-ext-diff", "--no-textconv", "--unified=0", f"{base}...{head}", "--", "*.py"],
-        check=True, capture_output=True, text=True,
+        [
+            "git",
+            "-C",
+            str(proposed),
+            "diff",
+            "--no-ext-diff",
+            "--no-textconv",
+            "--unified=0",
+            f"{base}...{head}",
+            "--",
+            "*.py",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
     ).stdout
-    if any(line.startswith("+") and not line.startswith("+++") and "pragma: no mutate" in line for line in diff.splitlines()):
+    if any(
+        line.startswith("+")
+        and not line.startswith("+++")
+        and "pragma: no mutate" in line
+        for line in diff.splitlines()
+    ):
         raise ValueError("PR adds a mutation suppression")
 
 
@@ -73,12 +96,20 @@ def read_json(path: Path, root: Path) -> dict:
     return data
 
 
-def validate_python_evidence(repo: Path, targets: tuple[str, ...], base: str, head: str) -> dict:
+def validate_python_evidence(
+    repo: Path, targets: tuple[str, ...], base: str, head: str
+) -> dict:
     """Require real results for EVERY selected function, including class methods."""
     if not targets:
         data = read_json(repo / ".quality" / "mutation-no-targets.json", repo)
-        if data.get("scope") != {"base_sha": base, "head_sha": head, "no_targets": True}:
-            raise ValueError("No-target evidence does not match the independently computed scope")
+        if data.get("scope") != {
+            "base_sha": base,
+            "head_sha": head,
+            "no_targets": True,
+        }:
+            raise ValueError(
+                "No-target evidence does not match the independently computed scope"
+            )
         stats = data.get("stats")
         if stats != dict(killed=0, survived=0, timeouts=0, suspicious=0, total=0):
             raise ValueError("Nonzero or missing counters in no-target evidence")
@@ -94,17 +125,35 @@ def validate_python_evidence(repo: Path, targets: tuple[str, ...], base: str, he
             statuses[key] = code
     selected = {}
     for target in targets:
-        matches = {key: code for key, code in statuses.items() if fnmatch.fnmatchcase(key, target)}
+        matches = {
+            key: code
+            for key, code in statuses.items()
+            if fnmatch.fnmatchcase(key, target)
+        }
         if not matches:
-            raise ValueError(f"Changed function produced no mutation evidence: {target}")
+            raise ValueError(
+                f"Changed function produced no mutation evidence: {target}"
+            )
         selected.update(matches)
     # Mutmut 3: pytest exit 1 means the mutant was killed. All other values,
     # including None, skipped, timeout, crash and suspicious, fail closed.
-    bad = {key: code for key, code in selected.items() if type(code) is not int or code != 1}
+    bad = {
+        key: code
+        for key, code in selected.items()
+        if type(code) is not int or code != 1
+    }
     if bad:
         raise ValueError(f"Mutation gate failed: non-killed mutants {bad}")
-    return {"stats": {"killed": len(selected), "survived": 0, "timeouts": 0, "suspicious": 0, "total": len(selected)},
-            "scope": {"base_sha": base, "head_sha": head, "targets": list(targets)}}
+    return {
+        "stats": {
+            "killed": len(selected),
+            "survived": 0,
+            "timeouts": 0,
+            "suspicious": 0,
+            "total": len(selected),
+        },
+        "scope": {"base_sha": base, "head_sha": head, "targets": list(targets)},
+    }
 
 
 def validate_go_evidence(repo: Path, has_targets: bool, base: str, head: str) -> dict:
@@ -113,7 +162,9 @@ def validate_go_evidence(repo: Path, has_targets: bool, base: str, head: str) ->
     if scope.get("base_sha") != base or scope.get("head_sha") != head:
         raise ValueError("Gremlins evidence does not match base/head")
     if scope.get("no_targets") is not (not has_targets):
-        raise ValueError("Gremlins evidence contradicts the independently computed scope")
+        raise ValueError(
+            "Gremlins evidence contradicts the independently computed scope"
+        )
     stats = data.get("stats", {})
     names = ("killed", "survived", "timeouts", "suspicious", "total")
     if any(type(stats.get(name)) is not int or stats[name] < 0 for name in names):
@@ -130,4 +181,5 @@ def validate_go_evidence(repo: Path, has_targets: bool, base: str, head: str) ->
 if __name__ == "__main__":
     # NUL-delimited arguments; never interpolate project metadata into shell code.
     import sys
+
     sys.stdout.write("\0".join(project_sync_args(Path.cwd())) + "\0")
