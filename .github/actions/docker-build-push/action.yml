@@ -66,6 +66,10 @@ inputs:
     description: "Publish validated Trivy SARIF to GitHub Code Scanning (disabled by default)"
     required: false
     default: "false"
+  upload-scan-artifacts:
+    description: "Archive raw Trivy SARIF as a GitHub Actions artifact (disabled by default)"
+    required: false
+    default: "false"
   scan-severity:
     description: "Trivy scan severity levels"
     required: false
@@ -546,6 +550,13 @@ runs:
           echo "skip-setup=false" >> "$GITHUB_OUTPUT"
         fi
 
+    - name: Install Trivy when absent
+      if: inputs.scan == 'true' && steps.trivy-runtime.outputs.skip-setup != 'true'
+      uses: aquasecurity/setup-trivy@v0.2.6
+      with:
+        version: "v0.70.0"
+        cache: false
+
     - name: Resolve Trivy cache
       id: trivy-cache
       if: inputs.scan == 'true'
@@ -565,7 +576,16 @@ runs:
         else
           echo "shared-db=false" >> "$GITHUB_OUTPUT"
           echo "action-cache=true" >> "$GITHUB_OUTPUT"
-          echo "Shared Trivy DB unavailable; using local DB cache"
+          echo "Shared Trivy vulnerability DB unavailable; using local DB cache"
+        fi
+
+        if [[ -n "$SHARED_DB" && -s "$SHARED_DB/java-db/trivy-java.db" && -s "$SHARED_DB/java-db/metadata.json" ]]; then
+          ln -s "$SHARED_DB/java-db" "$LOCAL_CACHE/java-db"
+          echo "shared-java-db=true" >> "$GITHUB_OUTPUT"
+          echo "Using read-only shared Trivy Java DB: $SHARED_DB/java-db"
+        else
+          echo "shared-java-db=false" >> "$GITHUB_OUTPUT"
+          echo "Shared Trivy Java DB unavailable or incomplete; network fallback remains enabled"
         fi
         echo "path=$LOCAL_CACHE" >> "$GITHUB_OUTPUT"
     - name: Prepare Trivy report
@@ -581,24 +601,58 @@ runs:
     - name: Run Trivy vulnerability scanner
       id: trivy
       if: inputs.scan == 'true'
-      uses: aquasecurity/trivy-action@v0.36.0
+      shell: bash
       env:
-        # Plain-HTTP registry (registry-plain-http=true): allow non-TLS pulls.
         TRIVY_INSECURE: ${{ inputs.registry-plain-http == 'true' && 'true' || 'false' }}
         TRIVY_SKIP_VERSION_CHECK: "true"
         TRIVY_CACHE_BACKEND: "memory"
         TRIVY_SKIP_DB_UPDATE: ${{ steps.trivy-cache.outputs.shared-db == 'true' && 'true' || 'false' }}
-      with:
-        version: "v0.70.0"
-        skip-setup-trivy: ${{ steps.trivy-runtime.outputs.skip-setup || 'false' }}
-        cache: ${{ steps.trivy-cache.outputs.action-cache }}
-        cache-dir: ${{ steps.trivy-cache.outputs.path }}
-        timeout: "15m"
-        scanners: "vuln"
-        image-ref: ${{ steps.meta.outputs.full-name }}
-        format: "sarif"
-        output: ${{ steps.meta.outputs.sarif-file }}
-        severity: ${{ inputs.scan-severity }}
+        TRIVY_SKIP_JAVA_DB_UPDATE: ${{ steps.trivy-cache.outputs.shared-java-db == 'true' && 'true' || 'false' }}
+        TRIVY_CACHE_DIR: ${{ steps.trivy-cache.outputs.path }}
+        IMAGE_REF: ${{ steps.meta.outputs.full-name }}
+        SARIF_FILE: ${{ steps.meta.outputs.sarif-file }}
+        SCAN_SEVERITY: ${{ inputs.scan-severity }}
+      run: |
+        set -euo pipefail
+
+        run_scan() {
+          local log_file="$1"
+          rm -f -- "$SARIF_FILE" "$log_file"
+          set +e
+          timeout 15m trivy image \
+            --cache-dir "$TRIVY_CACHE_DIR" \
+            --scanners vuln \
+            --format sarif \
+            --output "$SARIF_FILE" \
+            --severity "$SCAN_SEVERITY" \
+            "$IMAGE_REF" 2>&1 | tee "$log_file"
+          local rc=${PIPESTATUS[0]}
+          set -e
+          return "$rc"
+        }
+
+        FIRST_LOG="${RUNNER_TEMP:-$GITHUB_WORKSPACE}/trivy-image-first.log"
+        RETRY_LOG="${RUNNER_TEMP:-$GITHUB_WORKSPACE}/trivy-image-retry.log"
+
+        if run_scan "$FIRST_LOG"; then
+          exit 0
+        fi
+        first_rc=$?
+
+        if ! grep -Fq "unexpected EOF" "$FIRST_LOG"; then
+          echo "::error title=Trivy scan failed::Non-transient Trivy failure; retry skipped."
+          exit "$first_rc"
+        fi
+
+        echo "::warning title=Transient Trivy extraction failure::Detected 'unexpected EOF'; retrying once with a fresh in-memory scan cache."
+        sleep 2
+
+        if run_scan "$RETRY_LOG"; then
+          exit 0
+        fi
+        retry_rc=$?
+        echo "::error title=Trivy retry failed::The single bounded retry also failed."
+        exit "$retry_rc"
 
     - name: Analyze scan results
       id: scan-results
@@ -746,7 +800,7 @@ runs:
     # This does not neutralize the earlier failure and must not run if no scan
     # was attempted (e.g. the Docker build failed or scanning was disabled).
     - name: Upload scan artifacts
-      if: ${{ !cancelled() && inputs.scan == 'true' && (steps.trivy.outcome == 'success' || steps.trivy.outcome == 'failure') }}
+      if: ${{ !cancelled() && inputs.scan == 'true' && inputs.upload-scan-artifacts == 'true' && (steps.trivy.outcome == 'success' || steps.trivy.outcome == 'failure') }}
       uses: actions/upload-artifact@v6
       continue-on-error: true
       with:
