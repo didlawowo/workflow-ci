@@ -16,16 +16,137 @@ def _run_hidden_go_test(candidate: Path, seed: int) -> None:
     source = f'''package handlers
 
 import (
+    "bytes"
     "context"
+    "encoding/json"
     "fmt"
+    "io"
     "net/http"
+    "net/http/httptest"
+    "path/filepath"
     "testing"
 
     "github.com/gin-gonic/gin"
-    "github.com/stretchr/testify/require"
 
+    "github.com/didlawowo/keryx/pkg/hermes"
     "github.com/didlawowo/keryx/pkg/store"
 )
+
+// Everything prefixed workflowCITrusted is owned by the central oracle.
+// The hidden evaluator must not depend on helpers from candidate *_test.go files.
+type workflowCITrustedHermes struct {{
+    events  []hermes.Event
+    lastReq hermes.StreamRequest
+}}
+
+func (f *workflowCITrustedHermes) Stream(
+    _ context.Context,
+    req hermes.StreamRequest,
+    onEvent func(hermes.Event) error,
+) error {{
+    f.lastReq = req
+    for _, ev := range f.events {{
+        if err := onEvent(ev); err != nil {{
+            return err
+        }}
+    }}
+    return nil
+}}
+
+func (f *workflowCITrustedHermes) Models(context.Context, string) ([]hermes.Model, error) {{
+    return nil, nil
+}}
+
+func (f *workflowCITrustedHermes) ResponseExists(context.Context, string, string) (bool, error) {{
+    return true, nil
+}}
+
+func (f *workflowCITrustedHermes) Capabilities(context.Context, string) (*hermes.Capabilities, error) {{
+    return &hermes.Capabilities{{Features: map[string]any{{}}}}, nil
+}}
+
+type workflowCITrustedTranscriber struct{{}}
+
+func (*workflowCITrustedTranscriber) Transcribe(context.Context, io.Reader, string) (string, error) {{
+    return "", nil
+}}
+
+func workflowCITrustedCompletedWith(id, text string) []hermes.Event {{
+    return []hermes.Event{{
+        {{Type: hermes.EventTextDelta, Delta: text}},
+        {{Type: hermes.EventTextDone, Text: text}},
+        {{Type: hermes.EventCompleted, Response: &hermes.Response{{ID: id, Usage: &hermes.Usage{{InputTokens: 10}}}}}},
+    }}
+}}
+
+func workflowCITrustedAPI(t *testing.T, h hermes.ChatServing) (*API, *gin.Engine) {{
+    t.Helper()
+    st, err := store.New(filepath.Join(t.TempDir(), "hidden.db"))
+    if err != nil {{
+        t.Fatalf("open hidden store: %v", err)
+    }}
+    t.Cleanup(func() {{ _ = st.Close() }})
+
+    api := &API{{
+        Store:       st,
+        Hermes:      h,
+        Transcriber: &workflowCITrustedTranscriber{{}},
+        Profiles:    []string{{"default", "devops"}},
+        AuthMode:    "proxy",
+    }}
+
+    gin.SetMode(gin.TestMode)
+    router := gin.New()
+    api.RegisterRoutes(router, func(c *gin.Context) {{ c.Next() }})
+    return api, router
+}}
+
+func workflowCITrustedDo(
+    t *testing.T,
+    router *gin.Engine,
+    method, path string,
+    body any,
+) *httptest.ResponseRecorder {{
+    t.Helper()
+    var reader io.Reader
+    if body != nil {{
+        raw, err := json.Marshal(body)
+        if err != nil {{
+            t.Fatalf("marshal hidden request: %v", err)
+        }}
+        reader = bytes.NewReader(raw)
+    }}
+    req := httptest.NewRequestWithContext(context.Background(), method, path, reader)
+    if body != nil {{
+        req.Header.Set("Content-Type", "application/json")
+    }}
+    rec := httptest.NewRecorder()
+    router.ServeHTTP(rec, req)
+    return rec
+}}
+
+func workflowCITrustedCreateThread(
+    t *testing.T,
+    router *gin.Engine,
+    title, profile string,
+) store.Thread {{
+    t.Helper()
+    rec := workflowCITrustedDo(
+        t,
+        router,
+        http.MethodPost,
+        "/api/threads",
+        gin.H{{"title": title, "profile": profile}},
+    )
+    if rec.Code != http.StatusCreated {{
+        t.Fatalf("create thread status=%d body=%s", rec.Code, rec.Body.String())
+    }}
+    var thread store.Thread
+    if err := json.Unmarshal(rec.Body.Bytes(), &thread); err != nil {{
+        t.Fatalf("decode thread: %v", err)
+    }}
+    return thread
+}}
 
 func TestWorkflowCIHiddenTurnFeedReplay(t *testing.T) {{
     f := newTurnFeed()
@@ -60,40 +181,54 @@ func TestWorkflowCIHiddenApprovalChoicesFailClosed(t *testing.T) {{
 }}
 
 func TestWorkflowCIHiddenReasoningClamp(t *testing.T) {{
-    fake := &fakeHermes{{events: completedWith("hidden-response", "ok")}}
-    _, router := newTestAPI(t, fake, &fakeTranscriber{{}})
-    thread := createThread(t, router, "Hidden", "")
-    response := do(t, router, http.MethodPost, "/api/threads/"+thread.ID+"/chat", gin.H{{
+    fake := &workflowCITrustedHermes{{events: workflowCITrustedCompletedWith("hidden-response", "ok")}}
+    _, router := workflowCITrustedAPI(t, fake)
+    thread := workflowCITrustedCreateThread(t, router, "Hidden", "")
+    response := workflowCITrustedDo(t, router, http.MethodPost, "/api/threads/"+thread.ID+"/chat", gin.H{{
         "message": "{message}",
         "reasoning_effort": "xhigh",
     }})
-    require.Equal(t, http.StatusOK, response.Code)
-    require.Equal(t, "medium", fake.lastReq.ReasoningEffort)
+    if response.Code != http.StatusOK {{
+        t.Fatalf("xhigh request status=%d body=%s", response.Code, response.Body.String())
+    }}
+    if fake.lastReq.ReasoningEffort != "medium" {{
+        t.Fatalf("xhigh reasoning=%q want=medium", fake.lastReq.ReasoningEffort)
+    }}
 
-    fake.events = completedWith("hidden-response-2", "ok2")
-    thread2 := createThread(t, router, "Hidden2", "")
-    response = do(t, router, http.MethodPost, "/api/threads/"+thread2.ID+"/chat", gin.H{{
+    fake.events = workflowCITrustedCompletedWith("hidden-response-2", "ok2")
+    thread2 := workflowCITrustedCreateThread(t, router, "Hidden2", "")
+    response = workflowCITrustedDo(t, router, http.MethodPost, "/api/threads/"+thread2.ID+"/chat", gin.H{{
         "message": "{message}-default",
     }})
-    require.Equal(t, http.StatusOK, response.Code)
-    require.Equal(t, "low", fake.lastReq.ReasoningEffort)
+    if response.Code != http.StatusOK {{
+        t.Fatalf("default request status=%d body=%s", response.Code, response.Body.String())
+    }}
+    if fake.lastReq.ReasoningEffort != "low" {{
+        t.Fatalf("default reasoning=%q want=low", fake.lastReq.ReasoningEffort)
+    }}
 }}
 
 func TestWorkflowCIHiddenRetryIsExactlyOnce(t *testing.T) {{
-    fake := &fakeHermes{{events: completedWith("hidden-retry", "done")}}
-    api, router := newTestAPI(t, fake, &fakeTranscriber{{}})
-    thread := createThread(t, router, "Retry", "")
+    fake := &workflowCITrustedHermes{{events: workflowCITrustedCompletedWith("hidden-retry", "done")}}
+    api, router := workflowCITrustedAPI(t, fake)
+    thread := workflowCITrustedCreateThread(t, router, "Retry", "")
     target, err := api.Store.AppendMessage(context.Background(), thread.ID, store.RoleUser, "{message}", "")
-    require.NoError(t, err)
+    if err != nil {{
+        t.Fatalf("append retry target: %v", err)
+    }}
 
-    response := do(t, router, http.MethodPost, "/api/threads/"+thread.ID+"/chat", gin.H{{
+    response := workflowCITrustedDo(t, router, http.MethodPost, "/api/threads/"+thread.ID+"/chat", gin.H{{
         "message": "{message}",
         "retry_message_id": target.ID,
     }})
-    require.Equal(t, http.StatusOK, response.Code)
+    if response.Code != http.StatusOK {{
+        t.Fatalf("retry status=%d body=%s", response.Code, response.Body.String())
+    }}
 
     messages, err := api.Store.ListMessages(context.Background(), thread.ID)
-    require.NoError(t, err)
+    if err != nil {{
+        t.Fatalf("list retry messages: %v", err)
+    }}
     occurrences := 0
     for _, item := range messages {{
         if item.Role == store.RoleUser && item.Content == "{message}" {{ occurrences++ }}
