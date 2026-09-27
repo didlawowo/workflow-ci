@@ -259,3 +259,32 @@ def test_hidden_required_check_aggregation_matrix() -> None:
             for index, status in enumerate(statuses)
         ]
         assert module.aggregate_required_checks(checks) == expected
+
+
+def test_jetracer_safety_evaluator_is_registered_for_control_paths() -> None:
+    registry = json.loads(REGISTRY.read_text(encoding="utf-8"))
+    spec = registry["evaluators"]["jet-racer-v2/control-safety"]
+    assert spec["repository"] == "didlawowo/jet-racer-v2"
+    assert spec["entrypoint"] == (
+        "hidden-evaluators/jet-racer-v2/control-safety/evaluator.py"
+    )
+    assert "src/jetracer/safety.py" in spec["paths"]
+    assert "src/jetracer/teleop.py" in spec["paths"]
+    assert "src/jetracer/collection/**" in spec["paths"]
+
+
+def test_jetracer_safety_evaluator_is_hardware_free_and_randomized() -> None:
+    source = (
+        ROOT
+        / "hidden-evaluators"
+        / "jet-racer-v2"
+        / "control-safety"
+        / "evaluator.py"
+    ).read_text(encoding="utf-8")
+    assert "random.Random(seed)" in source
+    assert "command_from_state" in source
+    assert "TeleopSession" in source
+    assert "Watchdog" in source
+    assert "SessionWriter" in source
+    assert "TemporaryDirectory" in source
+    assert "/dev/" not in source

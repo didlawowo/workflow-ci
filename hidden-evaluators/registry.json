@@ -44,12 +44,22 @@
         "web/src/lib/**",
         "web/src/types.ts"
       ]
-    }
-  },
-  "planned": {
+    },
     "jet-racer-v2/control-safety": {
       "repository": "didlawowo/jet-racer-v2",
-      "issue": "didlawowo/jet-racer-v2#58"
+      "entrypoint": "hidden-evaluators/jet-racer-v2/control-safety/evaluator.py",
+      "paths": [
+        "src/jetracer/safety.py",
+        "src/jetracer/teleop.py",
+        "src/jetracer/input/**",
+        "src/jetracer/hw/**",
+        "src/jetracer/collection/**",
+        "src/jetracer/inference/**",
+        "src/jetracer/camera/**",
+        "src/jetracer/training/**",
+        "native/camera/**"
+      ]
     }
-  }
+  },
+  "planned": {}
 }
