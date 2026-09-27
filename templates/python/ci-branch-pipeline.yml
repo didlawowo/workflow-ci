@@ -5,7 +5,7 @@
 # Uses composite actions from: didlawowo/workflow-ci
 #
 # To adapt for your project:
-# 1. Set repository variable `RUNNER` for a self-hosted runner (optional; defaults to ubuntu-latest)
+# 1. Set repository variable `RUNNER` for a self-hosted runner (optional; defaults to arc-runner-<repo>)
 # 2. Adjust PYTHON_VERSION, PYTHON_WORKING_DIR, COVERAGE_THRESHOLD
 # 3. Adjust IMAGE_NAME to your Docker Hub image
 # 4. Set secrets: DOCKER_USERNAME, DOCKER_PASSWORD, CODECOV_TOKEN
@@ -69,7 +69,7 @@ jobs:
   # ═══════════════════════════════════════════════════════════════════════════
   tests:
     name: "Tests & Coverage"
-    runs-on: ${{ vars.RUNNER || 'ubuntu-latest' }}
+    runs-on: ${{ vars.RUNNER || format('arc-runner-{0}', github.event.repository.name) }}
     timeout-minutes: 20
     permissions:
       contents: read
@@ -99,7 +99,7 @@ jobs:
   # ═══════════════════════════════════════════════════════════════════════════
   quality-security:
     name: "Quality & Security"
-    runs-on: ${{ vars.RUNNER || 'ubuntu-latest' }}
+    runs-on: ${{ vars.RUNNER || format('arc-runner-{0}', github.event.repository.name) }}
     timeout-minutes: 20
     permissions:
       contents: read
@@ -146,7 +146,7 @@ jobs:
     needs: [tests, quality-security]
     # PR = fast feedback. Expensive image build/scan only runs after merge to main or manually.
     if: always() && github.event_name != 'pull_request' && needs.tests.result == 'success' && needs.quality-security.result == 'success'
-    runs-on: ${{ vars.RUNNER || 'ubuntu-latest' }}
+    runs-on: ${{ vars.RUNNER || format('arc-runner-{0}', github.event.repository.name) }}
     timeout-minutes: 35
     permissions:
       contents: read
@@ -188,7 +188,7 @@ jobs:
     name: "Pipeline Summary"
     if: always()
     needs: [tests, quality-security, docker-build]
-    runs-on: ${{ vars.RUNNER || 'ubuntu-latest' }}
+    runs-on: ${{ vars.RUNNER || format('arc-runner-{0}', github.event.repository.name) }}
     timeout-minutes: 5
     steps:
       - name: Create summary

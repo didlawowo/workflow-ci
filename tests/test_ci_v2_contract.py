@@ -43,7 +43,9 @@ def test_main_coverage_is_committed_after_successful_merge_run():
     assert "needs: [tests]" in baseline
     assert "contents: write" in baseline
     assert "mode: write" in baseline
-    assert 'git commit -m "chore(ci): update main coverage baseline [skip ci]"' in baseline
+    assert (
+        'git commit -m "chore(ci): update main coverage baseline [skip ci]"' in baseline
+    )
     assert "git push origin HEAD:main" in baseline
 
 
@@ -53,7 +55,6 @@ def test_old_trusted_workflow_remains_available_during_migration():
     legacy_text = legacy.read_text(encoding="utf-8")
     assert "Independent quality execution" in legacy_text
     assert "mutation-policy.yml" in legacy_text
-
 
 
 def test_sonar_reuses_the_single_test_workspace_without_rerunning_tests():
@@ -75,7 +76,6 @@ def test_trusted_report_reuses_job_outputs_instead_of_executing_tests():
     assert "run-python-tests" not in report
     assert "run-go-tests" not in report
     assert "run-node-tests" not in report
-
 
 
 def test_coverage_bootstrap_and_protected_main_failure_are_explicit():

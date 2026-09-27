@@ -15,7 +15,16 @@ def _load(candidate: Path):
     from jetracer.input.dualsense import DualSenseState
     from jetracer.safety import Watchdog
     from jetracer.teleop import TeleopConfig, TeleopSession, command_from_state
-    return CameraConfig, SessionWriter, DualSenseState, Watchdog, TeleopConfig, TeleopSession, command_from_state
+
+    return (
+        CameraConfig,
+        SessionWriter,
+        DualSenseState,
+        Watchdog,
+        TeleopConfig,
+        TeleopSession,
+        command_from_state,
+    )
 
 
 def _state(DualSenseState, rng: random.Random, seq: int, buttons=frozenset()):
@@ -32,7 +41,9 @@ def _state(DualSenseState, rng: random.Random, seq: int, buttons=frozenset()):
     )
 
 
-def _teleop_invariants(DualSenseState, TeleopConfig, TeleopSession, command_from_state, rng):
+def _teleop_invariants(
+    DualSenseState, TeleopConfig, TeleopSession, command_from_state, rng
+):
     for _ in range(120):
         limit = rng.uniform(0.15, 0.8)
         start = rng.uniform(0.0, limit)
@@ -67,13 +78,21 @@ def _teleop_invariants(DualSenseState, TeleopConfig, TeleopSession, command_from
     assert stale.armed is False and stale.throttle == 0.0
 
     # Keeping options pressed after stale cannot immediately rearm.
-    still_pressed = session.update(_state(DualSenseState, rng, base + 2, {"options"}), now=now[0])
+    still_pressed = session.update(
+        _state(DualSenseState, rng, base + 2, {"options"}), now=now[0]
+    )
     assert still_pressed.armed is False and still_pressed.throttle == 0.0
 
-    session.update(_state(DualSenseState, rng, base + 3, frozenset()), now=now[0] + 0.001)
-    rearmed = session.update(_state(DualSenseState, rng, base + 4, {"options"}), now=now[0] + 0.002)
+    session.update(
+        _state(DualSenseState, rng, base + 3, frozenset()), now=now[0] + 0.001
+    )
+    rearmed = session.update(
+        _state(DualSenseState, rng, base + 4, {"options"}), now=now[0] + 0.002
+    )
     assert rearmed.armed is True
-    stopped = session.update(_state(DualSenseState, rng, base + 5, {"cross"}), now=now[0] + 0.003)
+    stopped = session.update(
+        _state(DualSenseState, rng, base + 5, {"cross"}), now=now[0] + 0.003
+    )
     assert stopped.armed is False and stopped.throttle == 0.0
 
 
@@ -81,7 +100,9 @@ def _watchdog_invariants(Watchdog, rng):
     now = [rng.uniform(10.0, 1000.0)]
     timeout = rng.uniform(0.05, 1.0)
     calls: list[float] = []
-    watchdog = Watchdog(timeout, on_timeout=lambda: calls.append(now[0]), clock=lambda: now[0])
+    watchdog = Watchdog(
+        timeout, on_timeout=lambda: calls.append(now[0]), clock=lambda: now[0]
+    )
 
     assert watchdog.check() is False
     watchdog.feed()
@@ -116,7 +137,9 @@ def _session_crash_invariants(CameraConfig, SessionWriter, TeleopConfig, rng):
         except RuntimeError as exc:
             assert "hidden synthetic interruption" in str(exc)
 
-        manifest = json.loads((root / session_id / "manifest.json").read_text(encoding="utf-8"))
+        manifest = json.loads(
+            (root / session_id / "manifest.json").read_text(encoding="utf-8")
+        )
         assert manifest["status"] == "error"
         assert manifest["stats"]["events"] == 1
         assert "hidden synthetic interruption" in manifest.get("error", "")
@@ -126,7 +149,9 @@ def _session_crash_invariants(CameraConfig, SessionWriter, TeleopConfig, rng):
 
         # close() after context cleanup must remain idempotent.
         writer.close(status="completed")
-        manifest_after = json.loads((root / session_id / "manifest.json").read_text(encoding="utf-8"))
+        manifest_after = json.loads(
+            (root / session_id / "manifest.json").read_text(encoding="utf-8")
+        )
         assert manifest_after["status"] == "error"
 
 
@@ -141,16 +166,30 @@ def _check(name: str, callback) -> dict[str, str]:
 def evaluate(candidate: Path, seed: int) -> list[dict[str, str]]:
     if not (candidate / "src" / "jetracer").is_dir():
         raise RuntimeError("candidate does not look like jet-racer-v2")
-    CameraConfig, SessionWriter, DualSenseState, Watchdog, TeleopConfig, TeleopSession, command_from_state = _load(candidate)
+    (
+        CameraConfig,
+        SessionWriter,
+        DualSenseState,
+        Watchdog,
+        TeleopConfig,
+        TeleopSession,
+        command_from_state,
+    ) = _load(candidate)
     rng = random.Random(seed)
     return [
         _check(
             "teleop-bounds-and-stale-failsafe",
-            lambda: _teleop_invariants(DualSenseState, TeleopConfig, TeleopSession, command_from_state, rng),
+            lambda: _teleop_invariants(
+                DualSenseState, TeleopConfig, TeleopSession, command_from_state, rng
+            ),
         ),
-        _check("watchdog-exactly-once-rearm", lambda: _watchdog_invariants(Watchdog, rng)),
+        _check(
+            "watchdog-exactly-once-rearm", lambda: _watchdog_invariants(Watchdog, rng)
+        ),
         _check(
             "collection-crash-manifest",
-            lambda: _session_crash_invariants(CameraConfig, SessionWriter, TeleopConfig, rng),
+            lambda: _session_crash_invariants(
+                CameraConfig, SessionWriter, TeleopConfig, rng
+            ),
         ),
     ]

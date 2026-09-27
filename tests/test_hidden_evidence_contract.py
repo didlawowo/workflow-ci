@@ -94,11 +94,17 @@ def test_hidden_workflow_checks_out_trusted_base_and_exact_candidate() -> None:
     assert workflow.count("persist-credentials: false") >= 3
     assert (
         'test "$(git -C .workflow-ci-hidden rev-parse HEAD)" = '
-        '"$(git -C .workflow-ci-hidden rev-parse \'${{ job.workflow_sha }}^{commit}\')"'
+        "\"$(git -C .workflow-ci-hidden rev-parse '${{ job.workflow_sha }}^{commit}')\""
         in workflow
     )
-    assert 'test "$(git -C base rev-parse HEAD)" = "${{ github.event.pull_request.base.sha }}"' in workflow
-    assert 'test "$(git -C candidate rev-parse HEAD)" = "${{ github.event.pull_request.head.sha }}"' in workflow
+    assert (
+        'test "$(git -C base rev-parse HEAD)" = "${{ github.event.pull_request.base.sha }}"'
+        in workflow
+    )
+    assert (
+        'test "$(git -C candidate rev-parse HEAD)" = "${{ github.event.pull_request.head.sha }}"'
+        in workflow
+    )
     assert "git -C candidate cat-file -e" not in workflow
 
 
@@ -113,7 +119,9 @@ def test_hidden_scope_compares_tracked_base_and_candidate_trees() -> None:
 
 def test_hidden_workflow_is_read_only_and_reporting_is_best_effort() -> None:
     workflow = WORKFLOW.read_text(encoding="utf-8")
-    permissions = workflow.split("    permissions:\n", 1)[1].split("    outputs:\n", 1)[0]
+    permissions = workflow.split("    permissions:\n", 1)[1].split("    outputs:\n", 1)[
+        0
+    ]
     assert "contents: read" in permissions
     assert "write" not in permissions
     assert "pull-requests:" not in permissions
@@ -136,7 +144,9 @@ def test_ioniq_hidden_oracle_uses_independent_reference_projection() -> None:
     assert "calibration.metrics(" not in source
     assert "calibration.fit_extrinsics(train, intrinsics)" in source
     assert "_reference_errors(holdout, intrinsics, fitted)" in source
-    assert 'TRUSTED_AUTO_METHOD = "automatic_unambiguous_radar_yolo_bootstrap"' in source
+    assert (
+        'TRUSTED_AUTO_METHOD = "automatic_unambiguous_radar_yolo_bootstrap"' in source
+    )
     assert 'TRUSTED_AUTO_VALIDATION_MODE = "operational_independent_routes"' in source
     assert '"min_frames_with_targets": 40' in source
     assert '"min_frame_match_rate": 0.80' in source
@@ -206,11 +216,7 @@ def test_keryx_runtime_evaluator_is_registered_with_runtime_paths() -> None:
 
 def test_keryx_runtime_evaluator_executes_ephemeral_go_tests() -> None:
     source = (
-        ROOT
-        / "hidden-evaluators"
-        / "keryx"
-        / "conversation-runtime"
-        / "evaluator.py"
+        ROOT / "hidden-evaluators" / "keryx" / "conversation-runtime" / "evaluator.py"
     ).read_text(encoding="utf-8")
     assert "workflow_ci_hidden_test.go" in source
     assert '"go",' in source and '"test",' in source
@@ -275,11 +281,7 @@ def test_jetracer_safety_evaluator_is_registered_for_control_paths() -> None:
 
 def test_jetracer_safety_evaluator_is_hardware_free_and_randomized() -> None:
     source = (
-        ROOT
-        / "hidden-evaluators"
-        / "jet-racer-v2"
-        / "control-safety"
-        / "evaluator.py"
+        ROOT / "hidden-evaluators" / "jet-racer-v2" / "control-safety" / "evaluator.py"
     ).read_text(encoding="utf-8")
     assert "random.Random(seed)" in source
     assert "command_from_state" in source

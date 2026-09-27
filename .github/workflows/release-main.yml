@@ -9,9 +9,18 @@ permissions:
   contents: write
 
 jobs:
+  validate:
+    permissions:
+      contents: read
+      actions: read
+      pull-requests: write
+    uses: ./.github/workflows/quality-report-selftest.yml
+
   release:
+    needs: validate
     uses: ./.github/workflows/release.yml
     with:
-      workflow-ci-ref: main
+      validated-sha: ${{ github.sha }}
+      workflow-ci-ref: ${{ github.sha }}
       runs-on: arc-runner-workflow-ci
     secrets: inherit

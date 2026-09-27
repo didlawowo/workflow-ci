@@ -5,7 +5,7 @@
 # Requires: LLM endpoint accessible from runner (cluster-internal by default)
 #
 # Configuration:
-#   - vars.RUNNER: Repository variable for your runner label (default: ubuntu-latest)
+#   - vars.RUNNER: Repository variable for your runner label (default: arc-runner-<repo>)
 #   - LLM_BASE_URL: Override for external endpoint or different model port
 #   - LLM_MODEL: qwen35 (default) or nemo3 (faster, less accurate)
 #
@@ -35,7 +35,7 @@ jobs:
   ai-review:
     name: AI PR Review
     if: github.event.label.name == 'ai-review'
-    runs-on: ${{ vars.RUNNER || 'ubuntu-latest' }}
+    runs-on: ${{ vars.RUNNER || format('arc-runner-{0}', github.event.repository.name) }}
     permissions:
       pull-requests: write
       contents: read

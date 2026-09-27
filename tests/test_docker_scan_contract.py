@@ -205,7 +205,10 @@ def test_native_remote_buildkit_retries_once_and_then_fails_closed():
     retry = STEPS["Retry native remote BuildKit once"]
     enforce = STEPS["Enforce native Docker build result"]
 
-    assert "continue-on-error: ${{ steps.execution-mode.outputs.use-native == 'true' }}" in primary
+    assert (
+        "continue-on-error: ${{ steps.execution-mode.outputs.use-native == 'true' }}"
+        in primary
+    )
     assert "steps.build.outcome == 'failure'" in retry
     assert "builder: native" in retry
     assert "steps.build-retry.outcome != 'success'" in enforce
@@ -228,7 +231,9 @@ def test_scan_steps_are_gated_but_not_always_successful(name):
 
 
 def test_code_scanning_publication_is_disabled_by_default_and_opt_in():
-    upload_input = TEXT.split("  upload-sarif:\n", 1)[1].split("  scan-severity:\n", 1)[0]
+    upload_input = TEXT.split("  upload-sarif:\n", 1)[1].split("  scan-severity:\n", 1)[
+        0
+    ]
     assert '    default: "false"' in upload_input
 
     upload = STEPS["Upload Trivy scan results"]
@@ -336,7 +341,10 @@ def test_docker_actions_use_node24_capable_majors():
 
 def test_reusable_ci_propagates_native_auto_default():
     reusable = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
-    assert "native-multiarch:\n        required: false\n        type: string\n        default: \"auto\"" in reusable
+    assert (
+        'native-multiarch:\n        required: false\n        type: string\n        default: "auto"'
+        in reusable
+    )
     assert "native-multiarch: ${{ inputs.native-multiarch }}" in reusable
 
 
@@ -346,8 +354,8 @@ def test_arc_auto_prefers_native_buildkit_and_skips_qemu():
     local = STEPS["Set up Docker Buildx"]
     remote = STEPS["Set up native multi-arch Buildx (remote BuildKit)"]
 
-    assert 'NATIVE_MULTIARCH: ${{ inputs.native-multiarch }}' in resolve
-    assert 'RUNNER_NAME: ${{ runner.name }}' in resolve
+    assert "NATIVE_MULTIARCH: ${{ inputs.native-multiarch }}" in resolve
+    assert "RUNNER_NAME: ${{ runner.name }}" in resolve
     assert '[ "$PUSH_IMAGE" = "true" ]' in resolve
     assert '[[ "$RUNNER_NAME" == arc-runner-* ]]' in resolve
     assert 'echo "use-native=$use_native"' in resolve
@@ -488,15 +496,17 @@ def test_filesystem_scan_java_db_and_artifact_contract():
     filesystem = (
         ROOT / ".github" / "actions" / "trivy-filesystem-scan" / "action.yml"
     ).read_text(encoding="utf-8")
-    assert 'default: "false"' in filesystem.split(
-        "  upload-scan-artifacts:\n", 1
-    )[1].split("\noutputs:", 1)[0]
+    assert (
+        'default: "false"'
+        in filesystem.split("  upload-scan-artifacts:\n", 1)[1].split("\noutputs:", 1)[
+            0
+        ]
+    )
     assert 'ln -s "$SHARED_DB/java-db" "$LOCAL_CACHE/java-db"' in filesystem
     assert '"$SHARED_DB/java-db/trivy-java.db"' in filesystem
     assert '"$SHARED_DB/java-db/metadata.json"' in filesystem
     assert "TRIVY_SKIP_JAVA_DB_UPDATE:" in filesystem
     assert "inputs.upload-scan-artifacts == 'true' && always()" in filesystem
-
 
 
 def test_cosign_prefers_runner_binary_and_fallback_is_same_version():

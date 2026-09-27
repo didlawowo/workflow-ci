@@ -5,6 +5,8 @@ on:
     paths:
       - ".github/actions/docker-build-push/**"
       - ".github/workflows/quality-report-selftest.yml"
+      - ".github/workflows/ci.yml"
+      - ".github/workflows/release-main.yml"
       - ".github/actions/quality-report/**"
       - ".github/actions/run-python-tests/**"
       - ".github/actions/python-quality-security/**"
@@ -24,34 +26,11 @@ on:
       - "pyproject.toml"
       - ".ci/mutation.sh"
       - ".ci/mutation_scope.py"
-  push:
-    branches: [main]
-    paths:
-      - ".github/actions/docker-build-push/**"
-      - ".github/workflows/quality-report-selftest.yml"
-      - ".github/actions/quality-report/**"
-      - ".github/actions/run-python-tests/**"
-      - ".github/actions/python-quality-security/**"
-      - ".github/workflows/quality-evidence.yml"
-      - ".github/actions/run-go-tests/**"
-      - ".github/actions/run-node-tests/**"
-      - "quality_report.py"
-      - ".github/scripts/mutation_policy.py"
-      - ".github/workflows/mutation-policy.yml"
-      - ".github/workflows/mutation-issue-policy.yml"
-      - ".ci/mutation-go.sh"
-      - ".github/workflows/release.yml"
-      - ".github/scripts/sync_internal_refs.py"
-      - ".workflow-ci-version"
-      - "templates/**"
-      - "tests/**"
-      - "pyproject.toml"
-      - ".ci/mutation.sh"
-      - ".ci/mutation_scope.py"
+  workflow_call:
 
 jobs:
   test:
-    runs-on: ${{ vars.RUNNER || 'ubuntu-latest' }}
+    runs-on: ${{ vars.RUNNER || format('arc-runner-{0}', github.event.repository.name) }}
     permissions:
       contents: read
       pull-requests: write
@@ -86,7 +65,7 @@ jobs:
 
   mutation:
     if: github.event_name == 'pull_request'
-    runs-on: ${{ vars.RUNNER || 'ubuntu-latest' }}
+    runs-on: ${{ vars.RUNNER || format('arc-runner-{0}', github.event.repository.name) }}
     permissions:
       contents: read
     steps:

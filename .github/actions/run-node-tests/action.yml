@@ -2,6 +2,10 @@ name: "Run Node.js Tests"
 description: "Execute Node.js tests with optional Playwright and coverage"
 
 inputs:
+  coverage-threshold:
+    description: "Minimum line coverage percentage; 0 disables the gate"
+    required: false
+    default: "0"
   node-version:
     description: "Node.js version"
     required: false
@@ -222,3 +226,28 @@ runs:
           echo "::error::Node tests failed (exit=${STATUS:-unknown})."
           exit 1
         fi
+
+    - name: Check coverage threshold
+      shell: bash
+      env:
+        COVERAGE_THRESHOLD: ${{ inputs.coverage-threshold }}
+        COVERAGE_PERCENTAGE: ${{ steps.coverage.outputs.percentage }}
+      run: |
+        node <<'JS'
+        const rawThreshold = process.env.COVERAGE_THRESHOLD;
+        const threshold = Number(rawThreshold);
+        function fail(message) {
+          console.error(`::error::${message}`);
+          process.exit(1);
+        }
+        if (!rawThreshold.trim() || !Number.isFinite(threshold) || threshold < 0 || threshold > 100) {
+          fail('Coverage threshold must be a number between 0 and 100.');
+        }
+        if (threshold === 0) process.exit(0);
+        const rawCoverage = process.env.COVERAGE_PERCENTAGE;
+        const coverage = Number(rawCoverage);
+        if (!rawCoverage.trim() || !Number.isFinite(coverage) || coverage < 0 || coverage > 100) {
+          fail('Valid coverage/coverage-summary.json line coverage is required when a threshold is enabled.');
+        }
+        if (coverage < threshold) fail(`Coverage ${coverage}% is below threshold ${threshold}%.`);
+        JS

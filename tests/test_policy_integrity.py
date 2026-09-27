@@ -3,7 +3,9 @@ from __future__ import annotations
 import importlib.util
 from pathlib import Path
 
-MODULE_PATH = Path(__file__).resolve().parents[1] / ".github" / "scripts" / "policy_integrity.py"
+MODULE_PATH = (
+    Path(__file__).resolve().parents[1] / ".github" / "scripts" / "policy_integrity.py"
+)
 SPEC = importlib.util.spec_from_file_location("policy_integrity", MODULE_PATH)
 assert SPEC and SPEC.loader
 policy_integrity = importlib.util.module_from_spec(SPEC)
@@ -100,6 +102,7 @@ def test_wrapper_downgrade_is_rejected(tmp_path: Path) -> None:
     assert result["status"] == "fail"
     assert "must move forward" in result["violations"][0]["reason"]
 
+
 def test_policy_integrity_workflow_resolves_annotated_release_tags() -> None:
     workflow = (
         Path(__file__).resolve().parents[1]
@@ -110,7 +113,7 @@ def test_policy_integrity_workflow_resolves_annotated_release_tags() -> None:
 
     assert (
         'test "$(git -C .workflow-ci-policy rev-parse HEAD)" = '
-        '"$(git -C .workflow-ci-policy rev-parse \'${{ job.workflow_sha }}^{commit}\')"'
+        "\"$(git -C .workflow-ci-policy rev-parse '${{ job.workflow_sha }}^{commit}')\""
         in workflow
     )
 

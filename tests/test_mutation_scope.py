@@ -89,8 +89,7 @@ def test_scope_targets_function_for_deletion_only_hunk(tmp_path: Path):
     base = _commit(repo, "initial")
 
     source.write_text(
-        "def compute(value):\n"
-        "    return value + 1\n",
+        "def compute(value):\n    return value + 1\n",
         encoding="utf-8",
     )
     head = _commit(repo, "delete guard")
@@ -134,7 +133,9 @@ def test_bootstrap_scope_ignores_tests_without_mutmut_config(tmp_path: Path):
     base = _commit(repo, "initial")
 
     source.write_text("def production():\n    return 2\n", encoding="utf-8")
-    test_file.write_text("def test_production():\n    assert 1 + 1 == 2\n", encoding="utf-8")
+    test_file.write_text(
+        "def test_production():\n    assert 1 + 1 == 2\n", encoding="utf-8"
+    )
     head = _commit(repo, "bootstrap implementation")
 
     assert mutation_scope.mutation_targets(repo, base, head) == (
@@ -146,17 +147,13 @@ def test_scope_keeps_class_and_method_identity(tmp_path: Path):
     repo = _init_repo(tmp_path)
     source = repo / "src" / "service.py"
     source.write_text(
-        "class Calculator:\n"
-        "    def compute(self, value):\n"
-        "        return value + 1\n",
+        "class Calculator:\n    def compute(self, value):\n        return value + 1\n",
         encoding="utf-8",
     )
     base = _commit(repo, "initial")
 
     source.write_text(
-        "class Calculator:\n"
-        "    def compute(self, value):\n"
-        "        return value + 2\n",
+        "class Calculator:\n    def compute(self, value):\n        return value + 2\n",
         encoding="utf-8",
     )
     head = _commit(repo, "change method")
@@ -170,15 +167,13 @@ def test_scope_patterns_are_module_anchored(tmp_path: Path):
     repo = _init_repo(tmp_path)
     source = repo / "src" / "service.py"
     source.write_text(
-        "def compute(value):\n"
-        "    return value + 1\n",
+        "def compute(value):\n    return value + 1\n",
         encoding="utf-8",
     )
     base = _commit(repo, "initial")
 
     source.write_text(
-        "def compute(value):\n"
-        "    return value + 2\n",
+        "def compute(value):\n    return value + 2\n",
         encoding="utf-8",
     )
     head = _commit(repo, "change function")
@@ -192,9 +187,7 @@ def test_scope_reads_multiline_setup_cfg_source_paths(tmp_path: Path):
     repo = _init_repo(tmp_path)
     (repo / "pyproject.toml").unlink()
     (repo / "setup.cfg").write_text(
-        "[mutmut]\n"
-        "source_paths =\n"
-        "    src/\n",
+        "[mutmut]\nsource_paths =\n    src/\n",
         encoding="utf-8",
     )
     source = repo / "src" / "service.py"
@@ -217,11 +210,14 @@ def test_changed_lines_compares_exact_base_and_head_trees():
         "run",
         return_value=completed,
     ) as run:
-        assert mutation_scope._changed_lines(
-            Path("/repo"),
-            "base-sha",
-            "head-sha",
-        ) == {}
+        assert (
+            mutation_scope._changed_lines(
+                Path("/repo"),
+                "base-sha",
+                "head-sha",
+            )
+            == {}
+        )
 
     run.assert_called_once_with(
         [

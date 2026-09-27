@@ -30,7 +30,10 @@ def test_python_actions_honor_nested_projects_and_explicit_evidence():
     assert "--cov=${{ inputs.coverage-source }}" in tests
     assert "working-directory: ${{ inputs.working-directory }}" in tests
     assert 'echo "evidence-found=true"' in tests
-    assert "Custom test-command succeeded but did not produce the required JUnit evidence" in tests
+    assert (
+        "Custom test-command succeeded but did not produce the required JUnit evidence"
+        in tests
+    )
     assert "Detect preinstalled uv" in tests
     assert "Detect preinstalled Codecov CLI" in tests
     assert "binary: ${{ steps.codecov-runtime.outputs.binary }}" in tests
@@ -87,7 +90,10 @@ def test_templates_have_one_runner_source_of_truth():
     for path in templates:
         content = read(path)
         assert 'RUNNER: "ubuntu-latest"' not in content
-        assert "vars.RUNNER || 'ubuntu-latest'" in content
+        assert (
+            "vars.RUNNER || format('arc-runner-{0}', github.event.repository.name)"
+            in content
+        )
 
 
 def test_python_security_analysis_produces_the_output_used_by_issue_creation():
@@ -129,15 +135,23 @@ def test_github_go_mutation_honors_nested_project_without_shrinking_scope():
     workflow = read(".github/workflows/mutation-policy.yml")
     runner = read(".ci/mutation-go.sh")
 
-    assert 'description: "Project directory containing the language manifest"' in workflow
+    assert (
+        'description: "Project directory containing the language manifest"' in workflow
+    )
     assert "MUTATION_WORKING_DIRECTORY: ${{ inputs.working-directory }}" in workflow
-    assert "realpath -e \"$PR_ROOT/$REQUESTED_DIRECTORY\"" in workflow
+    assert 'realpath -e "$PR_ROOT/$REQUESTED_DIRECTORY"' in workflow
     assert "Mutation working-directory escapes the pull request checkout" in workflow
-    assert "Changed Go production file '$path' is outside mutation working-directory" in workflow
+    assert (
+        "Changed Go production file '$path' is outside mutation working-directory"
+        in workflow
+    )
     assert 'git -C "$PR_ROOT" diff --name-only -z' in workflow
     assert "while IFS= read -r -d '' path" in workflow
-    assert "go-version-file: pr/${{ steps.runner.outputs.working-directory }}/go.mod" in workflow
-    assert "MUTATION_WORKING_DIRECTORY=\"$MUTATION_WORKING_DIRECTORY\"" in workflow
+    assert (
+        "go-version-file: pr/${{ steps.runner.outputs.working-directory }}/go.mod"
+        in workflow
+    )
+    assert 'MUTATION_WORKING_DIRECTORY="$MUTATION_WORKING_DIRECTORY"' in workflow
 
     assert 'WORKING_DIRECTORY="${MUTATION_WORKING_DIRECTORY:-.}"' in runner
     assert 'PROJECT_ROOT="$(cd "$REPO_ROOT/$WORKING_DIRECTORY" && pwd -P)"' in runner

@@ -66,7 +66,7 @@ templates/
 
 Each template has a `PROJECT CONFIGURATION` section at the top for project-specific values such as `IMAGE_NAME`, language version and working directory.
 
-Runner selection has a single source of truth: the GitHub repository variable `vars.RUNNER`. If it is unset, templates fall back to `ubuntu-latest`; do not add a separate `env.RUNNER`.
+Runner selection has a single source of truth: the GitHub repository variable `vars.RUNNER`. If it is unset, GitHub templates fall back to `arc-runner-<repo>`; do not add a separate `env.RUNNER`.
 
 ### Nested projects and test evidence
 

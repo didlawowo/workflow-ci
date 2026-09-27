@@ -89,7 +89,10 @@ def _hidden_enrollment(text: str, repository: str) -> tuple[bool, str]:
     evaluators = HIDDEN_EVALUATOR_RE.findall(text)
     runners = HIDDEN_RUNNER_RE.findall(text)
     if len(refs) != 1 or len(evaluators) != 1 or len(runners) != 1:
-        return False, "hidden enrollment must declare one semantic ref, evaluator and runner"
+        return (
+            False,
+            "hidden enrollment must declare one semantic ref, evaluator and runner",
+        )
 
     evaluator = evaluators[0]
     runner = runners[0]
@@ -126,7 +129,10 @@ def safe_hidden_upgrade(
     old_version = old.group(2)
     new_version = new.group(2)
     if _semver(new_version) <= _semver(old_version):
-        return False, f"hidden workflow-ci migration must move forward ({old_version} -> {new_version})"
+        return (
+            False,
+            f"hidden workflow-ci migration must move forward ({old_version} -> {new_version})",
+        )
     if _normalize_hidden(base_text) != _normalize_hidden(candidate_text):
         return False, "hidden enrollment changed beyond workflow-ci semantic ref"
     return True, f"allowed hidden workflow-ci migration {old_version} -> {new_version}"
@@ -157,10 +163,12 @@ def evaluate(base: Path, candidate: Path, repository: str = "") -> dict[str, Any
         changed.append(relative)
 
         if not repository:
-            violations.append({
-                "path": relative,
-                "reason": "repository identity is required to validate hidden enrollment",
-            })
+            violations.append(
+                {
+                    "path": relative,
+                    "reason": "repository identity is required to validate hidden enrollment",
+                }
+            )
             continue
         if before is None and after is not None:
             ok, reason = _hidden_enrollment(after, repository)
@@ -170,10 +178,12 @@ def evaluate(base: Path, candidate: Path, repository: str = "") -> dict[str, Any
                 violations.append({"path": relative, "reason": reason})
             continue
         if before is not None and after is None:
-            violations.append({
-                "path": relative,
-                "reason": "protected hidden enrollment was removed by the candidate",
-            })
+            violations.append(
+                {
+                    "path": relative,
+                    "reason": "protected hidden enrollment was removed by the candidate",
+                }
+            )
             continue
         assert before is not None and after is not None
         ok, reason = safe_hidden_upgrade(before, after, repository)
@@ -224,7 +234,9 @@ def main() -> int:
 
     report = evaluate(args.base.resolve(), args.candidate.resolve(), args.repository)
     args.report.parent.mkdir(parents=True, exist_ok=True)
-    args.report.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    args.report.write_text(
+        json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
     print(json.dumps(report, sort_keys=True))
 
     if report["violations"]:

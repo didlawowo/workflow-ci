@@ -28,11 +28,15 @@ def init_repo(tmp_path: Path, percentage: str = "80.0") -> tuple[Path, str]:
     repo.mkdir()
     subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
     subprocess.run(["git", "config", "user.name", "test"], cwd=repo, check=True)
-    subprocess.run(["git", "config", "user.email", "test@example.invalid"], cwd=repo, check=True)
+    subprocess.run(
+        ["git", "config", "user.email", "test@example.invalid"], cwd=repo, check=True
+    )
     baseline = repo / ".ci" / "coverage-main.json"
     baseline.parent.mkdir()
     baseline.write_text(
-        '{"coverage_percentage": "' + percentage + '", "schema_version": 1, "source_sha": "base"}\n',
+        '{"coverage_percentage": "'
+        + percentage
+        + '", "schema_version": 1, "source_sha": "base"}\n',
         encoding="utf-8",
     )
     subprocess.run(["git", "add", "."], cwd=repo, check=True)
@@ -75,7 +79,9 @@ def run_action(
 def test_compare_accepts_preserved_or_improved_coverage(tmp_path):
     repo, base = init_repo(tmp_path, "80.0")
 
-    result, output = run_action(repo, tmp_path, mode="compare", current="81.2", base_sha=base)
+    result, output = run_action(
+        repo, tmp_path, mode="compare", current="81.2", base_sha=base
+    )
 
     assert result.returncode == 0, result.stderr + result.stdout
     assert "baseline-percentage=80.0" in output
@@ -85,10 +91,14 @@ def test_compare_accepts_preserved_or_improved_coverage(tmp_path):
 def test_compare_rejects_coverage_regression(tmp_path):
     repo, base = init_repo(tmp_path, "80.0")
 
-    result, _ = run_action(repo, tmp_path, mode="compare", current="79.9", base_sha=base)
+    result, _ = run_action(
+        repo, tmp_path, mode="compare", current="79.9", base_sha=base
+    )
 
     assert result.returncode != 0
-    assert "Coverage decreased from 80.0% on main to 79.9%" in (result.stdout + result.stderr)
+    assert "Coverage decreased from 80.0% on main to 79.9%" in (
+        result.stdout + result.stderr
+    )
 
 
 def test_compare_reads_protected_base_not_pr_worktree(tmp_path):
@@ -97,10 +107,14 @@ def test_compare_reads_protected_base_not_pr_worktree(tmp_path):
         '{"coverage_percentage": "0", "schema_version": 1}\n', encoding="utf-8"
     )
 
-    result, _ = run_action(repo, tmp_path, mode="compare", current="79.9", base_sha=base)
+    result, _ = run_action(
+        repo, tmp_path, mode="compare", current="79.9", base_sha=base
+    )
 
     assert result.returncode != 0
-    assert "Coverage decreased from 80.0% on main to 79.9%" in (result.stdout + result.stderr)
+    assert "Coverage decreased from 80.0% on main to 79.9%" in (
+        result.stdout + result.stderr
+    )
 
 
 def test_write_updates_baseline_once_per_source_commit(tmp_path):
@@ -122,16 +136,19 @@ def test_write_updates_baseline_once_per_source_commit(tmp_path):
     assert "changed=false" in output
 
 
-
 def test_compare_allows_first_consumer_without_baseline(tmp_path):
     repo = tmp_path / "repo-missing"
     repo.mkdir()
     subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
     subprocess.run(["git", "config", "user.name", "test"], cwd=repo, check=True)
-    subprocess.run(["git", "config", "user.email", "test@example.invalid"], cwd=repo, check=True)
+    subprocess.run(
+        ["git", "config", "user.email", "test@example.invalid"], cwd=repo, check=True
+    )
     (repo / "README.md").write_text("bootstrap\n", encoding="utf-8")
     subprocess.run(["git", "add", "."], cwd=repo, check=True)
-    subprocess.run(["git", "commit", "-qm", "base without coverage"], cwd=repo, check=True)
+    subprocess.run(
+        ["git", "commit", "-qm", "base without coverage"], cwd=repo, check=True
+    )
     base = git(repo, "rev-parse", "HEAD")
 
     result, output = run_action(
@@ -146,6 +163,8 @@ def test_compare_allows_first_consumer_without_baseline(tmp_path):
 
 def test_compare_marks_existing_baseline_present(tmp_path):
     repo, base = init_repo(tmp_path, "80.0")
-    result, output = run_action(repo, tmp_path, mode="compare", current="80.0", base_sha=base)
+    result, output = run_action(
+        repo, tmp_path, mode="compare", current="80.0", base_sha=base
+    )
     assert result.returncode == 0
     assert "baseline-missing=false" in output

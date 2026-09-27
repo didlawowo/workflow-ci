@@ -134,7 +134,9 @@ def _pull_request_file_entries(event: dict) -> list[dict] | None:
     while True:
         suffix = "per_page=100" if page == 1 else f"per_page=100&page={page}"
         payload = _api_request("GET", f"pulls/{number}/files?{suffix}") or []
-        if not isinstance(payload, list) or any(not isinstance(item, dict) for item in payload):
+        if not isinstance(payload, list) or any(
+            not isinstance(item, dict) for item in payload
+        ):
             return None
 
         page_entries: list[dict] = []
@@ -222,15 +224,20 @@ def _is_node_production_path(path: str) -> bool:
         return False
     lowered = {part.lower() for part in parts}
     if lowered.intersection(
-        {"tests", "test", "__tests__", "docs", "examples", "node_modules", "dist", "build"}
+        {
+            "tests",
+            "test",
+            "__tests__",
+            "docs",
+            "examples",
+            "node_modules",
+            "dist",
+            "build",
+        }
     ):
         return False
     name = Path(normalized).name.lower()
-    return not (
-        ".test." in name
-        or ".spec." in name
-        or name.startswith("test_")
-    )
+    return not (".test." in name or ".spec." in name or name.startswith("test_"))
 
 
 def _is_supported_production_path(path: str) -> bool:
@@ -263,7 +270,9 @@ def automatic_complexity_reasons(event: dict) -> tuple[str, ...]:
         return ("changed-files-unverified",)
 
     production = [
-        entry for entry in entries if _is_supported_production_path(str(entry["filename"]))
+        entry
+        for entry in entries
+        if _is_supported_production_path(str(entry["filename"]))
     ]
     changed_lines = sum(
         int(entry["additions"]) + int(entry["deletions"]) for entry in production
@@ -326,9 +335,11 @@ def _api_request(method: str, path: str, payload: dict | None = None) -> object:
 
 
 def _load_event() -> dict:
-    event_path = os.environ.get("POLICY_EVENT_PATH") or os.environ.get(
-        "GITHUB_EVENT_PATH"
-    ) or os.environ.get("FORGEJO_EVENT_PATH")
+    event_path = (
+        os.environ.get("POLICY_EVENT_PATH")
+        or os.environ.get("GITHUB_EVENT_PATH")
+        or os.environ.get("FORGEJO_EVENT_PATH")
+    )
     if not event_path:
         raise RuntimeError("No workflow event path available")
     return json.loads(Path(event_path).read_text())
@@ -393,7 +404,10 @@ def classify(event: dict) -> int:
             production = production_change_reasons(event)
             automatic = automatic_complexity_reasons(event)
 
-            if "changed-files-unverified" in production or "changed-files-unverified" in automatic:
+            if (
+                "changed-files-unverified" in production
+                or "changed-files-unverified" in automatic
+            ):
                 reasons = ("complexity:high", "changed-files-unverified")
             elif automatic:
                 reasons = ("complexity:high", *automatic, *production)
@@ -421,12 +435,19 @@ def classify(event: dict) -> int:
     if required:
         print(f"Mutation testing required ({depth}): {', '.join(reasons)}")
     else:
-        print("Mutation testing not required: low complexity or no supported production code change")
+        print(
+            "Mutation testing not required: low complexity or no supported production code change"
+        )
     return 0
+
 
 def _open_pull_requests() -> list[dict]:
     payload = _api_request("GET", "pulls?state=open&per_page=100") or []
-    return [item for item in payload if isinstance(item, dict)] if isinstance(payload, list) else []
+    return (
+        [item for item in payload if isinstance(item, dict)]
+        if isinstance(payload, list)
+        else []
+    )
 
 
 def _mutation_runs_for_head(head_sha: str) -> list[dict]:
@@ -459,10 +480,15 @@ def _is_mutation_policy_run(run: dict, pr_number: int, head_sha: str) -> bool:
     )
     if path and not path.endswith(valid_workflow_paths):
         return False
-    if not path and name and name not in {
-        "Mutation testing policy",
-        "Trusted quality evidence",
-    }:
+    if (
+        not path
+        and name
+        and name
+        not in {
+            "Mutation testing policy",
+            "Trusted quality evidence",
+        }
+    ):
         return False
 
     pull_requests = run.get("pull_requests")
@@ -496,7 +522,11 @@ def refresh(event: dict) -> int:
         pr_number = pull_request.get("number")
         head = pull_request.get("head") or {}
         head_sha = head.get("sha")
-        if not isinstance(pr_number, int) or not isinstance(head_sha, str) or not head_sha:
+        if (
+            not isinstance(pr_number, int)
+            or not isinstance(head_sha, str)
+            or not head_sha
+        ):
             continue
         if issue_number not in linked_issue_numbers(pull_request.get("body")):
             continue

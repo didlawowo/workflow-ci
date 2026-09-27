@@ -11,9 +11,12 @@ def test_go_cache_keeps_module_downloads_without_archiving_build_objects():
     assert "uses: actions/setup-go@v6" in content
     assert "cache: false" in content
     assert "uses: actions/cache@v5" in content
-    assert 'download=$(go env GOMODCACHE)/cache/download' in content
+    assert "download=$(go env GOMODCACHE)/cache/download" in content
     assert "path: ${{ steps.cache-path.outputs.download }}" in content
-    assert "${{ runner.os }}-${{ runner.arch }}-${{ steps.setup.outputs.go-version }}" in content
+    assert (
+        "${{ runner.os }}-${{ runner.arch }}-${{ steps.setup.outputs.go-version }}"
+        in content
+    )
     assert "${{ hashFiles(inputs.cache-dependency-path) }}" in content
     assert "path: ${{ env.GOCACHE }}" not in content
     assert "path: ${{ env.GOMODCACHE }}" not in content

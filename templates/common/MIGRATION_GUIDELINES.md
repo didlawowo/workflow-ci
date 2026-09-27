@@ -191,7 +191,7 @@ Changements :
    les deux events :
    ```yaml
    extract-version:
-     runs-on: ${{ vars.RUNNER || 'ubuntu-latest' }}
+     runs-on: ${{ vars.RUNNER || format('arc-runner-{0}', github.event.repository.name) }}
      outputs:
        tag_name: ${{ steps.info.outputs.tag_name }}
        version:  ${{ steps.info.outputs.version }}
@@ -285,8 +285,8 @@ Cas typique : repo neuf qui n'a jamais utilisé release-please. Pas de tag
 git, pas de `release-please-manifest.json`, pas de CHANGELOG. Suivre :
 
 1. **Pré-requis sur le repo GitHub** :
-   - Variable `vars.RUNNER` settée si tu veux build sur ARC (sinon le
-     workflow tombe sur `ubuntu-latest`, GH-hosted, qui fait le job).
+   - Runner ARC onboardé pour le dépôt ; `vars.RUNNER` permet de surcharger
+     le label par défaut `arc-runner-<repo>`.
    - Secrets `OCI_USERNAME`, `OCI_PASSWORD` provisionnés.
    - Secrets `DOCKERHUB_USERNAME`, `DOCKERHUB_TOKEN` si le Dockerfile pull
      depuis docker.io (cf. section secrets).
@@ -384,7 +384,7 @@ l'image, dans le même job ou un job suivant. Pattern attendu :
 ```yaml
 package-and-push-chart:
   needs: [extract-version, update-deployments]
-  runs-on: ${{ vars.RUNNER || 'ubuntu-latest' }}
+  runs-on: ${{ vars.RUNNER || format('arc-runner-{0}', github.event.repository.name) }}
   steps:
     - uses: actions/checkout@v4
       with:

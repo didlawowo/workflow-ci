@@ -12,7 +12,7 @@ def test_node_mutation_runner_is_diff_scoped_and_depth_aware() -> None:
     script = RUNNER.read_text(encoding="utf-8")
 
     assert 'DEPTH="${MUTATION_DEPTH:-medium}"' in script
-    assert 'medium|high' in script
+    assert "medium|high" in script
     assert 'git diff --name-only --diff-filter=ACMR "$BASE_SHA...$HEAD_SHA"' in script
     assert "grep -E '\\.(js|jsx|ts|tsx)$'" in script
     assert "grep -Ev" in script and ".(test|spec)" in script
@@ -68,6 +68,7 @@ def test_node_mutation_diagnostic_artifact_is_best_effort() -> None:
     assert "actions/upload-artifact@v6" in block
     assert "if-no-files-found: ignore" in block
 
+
 def test_node_mutation_materializes_central_workflow_after_candidate_checkout() -> None:
     workflow = WORKFLOW.read_text(encoding="utf-8")
 
@@ -77,4 +78,3 @@ def test_node_mutation_materializes_central_workflow_after_candidate_checkout() 
 
     assert checkout < central < classify
     assert 'DEST="$GITHUB_WORKSPACE/.workflow-ci"' in workflow
-

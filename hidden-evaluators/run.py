@@ -45,7 +45,11 @@ def load_spec(evaluator: str, repository: str) -> dict[str, Any]:
     paths = spec.get("paths")
     if not isinstance(entrypoint, str) or not entrypoint:
         raise ValueError(f"evaluator {evaluator} has no entrypoint")
-    if not isinstance(paths, list) or not paths or not all(isinstance(p, str) for p in paths):
+    if (
+        not isinstance(paths, list)
+        or not paths
+        or not all(isinstance(p, str) for p in paths)
+    ):
         raise ValueError(f"evaluator {evaluator} has invalid paths")
     return spec
 
@@ -76,7 +80,9 @@ def load_evaluator(entrypoint: str) -> ModuleType:
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     if not callable(getattr(module, "evaluate", None)):
-        raise ValueError(f"hidden evaluator {entrypoint} must expose evaluate(candidate, seed)")
+        raise ValueError(
+            f"hidden evaluator {entrypoint} must expose evaluate(candidate, seed)"
+        )
     return module
 
 

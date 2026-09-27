@@ -26,7 +26,9 @@ def test_absent_scanner_output_still_publishes_mutation_failure(tmp_path, scan_e
             "security-scan-errors": scan_errors,
         }
     )
-    step = next(s for s in action["runs"]["steps"] if s["name"] == "Build quality evidence")
+    step = next(
+        s for s in action["runs"]["steps"] if s["name"] == "Build quality evidence"
+    )
     command = re.sub(
         r"\$\{\{ inputs\.([\w-]+) \}\}",
         lambda match: str(inputs[match.group(1)]),
@@ -65,7 +67,9 @@ def test_quality_report_resolves_a_writable_uv_cache():
     action = yaml.safe_load(action_path.read_text())
     steps = action["runs"]["steps"]
     resolver = next(
-        step for step in steps if step["name"] == "Resolve writable uv cache for quality reporter"
+        step
+        for step in steps
+        if step["name"] == "Resolve writable uv cache for quality reporter"
     )
     command = resolver["run"]
 

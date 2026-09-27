@@ -58,7 +58,13 @@ def write_report(path: Path, report: dict[str, Any]) -> None:
 
 
 def write_replay_capsule(
-    path: Path, *, evaluator: str, repository: str, base_sha: str, head_sha: str, seed: int
+    path: Path,
+    *,
+    evaluator: str,
+    repository: str,
+    base_sha: str,
+    head_sha: str,
+    seed: int,
 ) -> None:
     """Write replay material for trusted operators.
 
