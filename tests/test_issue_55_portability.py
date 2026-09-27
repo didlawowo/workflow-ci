@@ -109,6 +109,10 @@ def test_reusable_quality_workflow_routes_nested_projects_for_all_languages():
     assert "coverage-source: ${{ inputs.python-source-path }}" in workflow
     assert "bandit-paths: ${{ inputs.python-source-path }}" in workflow
     assert "working-directory: ${{ inputs.working-directory }}" in workflow
+    mutation_job = workflow.split("  mutation:", 1)[1].split(
+        "  independent-verification:", 1
+    )[0]
+    assert "working-directory: ${{ inputs.working-directory }}" in mutation_job
     assert "artifact-suffix: ${{ inputs.repo-type }}" in workflow
 
     selftest = read(".github/workflows/consumer-integration-selftest.yml")
@@ -119,6 +123,30 @@ def test_reusable_quality_workflow_routes_nested_projects_for_all_languages():
 
     assert "custom-junit.xml" in selftest
     assert "custom-coverage.xml" in selftest
+
+
+def test_github_go_mutation_honors_nested_project_without_shrinking_scope():
+    workflow = read(".github/workflows/mutation-policy.yml")
+    runner = read(".ci/mutation-go.sh")
+
+    assert 'description: "Project directory containing the language manifest"' in workflow
+    assert "MUTATION_WORKING_DIRECTORY: ${{ inputs.working-directory }}" in workflow
+    assert "realpath -e \"$PR_ROOT/$REQUESTED_DIRECTORY\"" in workflow
+    assert "Mutation working-directory escapes the pull request checkout" in workflow
+    assert "Changed Go production file '$path' is outside mutation working-directory" in workflow
+    assert 'git -C "$PR_ROOT" diff --name-only -z' in workflow
+    assert "while IFS= read -r -d '' path" in workflow
+    assert "go-version-file: pr/${{ steps.runner.outputs.working-directory }}/go.mod" in workflow
+    assert "MUTATION_WORKING_DIRECTORY=\"$MUTATION_WORKING_DIRECTORY\"" in workflow
+
+    assert 'WORKING_DIRECTORY="${MUTATION_WORKING_DIRECTORY:-.}"' in runner
+    assert 'PROJECT_ROOT="$(cd "$REPO_ROOT/$WORKING_DIRECTORY" && pwd -P)"' in runner
+    assert 'QUALITY_DIR="$REPO_ROOT/.quality"' in runner
+    assert 'cd "$PROJECT_ROOT"' in runner
+    assert 'git -C "$REPO_ROOT" diff' in runner
+    assert "diff --name-only -z" in runner
+    assert "while IFS= read -r -d '' path" in runner
+    assert '-- "$PROJECT_DIRECTORY"' in runner
 
 
 def test_quality_reporter_does_not_depend_on_consumer_python_tooling():

@@ -95,6 +95,7 @@ jobs:
     with:
       scope-key: ${{ format('{0}-{1}', inputs.repo-type, inputs.working-directory) }}
       trusted-runner: ${{ inputs.runner }}
+      working-directory: ${{ inputs.working-directory }}
     permissions:
       contents: read
       actions: read

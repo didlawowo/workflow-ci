@@ -156,6 +156,85 @@ def test_python_runner_requests_all_mutmut_statuses():
     assert 'mutmut results --all true > "$RAW_RESULTS"' in script
 
 
+@pytest.mark.parametrize("project_directory", [".", "src-é"])
+def test_go_runner_handles_raw_unicode_paths_and_keeps_evidence_at_repo_root(
+    tmp_path, project_directory
+):
+    repo = tmp_path / "consumer"
+    module = repo if project_directory == "." else repo / project_directory
+    tools = tmp_path / "tools"
+    module.mkdir(parents=True)
+    tools.mkdir()
+
+    subprocess.run(["git", "init", "-q", repo], check=True)
+    subprocess.run(["git", "-C", repo, "config", "user.email", "ci@example.test"], check=True)
+    subprocess.run(["git", "-C", repo, "config", "user.name", "Mutation self-test"], check=True)
+    (module / "go.mod").write_text("module example.test/consumer\ngo 1.25\n")
+    source = module / "café.go"
+    source.write_text("package consumer\n\nfunc Add(a, b int) int { return a + b }\n")
+    subprocess.run(["git", "-C", repo, "add", "."], check=True)
+    subprocess.run(["git", "-C", repo, "commit", "-qm", "base"], check=True)
+    base = subprocess.check_output(
+        ["git", "-C", repo, "rev-parse", "HEAD"], text=True
+    ).strip()
+    source.write_text("package consumer\n\nfunc Add(a, b int) int { return a + b + 1 }\n")
+    subprocess.run(["git", "-C", repo, "add", "."], check=True)
+    subprocess.run(["git", "-C", repo, "commit", "-qm", "head"], check=True)
+    head = subprocess.check_output(
+        ["git", "-C", repo, "rev-parse", "HEAD"], text=True
+    ).strip()
+
+    (tools / "uname").write_text(
+        "#!/bin/sh\n[ \"$1\" = -s ] && echo Linux || echo arm64\n"
+    )
+    (tools / "gremlins").write_text(
+        """#!/bin/sh
+if [ "$1" = --version ]; then echo 0.6.0; exit 0; fi
+[ "$PWD" = "$EXPECTED_GREMLINS_CWD" ] || exit 42
+while [ "$#" -gt 0 ]; do
+  if [ "$1" = --output ]; then output="$2"; shift 2; else shift; fi
+done
+cat > "$output" <<'JSON'
+{"files":[{"mutations":[{"status":"KILLED"}]}]}
+JSON
+"""
+    )
+    (tools / "uv").write_text(
+        "#!/bin/sh\n"
+        "while [ \"$1\" != python ]; do shift; done\n"
+        "shift\n"
+        f'exec "{sys.executable}" "$@"\n'
+    )
+    for executable in tools.iterdir():
+        executable.chmod(0o755)
+
+    env = os.environ.copy()
+    env["PATH"] = f"{tools}:{env['PATH']}"
+    env["MUTATION_BASE_SHA"] = base
+    env["MUTATION_HEAD_SHA"] = head
+    env["MUTATION_WORKING_DIRECTORY"] = project_directory
+    env["EXPECTED_GREMLINS_CWD"] = str(module)
+    completed = subprocess.run(
+        ["bash", ROOT / ".ci" / "mutation-go.sh"],
+        cwd=repo,
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+
+    assert completed.returncode == 0, completed.stdout + completed.stderr
+    evidence = json.loads((repo / ".quality" / "gremlins.json").read_text())
+    assert evidence["stats"] == {
+        "killed": 1,
+        "survived": 0,
+        "timeouts": 0,
+        "suspicious": 0,
+        "total": 1,
+    }
+    if module != repo:
+        assert not (module / ".quality").exists()
+
+
 def test_mutmut_diagnostics_reconstruction_uses_exact_requested_scope(tmp_path):
     script = (ROOT / ".ci" / "mutation.sh").read_text(encoding="utf-8")
     marker = (

@@ -4,11 +4,39 @@ set -euo pipefail
 GREMLINS_VERSION="0.6.0"
 BASE_SHA="${MUTATION_BASE_SHA:-}"
 HEAD_SHA="${MUTATION_HEAD_SHA:-}"
+WORKING_DIRECTORY="${MUTATION_WORKING_DIRECTORY:-.}"
 
 if [[ -z "$BASE_SHA" || -z "$HEAD_SHA" ]]; then
   echo "::error::Go mutation scope requires MUTATION_BASE_SHA and MUTATION_HEAD_SHA."
   exit 1
 fi
+
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+REPO_ROOT="$(cd "$REPO_ROOT" && pwd -P)"
+if [[ "$WORKING_DIRECTORY" == /* ]]; then
+  echo "::error::Mutation working-directory must be relative to the repository root."
+  exit 1
+fi
+if [[ ! -d "$REPO_ROOT/$WORKING_DIRECTORY" ]]; then
+  echo "::error::Mutation working-directory does not exist."
+  exit 1
+fi
+PROJECT_ROOT="$(cd "$REPO_ROOT/$WORKING_DIRECTORY" && pwd -P)"
+case "$PROJECT_ROOT" in
+  "$REPO_ROOT") PROJECT_DIRECTORY="." ;;
+  "$REPO_ROOT"/*) PROJECT_DIRECTORY="${PROJECT_ROOT#"$REPO_ROOT"/}" ;;
+  *) echo "::error::Mutation working-directory escapes the repository."; exit 1 ;;
+esac
+if [[ ! -f "$PROJECT_ROOT/go.mod" ]]; then
+  echo "::error::Mutation working-directory '$PROJECT_DIRECTORY' contains no go.mod."
+  exit 1
+fi
+
+QUALITY_DIR="$REPO_ROOT/.quality"
+RAW_REPORT="$QUALITY_DIR/gremlins-raw.json"
+REPORT="$QUALITY_DIR/gremlins.json"
+mkdir -p "$QUALITY_DIR"
+cd "$PROJECT_ROOT"
 
 case "$(uname -s)" in
   Linux) os="linux" ;;
@@ -55,15 +83,23 @@ if [[ -z "$GREMLINS" ]]; then
   fi
 fi
 
-mkdir -p .quality
-changed_go="$(git diff --name-only "$BASE_SHA...$HEAD_SHA" -- '*.go' | grep -Ev '(^|/).*_test\.go$' || true)"
-if [[ -z "$changed_go" ]]; then
-  uv run --no-project --python 3.12 python - "$BASE_SHA" "$HEAD_SHA" <<'PY'
+CHANGED_GO=()
+while IFS= read -r -d '' path; do
+  case "$path" in
+    *_test.go|vendor/*|testdata/*|tests/*) ;;
+    *.go) CHANGED_GO+=("$path") ;;
+  esac
+done < <(
+  git -C "$REPO_ROOT" diff --name-only -z \
+    "$BASE_SHA...$HEAD_SHA" -- "$PROJECT_DIRECTORY"
+)
+if [[ "${#CHANGED_GO[@]}" -eq 0 ]]; then
+  uv run --no-project --python 3.12 python - "$BASE_SHA" "$HEAD_SHA" "$REPORT" <<'PY'
 import json
 import sys
 from pathlib import Path
 
-Path(".quality/gremlins.json").write_text(
+Path(sys.argv[3]).write_text(
     json.dumps(
         {
             "stats": {
@@ -92,22 +128,22 @@ PY
 fi
 
 set +e
-"$GREMLINS" unleash --diff "$BASE_SHA" --output .quality/gremlins-raw.json
+"$GREMLINS" unleash --diff "$BASE_SHA" --output "$RAW_REPORT"
 gremlins_rc=$?
 set -e
 
-if [[ ! -s .quality/gremlins-raw.json ]]; then
+if [[ ! -s "$RAW_REPORT" ]]; then
   echo "::error::Gremlins did not produce machine-readable evidence (exit=$gremlins_rc)."
   exit "${gremlins_rc:-1}"
 fi
 
-uv run --no-project --python 3.12 python - "$BASE_SHA" "$HEAD_SHA" "$GREMLINS_VERSION" <<'PY'
+uv run --no-project --python 3.12 python - "$BASE_SHA" "$HEAD_SHA" "$GREMLINS_VERSION" "$RAW_REPORT" "$REPORT" <<'PY'
 import json
 import sys
 from collections import Counter
 from pathlib import Path
 
-raw = json.loads(Path(".quality/gremlins-raw.json").read_text(encoding="utf-8"))
+raw = json.loads(Path(sys.argv[4]).read_text(encoding="utf-8"))
 statuses = Counter()
 for file_result in raw.get("files", []):
     for mutation in file_result.get("mutations", []):
@@ -144,7 +180,7 @@ payload = {
         "mutants_not_viable": int(raw.get("mutants_not_viable", 0)),
     },
 }
-Path(".quality/gremlins.json").write_text(
+Path(sys.argv[5]).write_text(
     json.dumps(payload, indent=2, sort_keys=True) + "\n",
     encoding="utf-8",
 )

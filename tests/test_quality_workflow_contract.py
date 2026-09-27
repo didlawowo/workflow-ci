@@ -122,7 +122,7 @@ def test_mutation_policy_separates_untrusted_execution_from_trusted_verification
     assert ".workflow-ci/.ci/mutation-go.sh" in content
     assert ".workflow-ci/.ci/mutation.sh" in content
     assert "Setup Go for central Gremlins runner" in content
-    assert "go-version-file: pr/go.mod" in content
+    assert "go-version-file: pr/${{ steps.runner.outputs.working-directory }}/go.mod" in content
     assert 'bash "${{ steps.runner.outputs.path }}"' in content
     assert "job.workflow_repository" in content
     assert "job.workflow_sha" in content
@@ -141,7 +141,7 @@ def test_central_go_mutation_runner_is_pinned_and_strict():
 
     assert 'GREMLINS_VERSION="0.6.0"' in runner
     assert '--diff "$BASE_SHA"' in runner
-    assert "--output .quality/gremlins-raw.json" in runner
+    assert '--output "$RAW_REPORT"' in runner
     assert '"survived": survived' in runner
     assert "not_covered" in runner
     assert "timeouts" in runner
