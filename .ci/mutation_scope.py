@@ -155,6 +155,22 @@ class _ChangedFunctionVisitor(ast.NodeVisitor):
         self.stack.pop()
 
 
+def syntax_unchanged(repo: Path, base: str, relative: str, tree: ast.AST) -> bool:
+    """Ignore formatting-only edits; unavailable base source remains in scope."""
+    previous = subprocess.run(
+        ["git", "show", f"{base}:{relative}"],
+        cwd=repo,
+        capture_output=True,
+        text=True,
+    )
+    if previous.returncode:
+        return False
+    try:
+        return ast.dump(ast.parse(previous.stdout)) == ast.dump(tree)
+    except SyntaxError:
+        return False
+
+
 def mutation_targets(
     repo: Path, base: str, head: str, *, depth: str = "medium"
 ) -> tuple[str, ...]:
@@ -183,13 +199,16 @@ def mutation_targets(
         if not module:
             continue
 
-        if depth == "high":
-            targets.add(f"{module}.*__mutmut_*")
-            continue
-
         try:
             tree = ast.parse(path.read_text(encoding="utf-8"))
         except (SyntaxError, UnicodeDecodeError):
+            continue
+
+        if syntax_unchanged(repo, base, relative, tree):
+            continue
+
+        if depth == "high":
+            targets.add(f"{module}.*__mutmut_*")
             continue
 
         visitor = _ChangedFunctionVisitor(lines)

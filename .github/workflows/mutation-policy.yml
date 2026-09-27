@@ -988,6 +988,12 @@ jobs:
               def is_production_python(relative):
                   return _policy_module._is_python_production_path(relative)
 
+              _scope_spec = importlib.util.spec_from_file_location(
+                  "workflow_ci_mutation_scope", policy_root / ".ci" / "mutation_scope.py"
+              )
+              _scope_module = importlib.util.module_from_spec(_scope_spec)
+              _scope_spec.loader.exec_module(_scope_module)
+
               changed_functions = {}
               for relative, lines in changed_lines.items():
                   path = repo / relative
@@ -1002,6 +1008,8 @@ jobs:
                   try:
                       tree = ast.parse(path.read_text(encoding="utf-8"))
                   except (SyntaxError, UnicodeDecodeError):
+                      continue
+                  if _scope_module.syntax_unchanged(repo, base, relative, tree):
                       continue
                   parts = list(Path(relative).with_suffix("").parts)
                   if parts and parts[0] == "src":

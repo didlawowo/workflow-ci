@@ -40,6 +40,31 @@ def _commit(repo: Path, message: str) -> str:
     return _git(repo, "rev-parse", "HEAD")
 
 
+def test_formatting_only_changes_do_not_require_mutants(tmp_path: Path):
+    repo = _init_repo(tmp_path)
+    source = repo / "src/service.py"
+    source.write_text("def compute(value):\n    return dict(value=value)\n")
+    base = _commit(repo, "initial")
+    source.write_text(
+        "def compute(value):\n    return dict(\n        value=value,\n    )\n"
+    )
+    head = _commit(repo, "format")
+    for depth in ("medium", "high"):
+        assert mutation_scope.mutation_targets(repo, base, head, depth=depth) == ()
+    source.write_text("def compute(value):\n    return dict(value=value + 1)\n")
+    head = _commit(repo, "change behavior")
+    for depth in ("medium", "high"):
+        assert mutation_scope.mutation_targets(repo, base, head, depth=depth)
+
+
+def test_new_module_still_requires_mutants(tmp_path: Path):
+    repo = _init_repo(tmp_path)
+    base = _commit(repo, "initial")
+    (repo / "src/service.py").write_text("def compute(value):\n    return value + 1\n")
+    head = _commit(repo, "add module")
+    assert mutation_scope.mutation_targets(repo, base, head)
+
+
 def test_stacked_pr_scope_only_targets_child_delta(tmp_path: Path):
     repo = _init_repo(tmp_path)
     source = repo / "src" / "service.py"

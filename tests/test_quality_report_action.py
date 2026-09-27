@@ -46,6 +46,8 @@ def test_absent_scanner_output_still_publishes_mutation_failure(tmp_path, scan_e
         "GITHUB_ACTION_PATH": str(action_path),
         "QUALITY_TEST_PYTHON": sys.executable,
         "RUNNER_TEMP": str(tmp_path),
+        # setup-python's Linux interpreter needs its shared library directory.
+        "LD_LIBRARY_PATH": os.environ.get("LD_LIBRARY_PATH", ""),
     }
     result = subprocess.run(
         ["bash", "-e", "-c", command],
@@ -55,7 +57,7 @@ def test_absent_scanner_output_still_publishes_mutation_failure(tmp_path, scan_e
         capture_output=True,
         text=True,
     )
-    assert result.returncode == 0, result.stderr
+    assert result.returncode == 0, result.stdout + result.stderr
     report = json.loads((tmp_path / ".quality/quality-report.json").read_text())
     assert report["gate"]["status"] == "FAIL"
     assert "mutation-execution" in report["gate"]["failures"]
