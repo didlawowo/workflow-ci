@@ -59,12 +59,29 @@ runs:
           echo "path=${GITHUB_ACTION_PATH}/../../../templates/common/cliff.toml" >> "$GITHUB_OUTPUT"
         fi
 
+    - name: Configure bounded git-cliff download retries
+      id: download-config
+      shell: bash
+      run: |
+        set -euo pipefail
+        curl_home="$(mktemp -d "$RUNNER_TEMP/git-cliff-curl.XXXXXX")"
+        # Scope curl defaults to the upstream action only. Retry HTTP reads,
+        # never the version/changelog/release steps themselves.
+        printf '%s\n' \
+          'retry = 3' \
+          'retry-delay = 2' \
+          'retry-max-time = 120' \
+          'connect-timeout = 15' \
+          'max-time = 60' > "$curl_home/.curlrc"
+        printf 'curl-home=%s\n' "$curl_home" >> "$GITHUB_OUTPUT"
+
     - name: Compute next version
       uses: orhun/git-cliff-action@v4
       with:
         config: ${{ steps.cfg.outputs.path }}
         args: --bumped-version
       env:
+        CURL_HOME: ${{ steps.download-config.outputs.curl-home }}
         OUTPUT: /tmp/next-version.txt
 
     - name: Decide if release is needed
@@ -104,6 +121,8 @@ runs:
       with:
         config: ${{ steps.cfg.outputs.path }}
         args: --tag ${{ steps.decide.outputs.version }} --unreleased --prepend CHANGELOG.md
+      env:
+        CURL_HOME: ${{ steps.download-config.outputs.curl-home }}
 
     - name: Create CHANGELOG from full history (first run)
       if: steps.decide.outputs.released == 'true' && steps.changelog.outputs.mode == 'create'
@@ -111,6 +130,8 @@ runs:
       with:
         config: ${{ steps.cfg.outputs.path }}
         args: --tag ${{ steps.decide.outputs.version }} --output CHANGELOG.md
+      env:
+        CURL_HOME: ${{ steps.download-config.outputs.curl-home }}
 
     - name: Extract release notes
       if: steps.decide.outputs.released == 'true'
@@ -119,4 +140,5 @@ runs:
         config: ${{ steps.cfg.outputs.path }}
         args: --tag ${{ steps.decide.outputs.version }} --unreleased --strip header
       env:
+        CURL_HOME: ${{ steps.download-config.outputs.curl-home }}
         OUTPUT: /tmp/release-notes.md
