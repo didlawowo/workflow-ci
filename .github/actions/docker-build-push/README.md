@@ -1,15 +1,17 @@
 # Docker Build & Push: required scan evidence
 
-With `scan: true` (the existing default), a successful action now requires:
+With `scan: true` (the existing default), a successful action requires:
 
-1. A successful Trivy process.
+1. A successful Trivy process. A layer-extraction `unexpected EOF` is treated as a recognized transient failure and gets exactly one retry; other scanner failures are not retried.
 2. A non-empty, parseable SARIF 2.1.0 report with at least one run and explicit result arrays. The counter covers all runs, rejects failed invocations, and never substitutes zero for missing or invalid evidence.
-3. Successful archival of the SARIF report as a workflow artifact.
-4. GitHub Code Scanning publication only when `upload-sarif: true`.
+3. GitHub Code Scanning publication only when `upload-sarif: true`.
+4. Raw SARIF artifact archival only when `upload-scan-artifacts: true`.
 
-CodeQL/SARIF publication is **disabled by default** (`upload-sarif: false`). Trivy execution, local SARIF validation, Markdown reporting and artifact retention remain enabled. Repositories that explicitly want GitHub Code Scanning can opt in and must grant the corresponding permissions/eligibility.
+Both publication paths are **disabled by default**. Trivy execution and local SARIF validation remain hard gates.
 
-Artifacts are still attempted after scanner, validation or Code Scanning failures, unless the workflow was cancelled. Archival never changes the earlier failure into success. Missing artifacts are errors, not warnings. Artifact names and the seven-day retention period are unchanged. Reports can contain security-sensitive findings; do not publish their raw content in public logs.
+On ARC runners, `TRIVY_SHARED_DB_DIR` may expose both `db/` and `java-db/`. Each database is detected independently. A complete shared Java DB enables `TRIVY_SKIP_JAVA_DB_UPDATE=true`; an absent or partial Java DB deliberately keeps the normal network fallback instead of pretending the cache is usable.
+
+Raw SARIF artifacts are diagnostic only and may contain security-sensitive findings. Enable `upload-scan-artifacts` only when the retained file is actually needed.
 
 ## Optional Code Scanning publication
 
