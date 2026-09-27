@@ -22,6 +22,10 @@ inputs:
     description: "Ignore unfixed vulnerabilities"
     required: false
     default: "true"
+  upload-scan-artifacts:
+    description: "Archive raw Trivy SARIF files as a GitHub Actions artifact (disabled by default)"
+    required: false
+    default: "false"
 
 outputs:
   vulnerabilities-found:
@@ -70,7 +74,16 @@ runs:
         else
           echo "shared-db=false" >> "$GITHUB_OUTPUT"
           echo "action-cache=true" >> "$GITHUB_OUTPUT"
-          echo "Shared Trivy DB unavailable; using local DB cache"
+          echo "Shared Trivy vulnerability DB unavailable; using local DB cache"
+        fi
+
+        if [[ -n "$SHARED_DB" && -s "$SHARED_DB/java-db/trivy-java.db" && -s "$SHARED_DB/java-db/metadata.json" ]]; then
+          ln -s "$SHARED_DB/java-db" "$LOCAL_CACHE/java-db"
+          echo "shared-java-db=true" >> "$GITHUB_OUTPUT"
+          echo "Using read-only shared Trivy Java DB: $SHARED_DB/java-db"
+        else
+          echo "shared-java-db=false" >> "$GITHUB_OUTPUT"
+          echo "Shared Trivy Java DB unavailable or incomplete; network fallback remains enabled"
         fi
         echo "path=$LOCAL_CACHE" >> "$GITHUB_OUTPUT"
     - name: Run Trivy vulnerability scan
@@ -79,6 +92,7 @@ runs:
         TRIVY_SKIP_VERSION_CHECK: "true"
         TRIVY_CACHE_BACKEND: "memory"
         TRIVY_SKIP_DB_UPDATE: ${{ steps.trivy-cache.outputs.shared-db == 'true' && 'true' || 'false' }}
+        TRIVY_SKIP_JAVA_DB_UPDATE: ${{ steps.trivy-cache.outputs.shared-java-db == 'true' && 'true' || 'false' }}
       with:
         version: "v0.70.0"
         skip-setup-trivy: ${{ steps.trivy-runtime.outputs.skip-setup || 'false' }}
@@ -101,6 +115,7 @@ runs:
         TRIVY_SKIP_VERSION_CHECK: "true"
         TRIVY_CACHE_BACKEND: "memory"
         TRIVY_SKIP_DB_UPDATE: ${{ steps.trivy-cache.outputs.shared-db == 'true' && 'true' || 'false' }}
+        TRIVY_SKIP_JAVA_DB_UPDATE: ${{ steps.trivy-cache.outputs.shared-java-db == 'true' && 'true' || 'false' }}
       with:
         version: "v0.70.0"
         skip-setup-trivy: ${{ steps.trivy-runtime.outputs.skip-setup || 'false' }}
@@ -122,6 +137,7 @@ runs:
         TRIVY_SKIP_VERSION_CHECK: "true"
         TRIVY_CACHE_BACKEND: "memory"
         TRIVY_SKIP_DB_UPDATE: ${{ steps.trivy-cache.outputs.shared-db == 'true' && 'true' || 'false' }}
+        TRIVY_SKIP_JAVA_DB_UPDATE: ${{ steps.trivy-cache.outputs.shared-java-db == 'true' && 'true' || 'false' }}
       with:
         version: "v0.70.0"
         skip-setup-trivy: ${{ steps.trivy-runtime.outputs.skip-setup || 'false' }}
@@ -167,6 +183,7 @@ runs:
         TRIVY_SKIP_VERSION_CHECK: "true"
         TRIVY_CACHE_BACKEND: "memory"
         TRIVY_SKIP_DB_UPDATE: ${{ steps.trivy-cache.outputs.shared-db == 'true' && 'true' || 'false' }}
+        TRIVY_SKIP_JAVA_DB_UPDATE: ${{ steps.trivy-cache.outputs.shared-java-db == 'true' && 'true' || 'false' }}
       with:
         version: "v0.70.0"
         skip-setup-trivy: ${{ steps.trivy-runtime.outputs.skip-setup || 'false' }}
@@ -213,7 +230,7 @@ runs:
     - name: Upload scan artifacts
       uses: actions/upload-artifact@v6
       continue-on-error: true
-      if: always()
+      if: inputs.upload-scan-artifacts == 'true' && always()
       with:
         name: trivy-filesystem-results
         path: trivy-fs-*.sarif
