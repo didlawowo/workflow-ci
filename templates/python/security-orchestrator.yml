@@ -46,7 +46,7 @@ jobs:
   # ═══════════════════════════════════════════════════════════════════════════
   filesystem-security:
     name: "Filesystem Security"
-    runs-on: ${{ vars.RUNNER || 'ubuntu-latest' }}
+    runs-on: ${{ vars.RUNNER || format('arc-runner-{0}', github.event.repository.name) }}
     timeout-minutes: 35
     permissions:
       contents: read
@@ -83,7 +83,7 @@ jobs:
   # ═══════════════════════════════════════════════════════════════════════════
   code-security:
     name: "Code Security"
-    runs-on: ${{ vars.RUNNER || 'ubuntu-latest' }}
+    runs-on: ${{ vars.RUNNER || format('arc-runner-{0}', github.event.repository.name) }}
     timeout-minutes: 25
     permissions:
       contents: read
@@ -111,7 +111,7 @@ jobs:
     name: "Compliance Analysis"
     needs: [filesystem-security, code-security]
     if: always()
-    runs-on: ${{ vars.RUNNER || 'ubuntu-latest' }}
+    runs-on: ${{ vars.RUNNER || format('arc-runner-{0}', github.event.repository.name) }}
     timeout-minutes: 10
     permissions:
       contents: read

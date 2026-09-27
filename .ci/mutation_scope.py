@@ -31,9 +31,7 @@ def mutation_source_paths(root: Path) -> tuple[str, ...]:
         if parser.has_option("mutmut", "source_paths"):
             raw = parser.get("mutmut", "source_paths")
             return tuple(
-                item.strip()
-                for item in re.split(r"[\n,]", raw)
-                if item.strip()
+                item.strip() for item in re.split(r"[\n,]", raw) if item.strip()
             )
 
     return ()
@@ -104,9 +102,7 @@ def _changed_lines(repo: Path, base: str, head: str) -> dict[str, set[int]]:
             # A deletion-only hunk has no lines on the head side. Anchor both
             # adjacent surviving lines so a deletion inside an existing
             # function cannot be misclassified as "no mutation targets".
-            changed[current_path].update(
-                {max(start - 1, 1), max(start, 1)}
-            )
+            changed[current_path].update({max(start - 1, 1), max(start, 1)})
 
     return changed
 
@@ -159,6 +155,22 @@ class _ChangedFunctionVisitor(ast.NodeVisitor):
         self.stack.pop()
 
 
+def syntax_unchanged(repo: Path, base: str, relative: str, tree: ast.AST) -> bool:
+    """Ignore formatting-only edits; unavailable base source remains in scope."""
+    previous = subprocess.run(
+        ["git", "show", f"{base}:{relative}"],
+        cwd=repo,
+        capture_output=True,
+        text=True,
+    )
+    if previous.returncode:
+        return False
+    try:
+        return ast.dump(ast.parse(previous.stdout)) == ast.dump(tree)
+    except SyntaxError:
+        return False
+
+
 def mutation_targets(
     repo: Path, base: str, head: str, *, depth: str = "medium"
 ) -> tuple[str, ...]:
@@ -187,13 +199,16 @@ def mutation_targets(
         if not module:
             continue
 
-        if depth == "high":
-            targets.add(f"{module}.*__mutmut_*")
-            continue
-
         try:
             tree = ast.parse(path.read_text(encoding="utf-8"))
         except (SyntaxError, UnicodeDecodeError):
+            continue
+
+        if syntax_unchanged(repo, base, relative, tree):
+            continue
+
+        if depth == "high":
+            targets.add(f"{module}.*__mutmut_*")
             continue
 
         visitor = _ChangedFunctionVisitor(lines)
@@ -202,6 +217,7 @@ def mutation_targets(
             targets.add(f"{module}.*{'*'.join(qualified)}__mutmut_*")
 
     return tuple(sorted(targets))
+
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
@@ -214,7 +230,9 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> int:
     args = parse_args()
-    for target in mutation_targets(args.repo.resolve(), args.base, args.head, depth=args.depth):
+    for target in mutation_targets(
+        args.repo.resolve(), args.base, args.head, depth=args.depth
+    ):
         print(target)
     return 0
 

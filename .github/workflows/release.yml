@@ -45,18 +45,20 @@ on:
         required: false
         type: string
         default: "v1.8.0"
+      validated-sha:
+        description: "Optional tested commit to release. A concurrent branch update makes the push fail safely."
+        required: false
+        type: string
+        default: ""
       runs-on:
         description: |
-          Runner label for the release job. Defaults to a GitHub-hosted runner.
-          Set a self-hosted label (e.g. an ARC scale set) so the release of a private
-          repository does not depend on GitHub-hosted minutes: when the account's
-          billing fails, GitHub refuses a hosted job before its first step and no
-          release is cut, while CI on self-hosted runners stays green.
+          Runner label for the release job. Defaults to vars.RUNNER or arc-runner-<repo>.
+          Override only when the caller uses a different internal runner label.
           The runner needs git, python3 and gh, and must run the actions used here
           (actions/checkout, orhun/git-cliff-action).
         required: false
         type: string
-        default: "ubuntu-latest"
+        default: ""
       trigger-cd-workflow:
         description: |
           Optional. When set to a workflow filename (e.g. `cd-production-orchestrator.yml`),
@@ -95,7 +97,7 @@ on:
 
 jobs:
   release:
-    runs-on: ${{ inputs.runs-on }}
+    runs-on: ${{ inputs.runs-on || vars.RUNNER || format('arc-runner-{0}', github.event.repository.name) }}
 
     # Deux merges rapprochés sur main lançaient deux releases en parallèle. La
     # première perdait la course au push :
@@ -128,17 +130,10 @@ jobs:
       - name: Checkout calling repo
         uses: actions/checkout@v4
         with:
-          # La BRANCHE, pas le SHA de l'événement. Par défaut actions/checkout
-          # sort le commit qui a déclenché le run ; sérialiser les runs ne
-          # suffirait alors pas, car le second sortirait quand même un état
-          # antérieur au commit de release du premier et son `git push` serait
-          # toujours en non-fast-forward. En sortant la pointe de la branche —
-          # résolue à l'instant du checkout, donc après l'attente imposée par
-          # `concurrency` — le run travaille sur ce que main contient vraiment.
-          #
-          # github.ref reste correct pour un workflow_dispatch lancé depuis une
-          # autre branche : c'est celle-là qui est sortie, pas main.
-          ref: ${{ github.ref }}
+          # A caller with a validation job pins the tested commit. Otherwise keep
+          # the historical branch-tip checkout for serialized consumer releases.
+          # Publishing uses a non-force push: newer branch commits cannot be lost.
+          ref: ${{ inputs.validated-sha || github.ref }}
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
 

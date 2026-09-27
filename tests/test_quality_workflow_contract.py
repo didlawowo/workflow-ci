@@ -9,7 +9,10 @@ def test_quality_evidence_is_reusable_and_not_recursive():
 
     assert "workflow_call:" in content
     assert "pull_request:" not in content
-    assert "uses: didlawowo/workflow-ci/.github/workflows/quality-evidence.yml@" not in content
+    assert (
+        "uses: didlawowo/workflow-ci/.github/workflows/quality-evidence.yml@"
+        not in content
+    )
 
 
 def test_quality_evidence_cancels_stale_caller_revisions():
@@ -36,6 +39,7 @@ def test_quality_report_publisher_concurrency_is_scoped_per_consumer():
     ) in publisher
     assert "cancel-in-progress: false" in publisher
 
+
 def test_quality_evidence_requires_explicit_runner_and_same_commit_actions():
     content = WORKFLOW.read_text()
 
@@ -53,11 +57,21 @@ def test_quality_evidence_requires_explicit_runner_and_same_commit_actions():
 
 def test_quality_evidence_dependency_chain_uses_same_commit_self_refs():
     root = Path(__file__).resolve().parents[1]
-    go_tests = (root / ".github" / "actions" / "run-go-tests" / "action.yml").read_text()
-    node_tests = (root / ".github" / "actions" / "run-node-tests" / "action.yml").read_text()
-    python_quality = (root / ".github" / "actions" / "python-quality-security" / "action.yml").read_text()
-    go_quality = (root / ".github" / "actions" / "go-quality-security" / "action.yml").read_text()
-    node_quality = (root / ".github" / "actions" / "node-quality-security" / "action.yml").read_text()
+    go_tests = (
+        root / ".github" / "actions" / "run-go-tests" / "action.yml"
+    ).read_text()
+    node_tests = (
+        root / ".github" / "actions" / "run-node-tests" / "action.yml"
+    ).read_text()
+    python_quality = (
+        root / ".github" / "actions" / "python-quality-security" / "action.yml"
+    ).read_text()
+    go_quality = (
+        root / ".github" / "actions" / "go-quality-security" / "action.yml"
+    ).read_text()
+    node_quality = (
+        root / ".github" / "actions" / "node-quality-security" / "action.yml"
+    ).read_text()
 
     for content in (go_tests, node_tests, python_quality, go_quality, node_quality):
         assert "@main" not in content
@@ -77,7 +91,9 @@ def test_mutation_policy_classifies_every_pr_event_it_subscribes_to():
     mutation_verify = content.split("  mutation-verify:", 1)[1]
 
     assert "workflow_call:" in header
-    assert "types: [opened, synchronize, reopened, labeled, unlabeled, edited]" in header
+    assert (
+        "types: [opened, synchronize, reopened, labeled, unlabeled, edited]" in header
+    )
     assert "issues:" not in header
     assert "concurrency:" in header
     assert "group: mutation-policy-${{ github.repository }}-" in header
@@ -90,6 +106,7 @@ def test_mutation_policy_classifies_every_pr_event_it_subscribes_to():
     assert "github.event.changes.body != null" not in mutation_verify
     assert "if: github.event_name == 'pull_request'" in mutation_run
     assert "if: always() && github.event_name == 'pull_request'" in mutation_verify
+
 
 def test_forgejo_filters_irrelevant_edits_and_isolates_noop_concurrency():
     root = Path(__file__).resolve().parents[1]
@@ -117,12 +134,18 @@ def test_mutation_policy_separates_untrusted_execution_from_trusted_verification
     assert "pull_request:" in content
     assert "Fetch trusted base policy without submodule traversal" in content
     assert "Fetch pull request code without submodule traversal" in content
-    assert "vars.UNTRUSTED_RUNNER || vars.RUNNER || format('arc-runner-{0}', github.event.repository.name)" in content
+    assert (
+        "vars.UNTRUSTED_RUNNER || vars.RUNNER || format('arc-runner-{0}', github.event.repository.name)"
+        in content
+    )
     assert "Resolve trusted mutation runner" in content
     assert ".workflow-ci/.ci/mutation-go.sh" in content
     assert ".workflow-ci/.ci/mutation.sh" in content
     assert "Setup Go for central Gremlins runner" in content
-    assert "go-version-file: pr/${{ steps.runner.outputs.working-directory }}/go.mod" in content
+    assert (
+        "go-version-file: pr/${{ steps.runner.outputs.working-directory }}/go.mod"
+        in content
+    )
     assert 'bash "${{ steps.runner.outputs.path }}"' in content
     assert "job.workflow_repository" in content
     assert "job.workflow_sha" in content
@@ -158,7 +181,6 @@ def test_mutation_policy_requires_machine_readable_evidence_and_zero_survivors()
     assert "if survived or timeouts or suspicious:" in content
 
 
-
 def test_trusted_quality_enforces_ruff_and_sonarqube_quality_gate():
     root = Path(__file__).resolve().parents[1]
     workflow = WORKFLOW.read_text()
@@ -179,7 +201,10 @@ def test_trusted_quality_enforces_ruff_and_sonarqube_quality_gate():
     assert "uses: $/.github/actions/sonarqube-scan" in workflow
     assert "project-key: ${{ vars.SONAR_PROJECT_KEY }}" in workflow
     assert "steps.sonarqube.outcome" in workflow
-    assert "SonarQube Quality Gate failed, is not configured, or analysis could not complete" in workflow
+    assert (
+        "SonarQube Quality Gate failed, is not configured, or analysis could not complete"
+        in workflow
+    )
     assert "sonar-project.properties is protected quality policy" in workflow
     assert "vars.SONAR_ENABLED == 'true'" in workflow
     assert "github.repository != 'didlawowo/workflow-ci'" not in workflow
@@ -196,6 +221,7 @@ def test_trusted_quality_enforces_ruff_and_sonarqube_quality_gate():
     assert "Invalid $label path for SonarQube" in sonar
     assert "extra-args:" not in sonar
     assert "wait-for-quality-gate:" not in sonar
+
 
 def test_language_templates_make_quality_failures_blocking():
     root = Path(__file__).resolve().parents[1]
@@ -226,13 +252,20 @@ def test_mutation_verify_is_read_only_and_scoped_to_changed_functions():
     verify = content.split("  mutation-verify:", 1)[1]
     assert "issues: write" not in verify
     assert "pull-requests: write" not in verify
-    assert "inputs.trusted-runner || vars.RUNNER || format('arc-runner-{0}', github.event.repository.name)" in verify
-    assert "git\", \"-C\", str(repo), \"diff\", \"--unified=0\"" in verify
+    assert (
+        "inputs.trusted-runner || vars.RUNNER || format('arc-runner-{0}', github.event.repository.name)"
+        in verify
+    )
+    assert 'git", "-C", str(repo), "diff", "--unified=0"' in verify
     assert "mutation gate failed for changed functions" in verify
     assert "scoped-mutation-evidence-" in verify
     assert "quality-report@main" not in verify
-    assert '"$GITHUB_WORKSPACE/pr" "$GITHUB_WORKSPACE/.workflow-ci" "$BASE_SHA"' in verify
-    assert '"$GITHUB_WORKSPACE/pr" "$GITHUB_WORKSPACE/.policy" "$BASE_SHA"' not in verify
+    assert (
+        '"$GITHUB_WORKSPACE/pr" "$GITHUB_WORKSPACE/.workflow-ci" "$BASE_SHA"' in verify
+    )
+    assert (
+        '"$GITHUB_WORKSPACE/pr" "$GITHUB_WORKSPACE/.policy" "$BASE_SHA"' not in verify
+    )
 
 
 def test_python_security_action_propagates_requested_check_failures():
@@ -325,24 +358,18 @@ def test_issue_59_gitlink_parser_preserves_untrusted_paths_and_hidden_evidence()
 
 def test_issue_59_mutation_policy_never_uses_system_python():
     root = Path(__file__).resolve().parents[1]
-    content = (
-        root / ".github" / "workflows" / "mutation-policy.yml"
-    ).read_text()
+    content = (root / ".github" / "workflows" / "mutation-policy.yml").read_text()
 
     assert "run: python " not in content
     assert "\n          python -" not in content
     assert "python3 -m venv" not in content
-    assert content.count(
-        "uv run --no-project --python 3.12 python"
-    ) >= 4
+    assert content.count("uv run --no-project --python 3.12 python") >= 4
 
 
 def test_issue_59_deletion_only_hunks_remain_in_mutation_scope():
     root = Path(__file__).resolve().parents[1]
     scope = (root / ".ci" / "mutation_scope.py").read_text()
-    workflow = (
-        root / ".github" / "workflows" / "mutation-policy.yml"
-    ).read_text()
+    workflow = (root / ".github" / "workflows" / "mutation-policy.yml").read_text()
 
     assert "A deletion-only hunk has no lines on the head side" in scope
     assert "max(start - 1, 1)" in scope
@@ -352,9 +379,7 @@ def test_issue_59_deletion_only_hunks_remain_in_mutation_scope():
 
 def test_issue_59_mutation_policy_uses_exact_tree_range_and_isolated_home():
     root = Path(__file__).resolve().parents[1]
-    content = (
-        root / ".github" / "workflows" / "mutation-policy.yml"
-    ).read_text()
+    content = (root / ".github" / "workflows" / "mutation-policy.yml").read_text()
 
     assert 'f"{base}...{head}"' in content
     assert 'f"{base}..{head}"' not in content.replace('f"{base}...{head}"', "")
@@ -373,7 +398,10 @@ def test_language_templates_split_pr_fast_path_from_main_heavy_path():
         assert "pull_request:" in header
         assert "workflow_dispatch:" in header
         assert "concurrency:" in header
-        assert "group: ci-${{ github.workflow }}-${{ github.head_ref || github.ref_name }}" in header
+        assert (
+            "group: ci-${{ github.workflow }}-${{ github.head_ref || github.ref_name }}"
+            in header
+        )
         assert "cancel-in-progress: true" in header
         assert "github.event_name != 'pull_request'" in content
         assert "timeout-minutes:" in content
@@ -406,7 +434,7 @@ def test_internal_workflow_ci_refs_follow_immutable_version_contract():
             assert f"@{version}" in line, f"{path}: mutable/stale internal ref: {line}"
 
     release = (root / ".github" / "workflows" / "release.yml").read_text()
-    assert 'workflow-ci-ref:' in release
+    assert "workflow-ci-ref:" in release
     assert 'default: "v1.8.0"' in release
 
 
@@ -429,7 +457,10 @@ def test_issue_56_reacts_to_issue_label_add_and_remove():
     assert "refresh-linked-prs:" in workflow
     assert "actions: write" in workflow
     assert "mutation_policy.py refresh" in workflow
-    assert "inputs.runner || vars.RUNNER || format('arc-runner-{0}', github.event.repository.name)" in workflow
+    assert (
+        "inputs.runner || vars.RUNNER || format('arc-runner-{0}', github.event.repository.name)"
+        in workflow
+    )
     assert "job.workflow_repository" in workflow
     assert "job.workflow_sha" in workflow
     notify = workflow.split("  notify:", 1)[1].split("  refresh-linked-prs:", 1)[0]
@@ -459,7 +490,9 @@ def test_forgejo_mutation_policy_template_matches_label_refresh_contract():
     forgejo = (root / "templates" / "forgejo" / "mutation-policy.yml").read_text()
 
     assert "types: [labeled, unlabeled]" in forgejo
-    assert "types: [opened, synchronize, reopened, labeled, unlabeled, edited]" in forgejo
+    assert (
+        "types: [opened, synchronize, reopened, labeled, unlabeled, edited]" in forgejo
+    )
     assert "concurrency:" in forgejo.split("\njobs:", 1)[0]
     assert "cancel-in-progress: true" in forgejo.split("\njobs:", 1)[0]
     assert "refresh-linked-prs:" in forgejo
@@ -481,9 +514,7 @@ def test_quality_evidence_separates_blocking_gate_from_best_effort_publication()
     execution = content.split("  independent-verification:", 1)[1].split(
         "  trusted-gate:", 1
     )[0]
-    gate = content.split("  trusted-gate:", 1)[1].split(
-        "  publish-evidence:", 1
-    )[0]
+    gate = content.split("  trusted-gate:", 1)[1].split("  publish-evidence:", 1)[0]
     publisher = content.split("  publish-evidence:", 1)[1]
 
     assert "issues: write" not in execution
@@ -494,32 +525,48 @@ def test_quality_evidence_separates_blocking_gate_from_best_effort_publication()
 
     assert 'name: "Trusted quality gate"' in gate
     assert "needs: [independent-verification, mutation]" in gate
-    assert 'QUALITY_RESULT: ${{ needs.independent-verification.result }}' in gate
-    assert 'MUTATION_RESULT: ${{ needs.mutation.result }}' in gate
+    assert "QUALITY_RESULT: ${{ needs.independent-verification.result }}" in gate
+    assert "MUTATION_RESULT: ${{ needs.mutation.result }}" in gate
     assert 'echo "status=pass" >> "$GITHUB_OUTPUT"' in gate
     assert 'echo "status=fail" >> "$GITHUB_OUTPUT"' in gate
     assert "pull-requests: write" not in gate
 
     assert "needs: [trusted-gate, independent-verification, mutation]" in publisher
-    assert "scope-key: ${{ format('{0}-{1}', inputs.repo-type, inputs.working-directory) }}" in content
+    assert (
+        "scope-key: ${{ format('{0}-{1}', inputs.repo-type, inputs.working-directory) }}"
+        in content
+    )
     assert "Configure writable reporter cache" in publisher
     assert 'CACHE="${RUNNER_TEMP:-/tmp}/quality-reporter-uv-cache"' in publisher
     assert "Materialize trusted mutation evidence" in publisher
     assert "continue-on-error: true" in publisher
     assert "needs.mutation.outputs.report-b64" in publisher
     assert "needs.mutation.outputs.report-file" in publisher
-    assert "format('.mutation-evidence/{0}', needs.mutation.outputs.report-file)" in publisher
-    assert "mutation-required: ${{ needs.mutation.outputs.required || 'unknown' }}" in publisher
+    assert (
+        "format('.mutation-evidence/{0}', needs.mutation.outputs.report-file)"
+        in publisher
+    )
+    assert (
+        "mutation-required: ${{ needs.mutation.outputs.required || 'unknown' }}"
+        in publisher
+    )
     assert "issues: write" not in publisher
     assert "pull-requests: write" in publisher
     assert publisher.count("persist-credentials: false") >= 1
     assert "uses: $/.github/actions/quality-report" in publisher
     assert "repository: didlawowo/workflow-ci" not in publisher
     assert 'junit-glob: "${{ runner.temp }}/quality-evidence/no-junit.xml"' in publisher
-    assert 'coverage-glob: "${{ runner.temp }}/quality-evidence/no-coverage.xml"' in publisher
+    assert (
+        'coverage-glob: "${{ runner.temp }}/quality-evidence/no-coverage.xml"'
+        in publisher
+    )
     assert "Report publication warning" in publisher
-    assert "Reporting failures do not override the blocking trusted gate verdict." in publisher
+    assert (
+        "Reporting failures do not override the blocking trusted gate verdict."
+        in publisher
+    )
     assert "Enforce mutation evidence publication" not in publisher
+
 
 def test_consumer_selftest_grants_reusable_publisher_pr_write_permission():
     root = Path(__file__).resolve().parents[1]
@@ -559,7 +606,6 @@ def test_release_workflow_never_commits_workflow_ci_checkout():
     assert "git reset -- .workflow-ci 2>/dev/null || true" in content
 
 
-
 def test_mutation_jobs_force_uv_cache_into_runner_temp():
     root = Path(__file__).resolve().parents[1]
     content = (root / ".github" / "workflows" / "mutation-policy.yml").read_text()
@@ -578,7 +624,6 @@ def test_mutation_jobs_force_uv_cache_into_runner_temp():
     assert "UV_CACHE_DIR: ${{ runner.temp }}/uv-cache" not in content
 
 
-
 def test_consumer_mutation_runner_is_materialized_from_protected_tree_only():
     root = Path(__file__).resolve().parents[1]
     content = (root / ".github" / "workflows" / "mutation-policy.yml").read_text()
@@ -592,7 +637,10 @@ def test_consumer_mutation_runner_is_materialized_from_protected_tree_only():
     assert 'MATERIALIZED="$TRUSTED_DIR/mutation.sh"' in content
     assert 'cmp --silent "$CUSTOM" "$MATERIALIZED"' in content
     assert 'MATERIALIZED="$GITHUB_WORKSPACE/pr/.ci/mutation.sh"' not in content
-    assert "publishes no supported trusted evidence; falling back to the central runner" in content
+    assert (
+        "publishes no supported trusted evidence; falling back to the central runner"
+        in content
+    )
 
 
 def test_mutation_diagnostics_accept_machine_readable_stats_without_mutmut_binary():
@@ -606,12 +654,16 @@ def test_mutation_diagnostics_accept_machine_readable_stats_without_mutmut_binar
             "- name: Locate mutation evidence", 1
         )[0]
 
-        stats_guard = 'elif [[ -f mutants/mutmut-cicd-stats.json ]]; then'
+        stats_guard = "elif [[ -f mutants/mutmut-cicd-stats.json ]]; then"
         assert stats_guard in capture
-        assert "Mutmut completed successfully; machine-readable diagnostics are in " in capture
+        assert (
+            "Mutmut completed successfully; machine-readable diagnostics are in "
+            in capture
+        )
         assert capture.index(stats_guard) < capture.index(
             "Mutation diagnostics unavailable"
         )
+
 
 def test_python_actions_fallback_from_read_only_uv_cache():
     root = Path(__file__).resolve().parents[1]
@@ -650,5 +702,5 @@ def test_workflow_ci_main_has_self_release_caller():
     assert "workflow_dispatch:" in content
     assert "contents: write" in content
     assert "uses: ./.github/workflows/release.yml" in content
-    assert "workflow-ci-ref: main" in content
+    assert "workflow-ci-ref: ${{ github.sha }}" in content
     assert "runs-on: arc-runner-workflow-ci" in content

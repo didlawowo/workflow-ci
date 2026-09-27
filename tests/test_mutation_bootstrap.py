@@ -1,4 +1,5 @@
 """Bootstrap behavior moved with its owner from GitHub Manager to Workflow CI."""
+
 from __future__ import annotations
 
 import os
@@ -82,8 +83,12 @@ def _run_bootstrap(tmp_path: Path, *, venv_fails: bool = False, survives: bool =
         "FAKE_MUTMUT_SURVIVES": "1" if survives else "0",
     }
     result = subprocess.run(
-        ["bash", str(BOOTSTRAP)], cwd=tmp_path, env=env,
-        text=True, capture_output=True, check=False,
+        ["bash", str(BOOTSTRAP)],
+        cwd=tmp_path,
+        env=env,
+        text=True,
+        capture_output=True,
+        check=False,
     )
     return result, mutmut_log, runner_temp
 

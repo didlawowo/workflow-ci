@@ -180,6 +180,7 @@ jobs:
           package-manager: ${{ inputs.package-manager }}
           working-directory: ${{ inputs.working-directory }}
           upload-coverage: "false"
+          coverage-threshold: ${{ steps.threshold.outputs.value }}
 
       - name: Compare with committed main coverage
         id: coverage-compare
@@ -278,6 +279,7 @@ jobs:
     with:
       scope-key: ${{ format('ci-v2-{0}', inputs.repo-type) }}
       trusted-runner: ${{ inputs.runner }}
+      working-directory: ${{ inputs.working-directory }}
 
   docker:
     name: Docker build & scan

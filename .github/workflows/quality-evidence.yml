@@ -185,6 +185,7 @@ jobs:
           package-manager: ${{ inputs.package-manager }}
           working-directory: ${{ inputs.working-directory }}
           upload-coverage: "false"
+          coverage-threshold: ${{ steps.threshold.outputs.value }}
 
       - name: Verify Python quality and security
         id: python-quality

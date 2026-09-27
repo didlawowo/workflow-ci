@@ -37,7 +37,5 @@ jobs:
       # workflows. The reusable workflow dispatches the CD orchestrator after
       # pushing the tag. The CD must declare `workflow_dispatch:` + `inputs.tag`.
       trigger-cd-workflow: cd-production-orchestrator.yml
-      # Runner of the release job, ubuntu-latest (GitHub-hosted) by default. On a
-      # private repo, use your self-hosted runner so releases do not depend on
-      # GitHub-hosted minutes and billing (see RELEASE.md).
-      # runs-on: ${{ vars.RUNNER || 'arc-runner-<repo>' }}
+      # This example is pinned to an older release: select the internal runner explicitly.
+      runs-on: ${{ vars.RUNNER || format('arc-runner-{0}', github.event.repository.name) }}

@@ -71,7 +71,6 @@ class QualityReportTests(unittest.TestCase):
             [".github/workflows/ci.yml", ".ci/mutation.sh", "sonar-project.properties"],
         )
 
-
     def test_gremlins_report_is_parsed_from_engine_schema(self):
         with tempfile.TemporaryDirectory() as tmp:
             report = Path(tmp) / "gremlins.json"
@@ -289,8 +288,9 @@ class QualityReportTests(unittest.TestCase):
             fp=io.BytesIO(b'{"message":"Resource not accessible by integration"}'),
         )
 
-        with patch.object(quality_report, "_api_json", return_value=[]), patch.object(
-            quality_report.urllib.request, "urlopen", side_effect=error
+        with (
+            patch.object(quality_report, "_api_json", return_value=[]),
+            patch.object(quality_report.urllib.request, "urlopen", side_effect=error),
         ):
             with self.assertRaisesRegex(
                 RuntimeError,

@@ -25,6 +25,7 @@ def _load_candidate(candidate: Path):
     from scripts import auto_geometric_finalize as finalize
     from src.dataset import calibration_readiness as readiness
     from src.radar import calibration
+
     return calibration, readiness, finalize
 
 
@@ -208,8 +209,12 @@ def _valid_auto_report(rng: random.Random, *, pixel_status: str = "accepted") ->
         "target_route_excluded_from_calibration": target_route,
         "intrinsics": {"fx": 1600.0, "fy": 1595.0, "cx": 960.0, "cy": 540.0},
         "extrinsics": {
-            "tx_m": 0.11, "ty_m": -0.08, "tz_m": 0.07,
-            "roll_rad": 0.011, "pitch_rad": -0.017, "yaw_rad": 0.023,
+            "tx_m": 0.11,
+            "ty_m": -0.08,
+            "tz_m": 0.07,
+            "roll_rad": 0.011,
+            "pitch_rad": -0.017,
+            "yaw_rad": 0.023,
         },
         "split": {
             "train_routes": [train_a, train_b],
@@ -250,7 +255,9 @@ def _policy_fail_closed(readiness, rng: random.Random) -> None:
     attacks.append(("threshold-relaxation", relaxed))
 
     leaked = copy.deepcopy(report)
-    leaked["split"]["train_routes"].append(leaked["target_route_excluded_from_calibration"])
+    leaked["split"]["train_routes"].append(
+        leaked["target_route_excluded_from_calibration"]
+    )
     attacks.append(("target-train-leakage", leaked))
 
     overlap = copy.deepcopy(report)

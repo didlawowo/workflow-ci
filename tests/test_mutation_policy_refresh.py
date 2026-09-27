@@ -1,7 +1,9 @@
 import importlib.util
 from pathlib import Path
 
-MODULE_PATH = Path(__file__).resolve().parents[1] / ".github" / "scripts" / "mutation_policy.py"
+MODULE_PATH = (
+    Path(__file__).resolve().parents[1] / ".github" / "scripts" / "mutation_policy.py"
+)
 SPEC = importlib.util.spec_from_file_location("mutation_policy_refresh", MODULE_PATH)
 assert SPEC and SPEC.loader
 mutation_policy = importlib.util.module_from_spec(SPEC)
@@ -211,7 +213,6 @@ def test_dependabot_with_production_code_is_not_dependency_only(monkeypatch):
     assert not mutation_policy._dependabot_dependency_only(event)
 
 
-
 def test_python_production_change_requires_mutation_outside_src(monkeypatch, tmp_path):
     event = {
         "number": 201,
@@ -387,7 +388,6 @@ def test_dependabot_dependency_listing_paginates_before_exemption(monkeypatch):
     assert not mutation_policy._dependabot_dependency_only(event)
 
 
-
 def test_explicit_low_skips_mutation_for_small_production_change(monkeypatch, tmp_path):
     event = {
         "number": 301,
@@ -438,7 +438,9 @@ def test_explicit_medium_requires_mutation_without_file_api(monkeypatch, tmp_pat
     monkeypatch.setenv("GITHUB_OUTPUT", str(output))
 
     assert mutation_policy.classify(event) == 0
-    assert output.read_text() == "required=true\nlabels=complexity:medium\ndepth=medium\n"
+    assert (
+        output.read_text() == "required=true\nlabels=complexity:medium\ndepth=medium\n"
+    )
 
 
 def test_priority_high_does_not_influence_mutation(monkeypatch, tmp_path):

@@ -270,5 +270,11 @@ def evaluate(candidate: Path, seed: int) -> list[dict[str, str]]:
     try:
         _run_hidden_go_test(candidate, seed)
     except AssertionError as exc:
-        return [{"name": "conversation-runtime-invariants", "status": "fail", "detail": str(exc)}]
+        return [
+            {
+                "name": "conversation-runtime-invariants",
+                "status": "fail",
+                "detail": str(exc),
+            }
+        ]
     return [{"name": "conversation-runtime-invariants", "status": "pass"}]

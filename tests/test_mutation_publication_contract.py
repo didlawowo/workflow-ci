@@ -29,7 +29,9 @@ def test_trusted_gate_is_independent_from_publication(
 ):
     data = yaml.safe_load((ROOT / ".github/workflows/quality-evidence.yml").read_text())
     steps = data["jobs"]["trusted-gate"]["steps"]
-    gate = next(s for s in steps if s.get("name") == "Enforce trusted execution verdict")
+    gate = next(
+        s for s in steps if s.get("name") == "Enforce trusted execution verdict"
+    )
     completed = subprocess.run(
         ["bash", "-c", gate["run"]],
         env={
@@ -45,6 +47,7 @@ def test_trusted_gate_is_independent_from_publication(
         capture_output=True,
     )
     assert (completed.returncode == 0) is success
+
 
 def test_workflow_propagates_result_independently_and_publishes_missing_artifacts():
     data = yaml.safe_load((ROOT / ".github/workflows/quality-evidence.yml").read_text())
@@ -73,11 +76,14 @@ def test_workflow_propagates_result_independently_and_publishes_missing_artifact
         "actions": "read",
     }
 
+
 def test_mutation_policy_does_not_inject_large_base64_outputs_into_environment():
     data = yaml.safe_load((ROOT / ".github/workflows/mutation-policy.yml").read_text())
     steps = data["jobs"]["mutation-verify"]["steps"]
     materialize = next(
-        s for s in steps if s.get("name") == "Materialize mutation evidence from job outputs"
+        s
+        for s in steps
+        if s.get("name") == "Materialize mutation evidence from job outputs"
     )
     env = materialize.get("env", {})
     assert "EVIDENCE_B64" not in env
@@ -144,7 +150,6 @@ def test_cli_json_and_markdown_agree(tmp_path, extra, expected, detail):
         assert value["security"]["scan_errors"] == 1
 
 
-
 @pytest.mark.parametrize(
     "workflow",
     [
@@ -160,7 +165,6 @@ def test_scoped_mutation_validator_imports_configparser(workflow):
     assert "import configparser" in validator
 
 
-
 @pytest.mark.parametrize(
     "workflow",
     [
@@ -172,5 +176,5 @@ def test_capture_preserves_trusted_runner_mutation_diagnostics(workflow):
     text = workflow.read_text()
     marker = "Capture mutmut diagnostics"
     capture = text.split(marker, 1)[1].split("- name:", 1)[0]
-    assert '[[ -s .quality/mutmut-results.txt ]]' in capture
+    assert "[[ -s .quality/mutmut-results.txt ]]" in capture
     assert "Preserving mutation diagnostics produced by the trusted runner" in capture

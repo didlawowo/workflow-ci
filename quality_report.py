@@ -110,7 +110,11 @@ def fallback_tests(
         return tests
 
     total_n = int(total) if total and total.isdigit() else None
-    failed_n = int(failed) if failed and failed.isdigit() else (0 if status == "success" else None)
+    failed_n = (
+        int(failed)
+        if failed and failed.isdigit()
+        else (0 if status == "success" else None)
+    )
     skipped_n = int(skipped) if skipped and skipped.isdigit() else 0
     passed_n = None
     pass_rate = None
@@ -217,9 +221,7 @@ def enrich_coverage(
     enriched["changed_lines_percentage"] = changed
     enriched["threshold"] = minimum
     enriched["gate_passed"] = (
-        None
-        if current is None or minimum is None
-        else float(current) >= minimum
+        None if current is None or minimum is None else float(current) >= minimum
     )
     return enriched
 
@@ -231,7 +233,11 @@ def trusted_signal(status: str | None, *, required: bool = True) -> dict[str, An
     if normalized in {"failure", "failed", "fail", "false", "error"}:
         return {"available": True, "status": "failure", "required": required}
     if normalized in {"disabled", "skipped", "not-required", "not_required"}:
-        return {"available": False, "status": normalized or "disabled", "required": required}
+        return {
+            "available": False,
+            "status": normalized or "disabled",
+            "required": required,
+        }
     return {"available": False, "status": normalized or "unknown", "required": required}
 
 
@@ -255,9 +261,7 @@ def parse_mutation(path: str | None) -> dict[str, Any]:
     if not isinstance(data, dict):
         raise ValueError("mutation report must be a JSON object")
 
-    killed = _mutation_value(
-        data, ("killed", "killed_mutants", "mutants_killed")
-    )
+    killed = _mutation_value(data, ("killed", "killed_mutants", "mutants_killed"))
     survived = _mutation_value(
         data,
         (
@@ -291,8 +295,7 @@ def parse_mutation(path: str | None) -> dict[str, Any]:
     if total is None and len(measured) >= 4:
         total = sum(measured) + (not_viable or 0)
     denominator = sum(
-        value or 0
-        for value in (killed, survived, timeouts, suspicious, not_covered)
+        value or 0 for value in (killed, survived, timeouts, suspicious, not_covered)
     )
     scope = data.get("scope")
     no_targets = bool(isinstance(scope, dict) and scope.get("no_targets") is True)
@@ -464,14 +467,20 @@ def ci_history(
     except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError):
         return result
 
-    runs = runs_payload.get("workflow_runs", []) if isinstance(runs_payload, dict) else []
+    runs = (
+        runs_payload.get("workflow_runs", []) if isinstance(runs_payload, dict) else []
+    )
     matching = []
     for run in runs:
         prs = run.get("pull_requests") or []
-        if not prs or any(pr.get("number") == pr_number for pr in prs if isinstance(pr, dict)):
+        if not prs or any(
+            pr.get("number") == pr_number for pr in prs if isinstance(pr, dict)
+        ):
             matching.append(run)
 
-    conclusions = [run.get("conclusion") for run in matching if run.get("status") == "completed"]
+    conclusions = [
+        run.get("conclusion") for run in matching if run.get("status") == "completed"
+    ]
     result.update(
         {
             "available": True,
@@ -479,7 +488,9 @@ def ci_history(
             "workflow_runs": len(matching),
             "failed_runs": sum(1 for value in conclusions if value == "failure"),
             "successful_runs": sum(1 for value in conclusions if value == "success"),
-            "reruns": sum(max(int(run.get("run_attempt", 1)) - 1, 0) for run in matching),
+            "reruns": sum(
+                max(int(run.get("run_attempt", 1)) - 1, 0) for run in matching
+            ),
         }
     )
     return result
@@ -644,7 +655,9 @@ def _extract_state(body: str) -> dict[str, Any] | None:
     return value if isinstance(value, dict) else None
 
 
-def merge_reports(existing: dict[str, Any] | None, current: dict[str, Any]) -> dict[str, Any]:
+def merge_reports(
+    existing: dict[str, Any] | None, current: dict[str, Any]
+) -> dict[str, Any]:
     if not existing:
         return current
 
@@ -656,9 +669,7 @@ def merge_reports(existing: dict[str, Any] | None, current: dict[str, Any]) -> d
         else None
     )
     current_head = (
-        current_identity.get("head_sha")
-        if isinstance(current_identity, dict)
-        else None
+        current_identity.get("head_sha") if isinstance(current_identity, dict) else None
     )
 
     # Evidence is only mergeable when it belongs to the same PR head. Carrying
@@ -668,7 +679,9 @@ def merge_reports(existing: dict[str, Any] | None, current: dict[str, Any]) -> d
         return current
 
     merged = dict(existing)
-    merged["schema_version"] = current.get("schema_version", existing.get("schema_version", 1))
+    merged["schema_version"] = current.get(
+        "schema_version", existing.get("schema_version", 1)
+    )
     if current_identity is not None:
         merged["identity"] = current_identity
     for section in (
@@ -684,10 +697,18 @@ def merge_reports(existing: dict[str, Any] | None, current: dict[str, Any]) -> d
     ):
         candidate = current.get(section)
         previous = existing.get(section)
-        if section == "mutation" and isinstance(candidate, dict) and "execution_status" in candidate:
+        if (
+            section == "mutation"
+            and isinstance(candidate, dict)
+            and "execution_status" in candidate
+        ):
             # The latest authoritative result wins, even when evidence is absent.
             merged[section] = candidate
-        elif section == "mutation" and isinstance(previous, dict) and "execution_status" in previous:
+        elif (
+            section == "mutation"
+            and isinstance(previous, dict)
+            and "execution_status" in previous
+        ):
             # A legacy/partial publisher cannot erase a trusted failure.
             merged[section] = previous
         elif isinstance(candidate, dict) and candidate.get("available"):
@@ -729,9 +750,7 @@ def render_markdown(report: dict[str, Any]) -> str:
         if coverage.get("base_percentage") is not None:
             delta = coverage.get("delta")
             sign = "+" if isinstance(delta, (int, float)) and delta > 0 else ""
-            details.append(
-                f"main {coverage['base_percentage']}% · Δ {sign}{delta}%"
-            )
+            details.append(f"main {coverage['base_percentage']}% · Δ {sign}{delta}%")
         if coverage.get("changed_lines_percentage") is not None:
             details.append(f"changed lines {coverage['changed_lines_percentage']}%")
         if coverage.get("threshold") is not None:
@@ -860,13 +879,17 @@ def upsert_comment(
     pr_number: int,
     token: str,
 ) -> None:
-    comments_url = f"{api_url}/repos/{repository}/issues/{pr_number}/comments?per_page=100"
+    comments_url = (
+        f"{api_url}/repos/{repository}/issues/{pr_number}/comments?per_page=100"
+    )
     comments = _api_json(comments_url, token)
     existing_id = None
     existing_report = None
     if isinstance(comments, list):
         for comment in comments:
-            if isinstance(comment, dict) and COMMENT_MARKER in str(comment.get("body", "")):
+            if isinstance(comment, dict) and COMMENT_MARKER in str(
+                comment.get("body", "")
+            ):
                 existing_id = comment.get("id")
                 existing_report = _extract_state(str(comment.get("body", "")))
                 break
@@ -933,7 +956,9 @@ def main() -> int:
     args = parser.parse_args()
 
     pr_number_raw = os.environ.get("QUALITY_PR_NUMBER")
-    pr_number = int(pr_number_raw) if pr_number_raw and pr_number_raw.isdigit() else None
+    pr_number = (
+        int(pr_number_raw) if pr_number_raw and pr_number_raw.isdigit() else None
+    )
 
     tests = fallback_tests(
         parse_junit(args.junit),
@@ -971,7 +996,9 @@ def main() -> int:
         },
         "tests": tests,
         "coverage": coverage,
-        "mutation": mutation_evidence(args.mutation, args.mutation_required, args.mutation_result),
+        "mutation": mutation_evidence(
+            args.mutation, args.mutation_required, args.mutation_result
+        ),
         "quality": {
             **trusted_signal(args.quality_status, required=True),
         },
@@ -1015,7 +1042,9 @@ def main() -> int:
     markdown_path = Path(args.output_markdown)
     json_path.parent.mkdir(parents=True, exist_ok=True)
     markdown_path.parent.mkdir(parents=True, exist_ok=True)
-    json_path.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    json_path.write_text(
+        json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
     markdown_path.write_text(markdown, encoding="utf-8")
 
     summary_path = os.environ.get("GITHUB_STEP_SUMMARY")

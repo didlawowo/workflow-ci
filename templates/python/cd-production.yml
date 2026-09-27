@@ -39,7 +39,7 @@ jobs:
   # ═══════════════════════════════════════════════════════════════════════════
   release-please:
     name: "Release Please"
-    runs-on: ${{ vars.RUNNER || 'ubuntu-latest' }}
+    runs-on: ${{ vars.RUNNER || format('arc-runner-{0}', github.event.repository.name) }}
     outputs:
       release_created: ${{ steps.release.outputs.release_created }}
       tag_name: ${{ steps.release.outputs.tag_name }}
@@ -68,7 +68,7 @@ jobs:
     name: "Final Validation"
     needs: release-please
     if: needs.release-please.outputs.release_created == 'true'
-    runs-on: ${{ vars.RUNNER || 'ubuntu-latest' }}
+    runs-on: ${{ vars.RUNNER || format('arc-runner-{0}', github.event.repository.name) }}
     permissions:
       contents: read
     steps:
@@ -95,7 +95,7 @@ jobs:
     name: "Production Docker Build"
     needs: [release-please, validation]
     if: needs.release-please.outputs.release_created == 'true'
-    runs-on: ${{ vars.RUNNER || 'ubuntu-latest' }}
+    runs-on: ${{ vars.RUNNER || format('arc-runner-{0}', github.event.repository.name) }}
     outputs:
       digest: ${{ steps.build.outputs.digest }}
       image-full-name: ${{ steps.build.outputs.image-full-name }}
@@ -125,7 +125,7 @@ jobs:
     name: "Release Summary"
     if: always() && needs.release-please.outputs.release_created == 'true'
     needs: [release-please, validation, production-build]
-    runs-on: ${{ vars.RUNNER || 'ubuntu-latest' }}
+    runs-on: ${{ vars.RUNNER || format('arc-runner-{0}', github.event.repository.name) }}
     steps:
       - name: Create summary
         run: |

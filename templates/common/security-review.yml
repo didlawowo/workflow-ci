@@ -16,7 +16,7 @@ on:
 
 jobs:
   security:
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.RUNNER || format('arc-runner-{0}', github.event.repository.name) }}
     steps:
       - uses: actions/checkout@v6
         with:

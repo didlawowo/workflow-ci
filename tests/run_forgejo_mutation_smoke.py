@@ -1,4 +1,6 @@
 """Real engine + UID sandbox smoke; only the network fetch is replaced locally."""
+
+import importlib
 import json
 import os
 from pathlib import Path
@@ -9,12 +11,13 @@ import tempfile
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / ".ci"))
-import forgejo_mutation as adapter
+adapter = importlib.import_module("forgejo_mutation")
 
 
 def git(root, *args):
-    return subprocess.run(["git", "-C", str(root), *args], check=True,
-                          capture_output=True, text=True).stdout.strip()
+    return subprocess.run(
+        ["git", "-C", str(root), *args], check=True, capture_output=True, text=True
+    ).stdout.strip()
 
 
 def main():
@@ -24,7 +27,7 @@ def main():
         source.mkdir()
         (source / "src").mkdir()
         (source / "tests").mkdir()
-        (source / "pyproject.toml").write_text('''[project]
+        (source / "pyproject.toml").write_text("""[project]
 name = "forgejo-central-smoke"
 version = "0.0.1"
 requires-python = ">=3.12"
@@ -36,9 +39,9 @@ package = false
 [tool.mutmut]
 source_paths = ["src/"]
 pytest_add_cli_args_test_selection = ["tests/"]
-''')
+""")
         (source / "src/calc.py").write_text("def add(a, b):\n    return a + b\n")
-        (source / "tests/test_calc.py").write_text('''import os
+        (source / "tests/test_calc.py").write_text("""import os
 from pathlib import Path
 import sys
 import pytest
@@ -62,7 +65,7 @@ def test_real_engine_and_sandbox():
         (root / "state.json").read_text()
     with pytest.raises(PermissionError):
         (root / "engine/mutation.sh").write_text("exit 0")
-''')
+""")
         subprocess.run(["uv", "lock", "--python", "3.12"], cwd=source, check=True)
         git(source, "init", "-q")
         git(source, "config", "user.email", "ci@example.test")
@@ -86,15 +89,26 @@ def test_real_engine_and_sandbox():
 
         adapter.fetch = fetch_local
         output = Path(temp) / "outputs"
-        os.environ.update(POLICY_PROVIDER="forgejo",
-                          POLICY_API_URL="https://forgejo.example/api/v1",
-                          MUTATION_SERVER_URL="https://forgejo.example",
-                          POLICY_REPOSITORY="test/consumer",
-                          POLICY_TOKEN="credential-canary", FORGEJO_TOKEN="credential-canary",
-                          GITHUB_TOKEN="credential-canary", GITHUB_OUTPUT=str(output))
-        event = {"pull_request": {"number": 1, "user": {"login": "tester"},
-                 "labels": [{"name": "complexity:medium"}], "body": "",
-                 "base": {"sha": base}, "head": {"sha": head, "repo": {"full_name": "test/consumer"}}}}
+        os.environ.update(
+            POLICY_PROVIDER="forgejo",
+            POLICY_API_URL="https://forgejo.example/api/v1",
+            MUTATION_SERVER_URL="https://forgejo.example",
+            POLICY_REPOSITORY="test/consumer",
+            POLICY_TOKEN="credential-canary",
+            FORGEJO_TOKEN="credential-canary",
+            GITHUB_TOKEN="credential-canary",
+            GITHUB_OUTPUT=str(output),
+        )
+        event = {
+            "pull_request": {
+                "number": 1,
+                "user": {"login": "tester"},
+                "labels": [{"name": "complexity:medium"}],
+                "body": "",
+                "base": {"sha": base},
+                "head": {"sha": head, "repo": {"full_name": "test/consumer"}},
+            }
+        }
         adapter.prepare(event)
         values = dict(line.split("=", 1) for line in output.read_text().splitlines())
         assert values["required"] == "true"
@@ -112,7 +126,9 @@ def test_real_engine_and_sandbox():
             assert not sandbox.exists(), "The disposable sandbox must be cleaned"
         finally:
             shutil.rmtree(sandbox, ignore_errors=True)
-    print("Forgejo adapter smoke passed with real Mutmut, UID 65532 and protected policy")
+    print(
+        "Forgejo adapter smoke passed with real Mutmut, UID 65532 and protected policy"
+    )
 
 
 if __name__ == "__main__":
