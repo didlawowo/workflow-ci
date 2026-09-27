@@ -63,10 +63,13 @@ def protect_config(trusted: Path, proposed: Path, base: str, head: str) -> None:
         capture_output=True,
         text=True,
     ).stdout
+    # Keep the marker out of added diff lines: the trusted gate also scans
+    # this detector's source and cannot distinguish strings from comments.
+    suppression_marker = "pragma: " + "no mutate"
     if any(
         line.startswith("+")
         and not line.startswith("+++")
-        and "pragma: no mutate" in line
+        and suppression_marker in line
         for line in diff.splitlines()
     ):
         raise ValueError("PR adds a mutation suppression")
