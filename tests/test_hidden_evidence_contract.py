@@ -242,9 +242,11 @@ def test_solar_routing_evaluator_is_offline_and_owns_safety_limits() -> None:
     ).read_text(encoding="utf-8")
     assert "MAX_CHARGE_W = 1600" in source
     assert "MAX_DISCHARGE_W = 1200" in source
+    assert "SOLARFLOW_MAX_W = 2400" in source
     assert "BATTERY_MIN_LEVEL = 10" in source
     assert "random.Random(seed)" in source
     assert "optimizer.optimize_charging" in source
+    assert "coordinator.coordinate_storage" in source
     assert "providers.tempo" in source
     assert "httpx" not in source
     assert "mqtt" not in source.lower()
