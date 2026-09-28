@@ -12,9 +12,12 @@ from zoneinfo import ZoneInfo
 
 MAX_CHARGE_W = 1600
 MAX_DISCHARGE_W = 1200
+SOLARFLOW_MAX_W = 2400
 MIN_POWER_W = 50
 BATTERY_MIN_LEVEL = 10
+SOLARFLOW_MIN_LEVEL = 30
 SUMMER_SOLAR_STOP_SOC = 96
+SOLARFLOW_CHARGE_STOP_SOC = 95
 GRID_CHARGE_STOP_SOC = 99
 
 
@@ -87,17 +90,53 @@ async def _decision(optimizer, when: real_datetime.datetime, **kwargs):
 
 
 def _assert_safe(decision) -> None:
+    """Valide l'objectif site, avant application des plafonds matériels."""
     assert isinstance(decision.should_charge, bool)
     assert isinstance(decision.power, int)
-    assert (
-        0
-        <= decision.power
-        <= (MAX_CHARGE_W if decision.should_charge else MAX_DISCHARGE_W)
-    )
+    assert decision.power >= 0
     assert isinstance(decision.reason, str) and decision.reason
 
 
-async def _routing_invariants(optimizer, rng: random.Random) -> None:
+def _storage_plan(
+    coordinator,
+    decision,
+    *,
+    hyper_soc: int = 50,
+    solarflow_soc: int = 60,
+):
+    hyper = coordinator.StorageUnit(
+        device_id="hyper",
+        soc=hyper_soc,
+        min_soc=BATTERY_MIN_LEVEL,
+        charge_stop_soc=GRID_CHARGE_STOP_SOC,
+        max_charge_w=MAX_CHARGE_W,
+        max_discharge_w=MAX_DISCHARGE_W,
+    )
+    solarflow = coordinator.StorageUnit(
+        device_id="solarflow",
+        soc=solarflow_soc,
+        min_soc=SOLARFLOW_MIN_LEVEL,
+        charge_stop_soc=SOLARFLOW_CHARGE_STOP_SOC,
+        max_charge_w=SOLARFLOW_MAX_W,
+        max_discharge_w=SOLARFLOW_MAX_W,
+    )
+    return coordinator.coordinate_storage(
+        decision,
+        hyper=hyper,
+        solarflow=solarflow,
+        minimum_power_w=MIN_POWER_W,
+    )
+
+
+def _assert_plan_limits(plan) -> None:
+    assert 0 <= plan.hyper_power_w <= (
+        MAX_CHARGE_W if plan.should_charge else MAX_DISCHARGE_W
+    )
+    assert 0 <= plan.solarflow_power_w <= SOLARFLOW_MAX_W
+    assert plan.total_power_w <= plan.requested_power_w
+
+
+async def _routing_invariants(optimizer, coordinator, rng: random.Random) -> None:
     summer_peak = real_datetime.datetime(
         2026, 7, 15, 14, 0, tzinfo=ZoneInfo("Europe/Paris")
     )
@@ -120,7 +159,12 @@ async def _routing_invariants(optimizer, rng: random.Random) -> None:
         )
         _assert_safe(result)
         assert result.should_charge is True
-        assert result.power == min(MAX_CHARGE_W, surplus)
+        assert result.power == surplus
+        plan = _storage_plan(coordinator, result)
+        _assert_plan_limits(plan)
+        assert plan.total_power_w == min(
+            surplus, MAX_CHARGE_W + SOLARFLOW_MAX_W
+        )
 
     for _ in range(40):
         production = rng.randint(0, 180)
@@ -140,15 +184,20 @@ async def _routing_invariants(optimizer, rng: random.Random) -> None:
         )
         _assert_safe(result)
         assert result.should_charge is False
-        assert result.power == min(MAX_DISCHARGE_W, deficit)
+        assert result.power == deficit
+        plan = _storage_plan(coordinator, result)
+        _assert_plan_limits(plan)
+        assert plan.total_power_w == min(
+            deficit, MAX_DISCHARGE_W + SOLARFLOW_MAX_W
+        )
 
 
-async def _boundary_and_fail_safe(optimizer, rng: random.Random) -> None:
+async def _boundary_and_fail_safe(optimizer, coordinator, rng: random.Random) -> None:
     summer_peak = real_datetime.datetime(
         2026, 7, 15, 14, 0, tzinfo=ZoneInfo("Europe/Paris")
     )
 
-    # Solar stop boundary: a real surplus is released once the summer SOC cap is reached.
+    # Les seuils SOC sont portés par l'objectif puis appliqués par stockage.
     result = await _decision(
         optimizer,
         summer_peak,
@@ -161,10 +210,33 @@ async def _boundary_and_fail_safe(optimizer, rng: random.Random) -> None:
         ev_is_charging=False,
     )
     _assert_safe(result)
-    assert result.should_charge is False and result.power == 0
+    assert result.should_charge is True
+    assert result.power == 1000
+    assert result.charge_stop_soc == SUMMER_SOLAR_STOP_SOC
 
-    # Battery floor: peak deficit cannot discharge at or below the configured reserve.
+    full_plan = _storage_plan(
+        coordinator,
+        result,
+        hyper_soc=SUMMER_SOLAR_STOP_SOC,
+        solarflow_soc=SOLARFLOW_CHARGE_STOP_SOC,
+    )
+    _assert_plan_limits(full_plan)
+    assert full_plan.total_power_w == 0
+
+    alternate_plan = _storage_plan(
+        coordinator,
+        result,
+        hyper_soc=SUMMER_SOLAR_STOP_SOC,
+        solarflow_soc=50,
+    )
+    _assert_plan_limits(alternate_plan)
+    assert alternate_plan.hyper_power_w == 0
+    assert alternate_plan.solarflow_power_w == 1000
+
+    # Le SOC représentatif du site ne supprime pas l'objectif : les réserves sont
+    # évaluées par stockage, afin qu'un deuxième pool encore disponible puisse agir.
     for battery in (0, BATTERY_MIN_LEVEL):
+        deficit = rng.randint(200, 1000)
         result = await _decision(
             optimizer,
             summer_peak,
@@ -172,12 +244,31 @@ async def _boundary_and_fail_safe(optimizer, rng: random.Random) -> None:
             today_color="bleu",
             battery_level=battery,
             production=0,
-            consumption=rng.randint(200, 1000),
+            consumption=deficit,
             production_limit=50,
             ev_is_charging=False,
         )
         _assert_safe(result)
-        assert result.should_charge is False and result.power == 0
+        assert result.should_charge is False and result.power == deficit
+
+        empty_plan = _storage_plan(
+            coordinator,
+            result,
+            hyper_soc=BATTERY_MIN_LEVEL,
+            solarflow_soc=SOLARFLOW_MIN_LEVEL,
+        )
+        _assert_plan_limits(empty_plan)
+        assert empty_plan.total_power_w == 0
+
+        alternate_plan = _storage_plan(
+            coordinator,
+            result,
+            hyper_soc=BATTERY_MIN_LEVEL,
+            solarflow_soc=70,
+        )
+        _assert_plan_limits(alternate_plan)
+        assert alternate_plan.hyper_power_w == 0
+        assert alternate_plan.solarflow_power_w == deficit
 
     # EV fast charge protects the network from simultaneous battery discharge.
     result = await _decision(
@@ -224,7 +315,7 @@ async def _boundary_and_fail_safe(optimizer, rng: random.Random) -> None:
     _assert_safe(result)
     assert result.power == 0
 
-    # Extreme PV is still capped by the software charge ceiling.
+    # Un objectif site extrême reste brut ; le coordinateur applique les plafonds.
     result = await _decision(
         optimizer,
         summer_peak,
@@ -237,10 +328,14 @@ async def _boundary_and_fail_safe(optimizer, rng: random.Random) -> None:
         ev_is_charging=False,
     )
     _assert_safe(result)
-    assert result.should_charge is True and result.power == MAX_CHARGE_W
+    assert result.should_charge is True and result.power == 10**9
+    plan = _storage_plan(coordinator, result)
+    _assert_plan_limits(plan)
+    assert plan.hyper_power_w == MAX_CHARGE_W
+    assert plan.solarflow_power_w == SOLARFLOW_MAX_W
 
 
-async def _temporal_invariants(optimizer, rng: random.Random) -> None:
+async def _temporal_invariants(optimizer, coordinator, rng: random.Random) -> None:
     summer_night = real_datetime.datetime(
         2026, 7, 15, 4, 0, tzinfo=ZoneInfo("Europe/Paris")
     )
@@ -266,7 +361,8 @@ async def _temporal_invariants(optimizer, rng: random.Random) -> None:
     _assert_safe(result)
     assert result.should_charge is False and result.power == 0
 
-    # Grid charging always stops at the central 99% cap.
+    # Le plafond de charge réseau est transporté avec l'objectif et appliqué
+    # ensuite à chaque stockage.
     result = await _decision(
         optimizer,
         summer_night,
@@ -282,7 +378,17 @@ async def _temporal_invariants(optimizer, rng: random.Random) -> None:
         tomorrow_weather=None,
     )
     _assert_safe(result)
-    assert result.should_charge is False and result.power == 0
+    assert result.should_charge is True
+    assert result.power == MAX_CHARGE_W
+    assert result.charge_stop_soc == GRID_CHARGE_STOP_SOC
+    plan = _storage_plan(
+        coordinator,
+        result,
+        hyper_soc=GRID_CHARGE_STOP_SOC,
+        solarflow_soc=SOLARFLOW_CHARGE_STOP_SOC,
+    )
+    _assert_plan_limits(plan)
+    assert plan.total_power_w == 0
 
     # Red winter peak uses the battery for a meaningful deficit but remains capped.
     consumption = rng.randint(300, 2600)
@@ -301,7 +407,12 @@ async def _temporal_invariants(optimizer, rng: random.Random) -> None:
     )
     _assert_safe(result)
     assert result.should_charge is False
-    assert result.power == min(MAX_DISCHARGE_W, consumption)
+    assert result.power == consumption
+    plan = _storage_plan(coordinator, result)
+    _assert_plan_limits(plan)
+    assert plan.total_power_w == min(
+        consumption, MAX_DISCHARGE_W + SOLARFLOW_MAX_W
+    )
 
 
 async def _exception_is_standby(optimizer) -> None:
@@ -339,12 +450,20 @@ def evaluate(candidate: Path, seed: int) -> list[dict[str, str]]:
     if not (candidate / "src" / "core" / "optimizer.py").is_file():
         raise RuntimeError("candidate does not look like solar-monitoring")
     optimizer = _load_optimizer(candidate)
+    coordinator = importlib.import_module("core.storage_coordinator")
     rng = random.Random(seed)
     return [
-        _check("surplus-deficit-routing", lambda: _routing_invariants(optimizer, rng)),
-        _check("safety-boundaries", lambda: _boundary_and_fail_safe(optimizer, rng)),
         _check(
-            "tempo-seasonal-boundaries", lambda: _temporal_invariants(optimizer, rng)
+            "surplus-deficit-routing",
+            lambda: _routing_invariants(optimizer, coordinator, rng),
+        ),
+        _check(
+            "safety-boundaries",
+            lambda: _boundary_and_fail_safe(optimizer, coordinator, rng),
+        ),
+        _check(
+            "tempo-seasonal-boundaries",
+            lambda: _temporal_invariants(optimizer, coordinator, rng),
         ),
         _check("exception-fails-safe", lambda: _exception_is_standby(optimizer)),
     ]
