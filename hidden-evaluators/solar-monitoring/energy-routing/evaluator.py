@@ -34,6 +34,13 @@ def _load_optimizer(candidate: Path):
     config.settings = SimpleNamespace(battery_min_level=BATTERY_MIN_LEVEL)
     sys.modules["core.config"] = config
 
+    # Importer models.site_energy sans exécuter models/__init__.py du
+    # consommateur : cet __init__ agrège des modèles SQLModel sans rapport avec
+    # l'optimizer et faisait dépendre l'oracle caché de sqlmodel.
+    models = types.ModuleType("models")
+    models.__path__ = [str(candidate / "src" / "models")]
+    sys.modules["models"] = models
+
     providers = types.ModuleType("providers")
     providers.__path__ = [str(candidate / "src" / "providers")]
     sys.modules["providers"] = providers
