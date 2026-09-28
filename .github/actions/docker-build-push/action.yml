@@ -50,6 +50,16 @@ inputs:
       Default 'false' keeps the current behaviour (TLS registry, docker login).
     required: false
     default: "false"
+  registry-insecure-tls:
+    description: |
+      Set to 'true' for an HTTPS registry whose certificate cannot be verified
+      by the runner or remote BuildKit (for example an internal Traefik cert).
+      This keeps HTTPS, skips docker/login-action, writes registry credentials
+      directly to Docker config, and uses registry.insecure=true for native
+      remote BuildKit image export. Registry cache is disabled in this mode so
+      cache probing/export cannot fail an otherwise valid image publication.
+    required: false
+    default: "false"
   platforms:
     description: "Target platforms for build"
     required: false
@@ -366,37 +376,35 @@ runs:
     # builds too. Logging in never pushes anything — push is gated by the build
     # step's `push:` input below.
     - name: Login to Docker Registry
-      if: inputs.registry-username != '' && inputs.registry-password != '' && inputs.registry-plain-http != 'true'
+      if: inputs.registry-username != '' && inputs.registry-password != '' && inputs.registry-plain-http != 'true' && inputs.registry-insecure-tls != 'true'
       uses: docker/login-action@v4
       with:
         registry: ${{ inputs.registry }}
         username: ${{ inputs.registry-username }}
         password: ${{ inputs.registry-password }}
 
-    # Plain-HTTP registry: `docker login` validates credentials through the
-    # Docker daemon, which insists on TLS unless the host is in its
-    # insecure-registries list. Buildx (both drivers), Trivy and Cosign only
-    # need the auth entry in ~/.docker/config.json, so write it directly and
-    # merge with whatever docker/login-action (Docker Hub) already stored.
-    - name: Store registry credentials (plain HTTP, no daemon login)
-      if: inputs.registry-username != '' && inputs.registry-password != '' && inputs.registry-plain-http == 'true'
+    # Insecure registries (plain HTTP or HTTPS with an untrusted certificate):
+    # docker/login-action validates through the Docker daemon and would reject
+    # either case. Buildx only needs the auth entry in ~/.docker/config.json.
+    - name: Store registry credentials (insecure registry, no daemon login)
+      if: inputs.registry-username != '' && inputs.registry-password != '' && (inputs.registry-plain-http == 'true' || inputs.registry-insecure-tls == 'true')
       shell: bash
       env:
-        PLAIN_HTTP_REGISTRY: ${{ inputs.registry }}
-        PLAIN_HTTP_USERNAME: ${{ inputs.registry-username }}
-        PLAIN_HTTP_PASSWORD: ${{ inputs.registry-password }}
+        INSECURE_REGISTRY: ${{ inputs.registry }}
+        INSECURE_USERNAME: ${{ inputs.registry-username }}
+        INSECURE_PASSWORD: ${{ inputs.registry-password }}
       run: |
         set -euo pipefail
         CONFIG_DIR="${DOCKER_CONFIG:-$HOME/.docker}"
         CONFIG="${CONFIG_DIR}/config.json"
         mkdir -p "$CONFIG_DIR"
         [ -s "$CONFIG" ] || echo '{}' > "$CONFIG"
-        AUTH="$(printf '%s:%s' "$PLAIN_HTTP_USERNAME" "$PLAIN_HTTP_PASSWORD" | base64 | tr -d '\n')"
+        AUTH="$(printf '%s:%s' "$INSECURE_USERNAME" "$INSECURE_PASSWORD" | base64 | tr -d '\n')"
         TMP="$(mktemp)"
-        jq --arg reg "$PLAIN_HTTP_REGISTRY" --arg auth "$AUTH" '.auths[$reg] = {auth: $auth}' "$CONFIG" > "$TMP"
+        jq --arg reg "$INSECURE_REGISTRY" --arg auth "$AUTH" '.auths[$reg] = {auth: $auth}' "$CONFIG" > "$TMP"
         mv "$TMP" "$CONFIG"
         chmod 600 "$CONFIG"
-        echo "Stored credentials for ${PLAIN_HTTP_REGISTRY} in ${CONFIG} (plain HTTP, daemon login skipped)"
+        echo "Stored credentials for ${INSECURE_REGISTRY} in ${CONFIG} (daemon login skipped)"
 
     - name: Prepare image metadata
       id: meta
@@ -474,7 +482,7 @@ runs:
         # a ClusterIP Service without a 443 port returns. Result: "Head https://
         # <svc>/v2/…: dial tcp <svc-ip>:443: no route to host" (solar-monitoring
         # v0.34.2, 2026-09-02). buildx folds `push: true` into this image output.
-        outputs: ${{ inputs.push == 'true' && inputs.registry-plain-http == 'true' && steps.execution-mode.outputs.use-native == 'true' && 'type=image,push=true,registry.insecure=true' || '' }}
+        outputs: ${{ inputs.push == 'true' && (inputs.registry-plain-http == 'true' || inputs.registry-insecure-tls == 'true') && steps.execution-mode.outputs.use-native == 'true' && 'type=image,push=true,registry.insecure=true' || '' }}
         tags: ${{ steps.meta.outputs.tags }}
         labels: ${{ inputs.labels }}
         build-args: ${{ inputs.build-args }}
@@ -488,8 +496,8 @@ runs:
         # ignore-error=true = a cache EXPORT failure must NOT fail the build
         # (otherwise a registry that rejects the cache manifest would break every
         # release). Worst case = no cache, never a red build.
-        cache-from: type=registry,ref=${{ inputs.image-name }}:buildcache-${{ inputs.cache-scope }}
-        cache-to: ${{ inputs.push == 'true' && format('type=registry,mode=max,image-manifest=true,oci-mediatypes=true,ignore-error=true,ref={0}:buildcache-{1}', inputs.image-name, inputs.cache-scope) || '' }}
+        cache-from: ${{ inputs.registry-insecure-tls != 'true' && format('type=registry,ref={0}:buildcache-{1}', inputs.image-name, inputs.cache-scope) || '' }}
+        cache-to: ${{ inputs.push == 'true' && inputs.registry-insecure-tls != 'true' && format('type=registry,mode=max,image-manifest=true,oci-mediatypes=true,ignore-error=true,ref={0}:buildcache-{1}', inputs.image-name, inputs.cache-scope) || '' }}
         sbom: ${{ inputs.sbom }}
         provenance: ${{ inputs.provenance == 'true' && 'mode=max' || 'false' }}
 
@@ -505,12 +513,12 @@ runs:
         platforms: ${{ inputs.push == 'true' && inputs.platforms || '' }}
         push: ${{ inputs.push }}
         load: ${{ inputs.push != 'true' }}
-        outputs: ${{ inputs.push == 'true' && inputs.registry-plain-http == 'true' && 'type=image,push=true,registry.insecure=true' || '' }}
+        outputs: ${{ inputs.push == 'true' && (inputs.registry-plain-http == 'true' || inputs.registry-insecure-tls == 'true') && 'type=image,push=true,registry.insecure=true' || '' }}
         tags: ${{ steps.meta.outputs.tags }}
         labels: ${{ inputs.labels }}
         build-args: ${{ inputs.build-args }}
-        cache-from: type=registry,ref=${{ inputs.image-name }}:buildcache-${{ inputs.cache-scope }}
-        cache-to: ${{ inputs.push == 'true' && format('type=registry,mode=max,image-manifest=true,oci-mediatypes=true,ignore-error=true,ref={0}:buildcache-{1}', inputs.image-name, inputs.cache-scope) || '' }}
+        cache-from: ${{ inputs.registry-insecure-tls != 'true' && format('type=registry,ref={0}:buildcache-{1}', inputs.image-name, inputs.cache-scope) || '' }}
+        cache-to: ${{ inputs.push == 'true' && inputs.registry-insecure-tls != 'true' && format('type=registry,mode=max,image-manifest=true,oci-mediatypes=true,ignore-error=true,ref={0}:buildcache-{1}', inputs.image-name, inputs.cache-scope) || '' }}
         sbom: ${{ inputs.sbom }}
         provenance: ${{ inputs.provenance == 'true' && 'mode=max' || 'false' }}
 
@@ -603,7 +611,7 @@ runs:
       if: inputs.scan == 'true'
       shell: bash
       env:
-        TRIVY_INSECURE: ${{ inputs.registry-plain-http == 'true' && 'true' || 'false' }}
+        TRIVY_INSECURE: ${{ (inputs.registry-plain-http == 'true' || inputs.registry-insecure-tls == 'true') && 'true' || 'false' }}
         TRIVY_SKIP_VERSION_CHECK: "true"
         TRIVY_CACHE_BACKEND: "memory"
         TRIVY_SKIP_DB_UPDATE: ${{ steps.trivy-cache.outputs.shared-db == 'true' && 'true' || 'false' }}
