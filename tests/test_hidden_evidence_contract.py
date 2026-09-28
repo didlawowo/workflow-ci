@@ -179,9 +179,57 @@ def test_solar_routing_evaluator_is_registered_for_energy_paths() -> None:
     assert spec["entrypoint"] == (
         "hidden-evaluators/solar-monitoring/energy-routing/evaluator.py"
     )
-    assert "src/core/**" in spec["paths"]
-    assert "src/controllers/**" in spec["paths"]
+    assert "src/core/optimizer.py" in spec["paths"]
+    assert "src/core/storage_coordinator.py" in spec["paths"]
+    assert "src/models/site_energy.py" in spec["paths"]
     assert "src/zendure.py" in spec["paths"]
+    assert "src/core/db.py" not in spec["paths"]
+    assert "src/controllers/**" not in spec["paths"]
+
+
+def test_solar_routing_evaluator_bypasses_unrelated_models_package_init(
+    tmp_path: Path,
+) -> None:
+    import importlib.util
+
+    candidate = tmp_path / "candidate"
+    (candidate / "src" / "core").mkdir(parents=True)
+    (candidate / "src" / "models").mkdir(parents=True)
+    (candidate / "src" / "providers").mkdir(parents=True)
+    (candidate / "src" / "core" / "__init__.py").write_text("", encoding="utf-8")
+    (candidate / "src" / "models" / "__init__.py").write_text(
+        "import definitely_missing_sqlmodel_dependency\n",
+        encoding="utf-8",
+    )
+    (candidate / "src" / "models" / "site_energy.py").write_text(
+        "class EnergyObjective:\n"
+        "    def __init__(self, should_charge, power, reason, charge_stop_soc=None):\n"
+        "        self.should_charge = should_charge\n"
+        "        self.power = power\n"
+        "        self.reason = reason\n"
+        "        self.charge_stop_soc = charge_stop_soc\n",
+        encoding="utf-8",
+    )
+    (candidate / "src" / "core" / "optimizer.py").write_text(
+        "from models.site_energy import EnergyObjective\n"
+        "IMPORTED = EnergyObjective(False, 0, 'ok')\n",
+        encoding="utf-8",
+    )
+
+    evaluator_path = (
+        ROOT
+        / "hidden-evaluators"
+        / "solar-monitoring"
+        / "energy-routing"
+        / "evaluator.py"
+    )
+    spec = importlib.util.spec_from_file_location("solar_hidden_evaluator", evaluator_path)
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    optimizer = module._load_optimizer(candidate)
+    assert optimizer.IMPORTED.reason == "ok"
 
 
 def test_solar_routing_evaluator_is_offline_and_owns_safety_limits() -> None:
