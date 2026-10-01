@@ -61,7 +61,7 @@ inputs:
   scan:
     description: "Run Trivy security scan"
     required: false
-    default: "true"
+    default: "false"
   upload-sarif:
     description: "Publish validated Trivy SARIF to GitHub Code Scanning (disabled by default)"
     required: false
