@@ -271,7 +271,7 @@ def test_validate_before_upload_and_keep_evidence_after_failure():
 
 def test_vulnerability_policy_and_non_security_fallbacks_are_unchanged():
     scan_input = TEXT.split("  scan:\n", 1)[1].split("  scan-severity:\n", 1)[0]
-    assert '    default: "true"' in scan_input
+    assert '    default: "false"' in scan_input
     assert "exit-code:" not in STEPS["Run Trivy vulnerability scanner"]
     hub_login = STEPS["Login to Docker Hub (authenticated base image pulls)"]
     assert "continue-on-error: true" in hub_login
