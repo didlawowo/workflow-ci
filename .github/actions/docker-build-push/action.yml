@@ -619,7 +619,8 @@ runs:
           local log_file="$1"
           rm -f -- "$SARIF_FILE" "$log_file"
           set +e
-          timeout 15m trivy image \
+          timeout 25m trivy image \
+            --timeout 20m \
             --cache-dir "$TRIVY_CACHE_DIR" \
             --scanners vuln \
             --format sarif \
@@ -636,8 +637,9 @@ runs:
 
         if run_scan "$FIRST_LOG"; then
           exit 0
+        else
+          first_rc=$?
         fi
-        first_rc=$?
 
         if ! grep -Fq "unexpected EOF" "$FIRST_LOG"; then
           echo "::error title=Trivy scan failed::Non-transient Trivy failure; retry skipped."
@@ -649,8 +651,9 @@ runs:
 
         if run_scan "$RETRY_LOG"; then
           exit 0
+        else
+          retry_rc=$?
         fi
-        retry_rc=$?
         echo "::error title=Trivy retry failed::The single bounded retry also failed."
         exit "$retry_rc"
 
