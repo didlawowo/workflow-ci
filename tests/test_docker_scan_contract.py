@@ -426,7 +426,8 @@ def test_trivy_image_scan_uses_shared_db_with_memory_scan_cache():
     scan = STEPS["Run Trivy vulnerability scanner"]
     cache = STEPS["Resolve Trivy cache"]
 
-    assert "timeout 15m trivy image" in scan
+    assert "timeout 25m trivy image" in scan
+    assert "--timeout 20m" in scan
     assert "--scanners vuln" in scan
     assert 'TRIVY_SKIP_VERSION_CHECK: "true"' in scan
     assert 'TRIVY_CACHE_BACKEND: "memory"' in scan
@@ -490,6 +491,9 @@ def test_trivy_image_retry_is_only_for_unexpected_eof_and_bounded():
     assert "sleep 2" in scan
     assert scan.count('if run_scan "') == 2
     assert "The single bounded retry also failed." in scan
+    # Capture the real exit status: `first_rc=$?` after `fi` would always be 0.
+    assert "else\n          first_rc=$?" in scan
+    assert "else\n          retry_rc=$?" in scan
 
 
 def test_filesystem_scan_java_db_and_artifact_contract():
