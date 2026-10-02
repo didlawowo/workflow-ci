@@ -192,7 +192,11 @@ def test_trusted_quality_enforces_ruff_and_sonarqube_quality_gate():
         root / ".github" / "actions" / "python-quality-security" / "action.yml"
     ).read_text()
     assert "Run Ruff linting" in python_quality
-    assert "uv run ruff check ." in python_quality\n    assert "uv run ruff format --check ." in python_quality\n    assert "uvx --from ruff==" not in python_quality
+    assert "uv run ruff --version" in python_quality
+    assert "RUFF=(uv run ruff)" in python_quality
+    assert "RUFF=(uvx --from ruff==0.16.8 ruff)" in python_quality
+    assert '"${RUFF[@]}" check . --output-format=github' in python_quality
+    assert '"${RUFF[@]}" format --check .' in python_quality
 
     assert "sonar-enabled:" not in workflow
     assert "sonar-project-key:" not in workflow
