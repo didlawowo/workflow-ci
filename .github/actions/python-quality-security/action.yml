@@ -60,7 +60,7 @@ runs:
       shell: bash
       working-directory: ${{ inputs.working-directory }}
       run: |
-        if uvx --from ruff==0.16.8 ruff check . --output-format=github; then
+        if uv run ruff check . --output-format=github; then
           echo "status=passed" >> "$GITHUB_OUTPUT"
         else
           echo "status=failed" >> "$GITHUB_OUTPUT"
@@ -72,7 +72,7 @@ runs:
       shell: bash
       working-directory: ${{ inputs.working-directory }}
       run: |
-        if uvx --from ruff==0.16.8 ruff format --check .; then
+        if uv run ruff format --check .; then
           echo "status=passed" >> "$GITHUB_OUTPUT"
         else
           echo "status=failed" >> "$GITHUB_OUTPUT"
