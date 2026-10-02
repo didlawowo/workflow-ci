@@ -20,7 +20,7 @@ concurrency:
   cancel-in-progress: true
 jobs:
   python-central-runner:
-    runs-on: ${{ vars.RUNNER || format('arc-runner-{0}', github.event.repository.name) }}
+    runs-on: ${{ vars.LIGHT_RUNNER || vars.RUNNER || format('arc-runner-{0}', github.event.repository.name) }}
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
