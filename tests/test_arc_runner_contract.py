@@ -26,7 +26,6 @@ def test_non_docker_selftests_prefer_light_runner_with_safe_fallback():
         ".github/workflows/consumer-integration-selftest.yml",
         ".github/workflows/mutation-delegation-selftest.yml",
         ".github/workflows/quality-report-selftest.yml",
-        ".github/workflows/bench-uv-cache.yml",
     )
     for workflow in workflows:
         source = (ROOT / workflow).read_text()
@@ -36,3 +35,7 @@ def test_non_docker_selftests_prefer_light_runner_with_safe_fallback():
     release = (ROOT / ".github/workflows/release-main.yml").read_text()
     assert "runs-on: arc-runner-workflow-ci" in release
     assert "LIGHT_RUNNER" not in release
+
+    bench = (ROOT / ".github/workflows/bench-uv-cache.yml").read_text()
+    assert "runs-on: arc-runner-workflow-ci" in bench
+    assert "LIGHT_RUNNER" not in bench
