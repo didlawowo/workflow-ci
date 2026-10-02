@@ -26,6 +26,13 @@ Le bump est calculé depuis le type de commit :
 Pas de commits releasables depuis le dernier tag → le workflow log "Nothing
 to release" et exit 0. C'est normal, ce n'est pas une erreur.
 
+Le reusable applique explicitement cette règle **avant** d'appeler
+`git-cliff --bumped-version` lorsque la configuration centrale est utilisée.
+C'est volontaire : certaines versions de git-cliff peuvent proposer un patch
+même lorsque tous les commits depuis le dernier tag sont `test:`, `docs:`,
+`ci:`, `chore:` ou `style:`. Un `cliff.toml` fourni par le dépôt appelant
+conserve sa propre politique et n'est pas filtré par ce garde-fou.
+
 ## Forcer / skipper
 
 - **Forcer major** : `feat!: ...` ou ajouter `BREAKING CHANGE: explication`
