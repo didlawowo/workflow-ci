@@ -60,7 +60,12 @@ runs:
       shell: bash
       working-directory: ${{ inputs.working-directory }}
       run: |
-        if uv run ruff check . --output-format=github; then
+        if uv run ruff --version >/dev/null 2>&1; then
+          RUFF=(uv run ruff)
+        else
+          RUFF=(uvx --from ruff==0.16.8 ruff)
+        fi
+        if "${RUFF[@]}" check . --output-format=github; then
           echo "status=passed" >> "$GITHUB_OUTPUT"
         else
           echo "status=failed" >> "$GITHUB_OUTPUT"
@@ -72,7 +77,12 @@ runs:
       shell: bash
       working-directory: ${{ inputs.working-directory }}
       run: |
-        if uv run ruff format --check .; then
+        if uv run ruff --version >/dev/null 2>&1; then
+          RUFF=(uv run ruff)
+        else
+          RUFF=(uvx --from ruff==0.16.8 ruff)
+        fi
+        if "${RUFF[@]}" format --check .; then
           echo "status=passed" >> "$GITHUB_OUTPUT"
         else
           echo "status=failed" >> "$GITHUB_OUTPUT"
