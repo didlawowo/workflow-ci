@@ -19,3 +19,23 @@ def test_arc_runner_fast_path_tools_have_portable_fallbacks():
     assert "Detect preinstalled Cosign" in docker
     assert "sigstore/cosign-installer@v3" in docker
     assert "trufflehog.sh" in python_quality
+
+
+def test_non_docker_selftests_prefer_light_runner_with_safe_fallback():
+    workflows = (
+        ".github/workflows/consumer-integration-selftest.yml",
+        ".github/workflows/mutation-delegation-selftest.yml",
+        ".github/workflows/quality-report-selftest.yml",
+    )
+    for workflow in workflows:
+        source = (ROOT / workflow).read_text()
+        assert "vars.LIGHT_RUNNER" in source
+        assert "arc-runner-workflow-ci" in source or "vars.RUNNER" in source
+
+    release = (ROOT / ".github/workflows/release-main.yml").read_text()
+    assert "runs-on: arc-runner-workflow-ci" in release
+    assert "LIGHT_RUNNER" not in release
+
+    bench = (ROOT / ".github/workflows/bench-uv-cache.yml").read_text()
+    assert "runs-on: arc-runner-workflow-ci" in bench
+    assert "LIGHT_RUNNER" not in bench
