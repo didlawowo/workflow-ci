@@ -19,7 +19,7 @@ jobs:
     uses: ./.github/workflows/quality-evidence.yml
     with:
       repo-type: python
-      runner: ${{ vars.RUNNER || format('arc-runner-{0}', github.event.repository.name) }}
+      runner: ${{ vars.LIGHT_RUNNER || vars.RUNNER || format('arc-runner-{0}', github.event.repository.name) }}
       workflow-ci-ref: ${{ github.event.pull_request.head.sha }}
       working-directory: tests/fixtures/consumers/python
       python-source-path: src
@@ -41,7 +41,7 @@ jobs:
     uses: ./.github/workflows/quality-evidence.yml
     with:
       repo-type: go
-      runner: ${{ vars.RUNNER || format('arc-runner-{0}', github.event.repository.name) }}
+      runner: ${{ vars.LIGHT_RUNNER || vars.RUNNER || format('arc-runner-{0}', github.event.repository.name) }}
       workflow-ci-ref: ${{ github.event.pull_request.head.sha }}
       working-directory: tests/fixtures/consumers/go
       comment: false
@@ -55,7 +55,7 @@ jobs:
     uses: ./.github/workflows/quality-evidence.yml
     with:
       repo-type: node
-      runner: ${{ vars.RUNNER || format('arc-runner-{0}', github.event.repository.name) }}
+      runner: ${{ vars.LIGHT_RUNNER || vars.RUNNER || format('arc-runner-{0}', github.event.repository.name) }}
       workflow-ci-ref: ${{ github.event.pull_request.head.sha }}
       working-directory: tests/fixtures/consumers/node
       package-manager: npm
