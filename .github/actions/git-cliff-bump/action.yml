@@ -53,10 +53,12 @@ runs:
         set -euo pipefail
         if [ -n "${{ inputs.config }}" ] && [ -f "${{ inputs.config }}" ]; then
           echo "path=${{ inputs.config }}" >> "$GITHUB_OUTPUT"
+          echo "bundled=false" >> "$GITHUB_OUTPUT"
         else
           # Pull the bundled default from the workflow-ci repo where this action lives.
           # GITHUB_ACTION_PATH points to the checked-out action directory.
           echo "path=${GITHUB_ACTION_PATH}/../../../templates/common/cliff.toml" >> "$GITHUB_OUTPUT"
+          echo "bundled=true" >> "$GITHUB_OUTPUT"
         fi
 
     - name: Configure bounded git-cliff download retries
@@ -75,7 +77,41 @@ runs:
           'max-time = 60' > "$curl_home/.curlrc"
         printf 'curl-home=%s\n' "$curl_home" >> "$GITHUB_OUTPUT"
 
+    - name: Detect releasable conventional commits
+      id: release-scope
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        # A caller-provided cliff config may intentionally define a different
+        # release policy. In that case, leave the decision entirely to git-cliff.
+        if [ "${{ steps.cfg.outputs.bundled }}" != "true" ]; then
+          echo "releasable=true" >> "$GITHUB_OUTPUT"
+          echo "::notice::Custom cliff config: deferring release policy to git-cliff."
+          exit 0
+        fi
+
+        last="$(git describe --tags --abbrev=0 2>/dev/null || true)"
+        if [ -n "$last" ]; then
+          range="$last..HEAD"
+        else
+          range="HEAD"
+        fi
+
+        git log --format='%B%x1e' "$range" > /tmp/release-commit-messages.txt
+        releasable="$(
+          python3 "${GITHUB_ACTION_PATH}/../../scripts/release_commit_gate.py"             < /tmp/release-commit-messages.txt
+        )"
+        echo "releasable=$releasable" >> "$GITHUB_OUTPUT"
+
+        if [ "$releasable" = "true" ]; then
+          echo "::notice::At least one commit since ${last:-repository start} is releasable."
+        else
+          echo "::notice::Only non-releasing commits since ${last:-repository start}; skip semantic release."
+        fi
+
     - name: Compute next version
+      if: steps.release-scope.outputs.releasable == 'true'
       uses: orhun/git-cliff-action@v4
       with:
         config: ${{ steps.cfg.outputs.path }}
@@ -89,7 +125,11 @@ runs:
       shell: bash
       run: |
         set -euo pipefail
-        NEXT="$(cat /tmp/next-version.txt | tr -d '[:space:]')"
+        if [ -f /tmp/next-version.txt ]; then
+          NEXT="$(tr -d '[:space:]' < /tmp/next-version.txt)"
+        else
+          NEXT=""
+        fi
         LAST="$(git describe --tags --abbrev=0 2>/dev/null || echo '')"
         echo "next=$NEXT last=$LAST"
         if [ -z "$NEXT" ] || [ "$NEXT" = "$LAST" ]; then
