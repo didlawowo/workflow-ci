@@ -187,6 +187,10 @@ jobs:
           upload-coverage: "false"
           coverage-threshold: ${{ steps.threshold.outputs.value }}
 
+      # Ruff/MyPy execute with the consumer project's locked tools/configuration.
+      # They are project-quality checks, not an independent policy oracle. The
+      # trusted verdict is the protected orchestration plus central mutation/
+      # hidden evidence and the independently executed security checks below.
       - name: Verify Python quality and security
         id: python-quality
         if: inputs.repo-type == 'python'
