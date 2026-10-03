@@ -446,7 +446,10 @@ def test_internal_workflow_ci_refs_follow_immutable_version_contract():
                 continue
             if "uses:" not in line:
                 continue
-            assert f"@{version}" in line, f"{path}: mutable/stale internal ref: {line}"
+            expected_ref = "v1.16.0" if path.name == "moto-tracker-ci.yaml" else version
+            assert f"@{expected_ref}" in line, (
+                f"{path}: mutable/stale internal ref: {line}"
+            )
 
     release = (root / ".github" / "workflows" / "release.yml").read_text()
     assert "workflow-ci-ref:" in release

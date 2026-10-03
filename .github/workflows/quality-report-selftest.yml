@@ -3,6 +3,7 @@ name: Quality reporter self-test
 on:
   pull_request:
     paths:
+      - ".forgejo/workflows/**"
       - ".github/actions/docker-build-push/**"
       - ".github/workflows/quality-report-selftest.yml"
       - ".github/workflows/ci.yml"

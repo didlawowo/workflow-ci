@@ -172,3 +172,11 @@ The manual `bench-uv-cache` workflow remains a comparison of cache strategies,
 including GitHub archives; it does not define the production cache policy.
 Consumers must adopt the published workflow-ci tag to receive this behavior.
 Reverting to the preceding tag restores the previous cache policy.
+
+## Forgejo reusable workflows (V1)
+
+Forgejo 15+ consumers can call the workflows in `.forgejo/workflows/` from
+this public GitHub repository using a fully qualified URL. The workflow jobs
+run on the consumer's internal Forgejo runner, not on GitHub-hosted runners.
+See [Forgejo V1 setup](docs/forgejo-ci-v1.md) and the
+[moto-tracker example](templates/forgejo/moto-tracker-ci.yaml).

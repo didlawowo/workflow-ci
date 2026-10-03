@@ -1,0 +1,37 @@
+# Published Forgejo V1 pin; adopt a newer release to receive the NFS-only policy.
+# Copy to moto-tracker/.forgejo/workflows/ci.yaml.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ forgejo.ref }}
+  cancel-in-progress: true
+
+jobs:
+  taskfiles:
+    uses: https://github.com/didlawowo/workflow-ci/.forgejo/workflows/taskfiles.yaml@v1.16.0
+    with:
+      runner: ubuntu-latest
+
+  backend-tests:
+    needs: [taskfiles]
+    uses: https://github.com/didlawowo/workflow-ci/.forgejo/workflows/python-postgres.yaml@v1.16.0
+    with:
+      runner: ubuntu-latest
+      working-directory: backend
+      python-version: '3.13'
+
+  pwa-build:
+    needs: [taskfiles]
+    uses: https://github.com/didlawowo/workflow-ci/.forgejo/workflows/node-build.yaml@v1.16.0
+    with:
+      runner: ubuntu-latest
+      working-directory: pwa
+      node-version: '22'
+      build-test-script: test:build

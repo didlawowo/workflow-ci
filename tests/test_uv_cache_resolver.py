@@ -17,6 +17,7 @@ def run_validator(
     failure=False,
     variable="UV_CACHE_DIR",
     blocked=False,
+    command=None,
 ):
     cache = tmp_path / "NFS cache"
     if blocked:
@@ -42,7 +43,8 @@ def run_validator(
             "-euo",
             "pipefail",
             "-c",
-            f'source "{ROOT}/.ci/nfs-cache.sh"; require_nfs_cache {variable}; printf "%s" "${variable}"',
+            command
+            or f'source "{ROOT}/.ci/nfs-cache.sh"; require_nfs_cache {variable}; printf "%s" "${variable}"',
         ],
         env=env,
         text=True,
