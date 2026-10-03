@@ -83,6 +83,18 @@ runs:
       run: |
         set -euo pipefail
 
+        # Keep release history scoped to the tag family requested by the
+        # caller. Without --match, an unrelated chart-v*/v* tag can truncate the
+        # commit range used by the release gate.
+        PREFIX="${{ inputs.tag-prefix }}"
+        if [[ -n "$PREFIX" ]]; then
+          TAG_PATTERN="${PREFIX}[0-9]*"
+        else
+          TAG_PATTERN="[0-9]*"
+        fi
+        last="$(git describe --tags --abbrev=0 --match "$TAG_PATTERN" 2>/dev/null || true)"
+        echo "last-tag=$last" >> "$GITHUB_OUTPUT"
+
         # A caller-provided cliff config may intentionally define a different
         # release policy. In that case, leave the decision entirely to git-cliff.
         if [ "${{ steps.cfg.outputs.bundled }}" != "true" ]; then
@@ -90,8 +102,6 @@ runs:
           echo "::notice::Custom cliff config: deferring release policy to git-cliff."
           exit 0
         fi
-
-        last="$(git describe --tags --abbrev=0 2>/dev/null || true)"
         if [ -n "$last" ]; then
           range="$last..HEAD"
         else
@@ -130,7 +140,7 @@ runs:
         else
           NEXT=""
         fi
-        LAST="$(git describe --tags --abbrev=0 2>/dev/null || echo '')"
+        LAST="${{ steps.release-scope.outputs.last-tag }}"
         echo "next=$NEXT last=$LAST"
         if [ -z "$NEXT" ] || [ "$NEXT" = "$LAST" ]; then
           echo "released=false" >> "$GITHUB_OUTPUT"
