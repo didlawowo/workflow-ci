@@ -1,0 +1,61 @@
+name: Python tests with PostgreSQL
+
+on:
+  workflow_call:
+    inputs:
+      runner:
+        description: Label of an internal Forgejo runner
+        required: true
+        type: string
+      working-directory:
+        type: string
+        default: .
+      python-version:
+        type: string
+        default: '3.13'
+      requirements-file:
+        type: string
+        default: requirements-dev.txt
+
+jobs:
+  tests:
+    name: Test API
+    runs-on: ${{ inputs.runner }}
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: ci_test
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        options: >-
+          --health-cmd "pg_isready -U postgres -d ci_test"
+          --health-interval 2s
+          --health-timeout 3s
+          --health-retries 20
+    steps:
+      - uses: https://data.forgejo.org/actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Install uv
+        run: curl -fsSL https://astral.sh/uv/install.sh | env UV_INSTALL_DIR=/usr/local/bin sh
+
+      - name: Install dependencies
+        working-directory: ${{ inputs.working-directory }}
+        env:
+          PYTHON_VERSION: ${{ inputs.python-version }}
+          REQUIREMENTS_FILE: ${{ inputs.requirements-file }}
+        run: |
+          uv venv -p "$PYTHON_VERSION" .venv
+          uv pip install -r "$REQUIREMENTS_FILE"
+
+      - name: Run tests with coverage
+        working-directory: ${{ inputs.working-directory }}
+        env:
+          PYTHONPATH: .
+          DATABASE_URL: ''
+          DB_HOST: ''
+          TEST_DATABASE_URL: postgresql://postgres:postgres@postgres:5432/ci_test
+        run: .venv/bin/pytest -q -p no:cacheprovider --cov=. --cov-report=term

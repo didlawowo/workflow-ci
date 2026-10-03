@@ -147,3 +147,11 @@ actions to the exact commit of the tagged workflow and prevents stale cross-vers
 | --- | --- |
 | `SONAR_PROJECT_KEY` | Exact SonarQube project key imported for the repository |
 | `SONAR_ENABLED` | `true` to execute the SonarQube gate; otherwise Sonar is skipped |
+
+## Forgejo reusable workflows (V1)
+
+Forgejo 15+ consumers can call the workflows in `.forgejo/workflows/` from
+this public GitHub repository using a fully qualified URL. The workflow jobs
+run on the consumer's internal Forgejo runner, not on GitHub-hosted runners.
+See [Forgejo V1 setup](docs/forgejo-ci-v1.md) and the
+[moto-tracker example](templates/forgejo/moto-tracker-ci.yaml).
