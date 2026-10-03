@@ -21,7 +21,7 @@ def test_arc_runner_fast_path_tools_have_portable_fallbacks():
     assert "trufflehog.sh" in python_quality
 
 
-def test_non_docker_selftests_prefer_light_runner_with_safe_fallback():
+def test_language_cache_selftests_require_standard_runner():
     workflows = (
         ".github/workflows/consumer-integration-selftest.yml",
         ".github/workflows/mutation-delegation-selftest.yml",
@@ -29,7 +29,7 @@ def test_non_docker_selftests_prefer_light_runner_with_safe_fallback():
     )
     for workflow in workflows:
         source = (ROOT / workflow).read_text()
-        assert "vars.LIGHT_RUNNER" in source
+        assert "vars.LIGHT_RUNNER" not in source
         assert "arc-runner-workflow-ci" in source or "vars.RUNNER" in source
 
     release = (ROOT / ".github/workflows/release-main.yml").read_text()

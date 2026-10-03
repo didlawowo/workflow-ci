@@ -157,6 +157,9 @@ read/write probe rejects missing, local or unavailable caches before execution;
 there is no runner-local fallback. A later NFS outage still fails the language
 command and requires infrastructure recovery/retry.
 
+Language-cache self-tests use the standard runner; the light pool does not
+provide the required NFS cache environment.
+
 Go module and build caches are reused directly, without GitHub cache archives.
 The `setup-go-env` compatibility output `cache-hit` is always `false` because no
 archive restore occurs; `cache-dependency-path` remains accepted for callers.

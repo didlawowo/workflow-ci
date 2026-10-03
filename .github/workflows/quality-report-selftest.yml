@@ -30,7 +30,7 @@ on:
 
 jobs:
   test:
-    runs-on: ${{ vars.LIGHT_RUNNER || vars.RUNNER || format('arc-runner-{0}', github.event.repository.name) }}
+    runs-on: ${{ vars.RUNNER || format('arc-runner-{0}', github.event.repository.name) }}
     permissions:
       contents: read
       pull-requests: write
@@ -73,7 +73,7 @@ jobs:
 
   mutation:
     if: github.event_name == 'pull_request'
-    runs-on: ${{ vars.LIGHT_RUNNER || vars.RUNNER || format('arc-runner-{0}', github.event.repository.name) }}
+    runs-on: ${{ vars.RUNNER || format('arc-runner-{0}', github.event.repository.name) }}
     permissions:
       contents: read
     steps:
