@@ -61,7 +61,7 @@ def assert_no_probes(cache):
     assert list(cache.glob(".workflow-ci-write-test.*")) == []
 
 
-def test_writable_requested_cache_is_preserved_with_spaces(tmp_path):
+def test_writable_requested_cache_is_ignored_for_release(tmp_path):
     requested = tmp_path / "requested cache"
     runner_temp = tmp_path / "runner temp"
     runner_temp.mkdir()
@@ -70,36 +70,30 @@ def test_writable_requested_cache_is_preserved_with_spaces(tmp_path):
         tmp_path, requested=requested, runner_temp=runner_temp
     )
 
+    fallback = runner_temp / "workflow-ci-uv-cache"
     assert result.returncode == 0, result.stderr
-    assert output.read_text().splitlines() == [str(requested), "v1.2.3"]
-    assert_no_probes(requested)
-    assert not (runner_temp / "uv-cache").exists()
+    assert output.read_text().splitlines() == [str(fallback), "v1.2.3"]
+    assert not requested.exists()
+    assert_no_probes(fallback)
 
 
-def test_requested_cache_probe_failure_falls_back_under_errexit(tmp_path):
+def test_release_does_not_probe_shared_cache(tmp_path):
     requested = tmp_path / "requested cache"
     requested.mkdir()
     runner_temp = tmp_path / "runner temp"
     runner_temp.mkdir()
-    bin_dir = tmp_path / "bin"
-    bin_dir.mkdir()
-    timeout = bin_dir / "timeout"
-    timeout.write_text("#!/usr/bin/env bash\nexit 74\n")
-    timeout.chmod(0o700)
 
     result, output = run_post_bump(
         tmp_path,
         requested=requested,
         runner_temp=runner_temp,
-        path_prefix=bin_dir,
     )
 
-    fallback = runner_temp / "uv-cache"
+    fallback = runner_temp / "workflow-ci-uv-cache"
     assert result.returncode == 0, result.stderr
     assert output.read_text().splitlines() == [str(fallback), "v1.2.3"]
-    assert "using local fallback" in result.stdout
+    assert_no_probes(requested)
     assert_no_probes(fallback)
-
 
 def test_unusable_requested_cache_falls_back(tmp_path):
     requested = tmp_path / "not a directory"
@@ -111,7 +105,7 @@ def test_unusable_requested_cache_falls_back(tmp_path):
         tmp_path, requested=requested, runner_temp=runner_temp
     )
 
-    fallback = runner_temp / "uv-cache"
+    fallback = runner_temp / "workflow-ci-uv-cache"
     assert result.returncode == 0, result.stderr
     assert output.read_text().splitlines() == [str(fallback), "v1.2.3"]
     assert_no_probes(fallback)
@@ -132,7 +126,7 @@ def test_read_only_requested_cache_falls_back_for_non_root(tmp_path):
     finally:
         requested.chmod(0o700)
 
-    fallback = runner_temp / "uv-cache"
+    fallback = runner_temp / "workflow-ci-uv-cache"
     assert result.returncode == 0, result.stderr
     assert output.read_text().splitlines() == [str(fallback), "v1.2.3"]
     assert_no_probes(requested)
@@ -145,7 +139,7 @@ def test_unset_cache_uses_runner_temp(tmp_path):
 
     result, output = run_post_bump(tmp_path, runner_temp=runner_temp)
 
-    fallback = runner_temp / "uv-cache"
+    fallback = runner_temp / "workflow-ci-uv-cache"
     assert result.returncode == 0, result.stderr
     assert output.read_text().splitlines() == [str(fallback), "v1.2.3"]
     assert_no_probes(fallback)
@@ -168,8 +162,8 @@ def test_child_failure_code_is_propagated(tmp_path):
     result, output = run_post_bump(tmp_path, runner_temp=runner_temp, exit_code=37)
 
     assert result.returncode == 37
-    assert output.read_text().splitlines() == [str(runner_temp / "uv-cache"), "v1.2.3"]
-    assert_no_probes(runner_temp / "uv-cache")
+    assert output.read_text().splitlines() == [str(runner_temp / "workflow-ci-uv-cache"), "v1.2.3"]
+    assert_no_probes(runner_temp / "workflow-ci-uv-cache")
 
 
 def test_existing_release_guard_and_local_scope_are_unchanged():
@@ -182,3 +176,6 @@ def test_existing_release_guard_and_local_scope_are_unchanged():
     assert step["env"]["NEW_VERSION"] == "${{ steps.bump.outputs.version }}"
     assert "GITHUB_ENV" not in step["run"]
     assert "HOME=" not in step["run"]
+    assert 'requested="${UV_CACHE_DIR:-}"' not in step["run"]
+    assert "timeout 3 bash -c" not in step["run"]
+    assert 'cache="${RUNNER_TEMP:-/tmp}/workflow-ci-uv-cache"' in step["run"]
