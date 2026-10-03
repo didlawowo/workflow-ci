@@ -132,11 +132,9 @@ def test_quality_report_resolves_a_writable_uv_cache():
     )
     command = resolver["run"]
 
-    assert 'REQUESTED="${UV_CACHE_DIR:-}"' in command
-    assert 'FALLBACK="${RUNNER_TEMP:-/tmp}/uv-cache"' in command
-    assert "timeout 3 bash -c" in command
-    assert "using local fallback" in command
-    assert 'echo "UV_CACHE_DIR=$CACHE" >> "$GITHUB_ENV"' in command
+    assert 'source "$GITHUB_ACTION_PATH/../../../.ci/nfs-cache.sh"' in command
+    assert "require_nfs_cache UV_CACHE_DIR" in command
+    assert "RUNNER_TEMP" not in command
 
     installer = next(
         step for step in steps if step["name"] == "Install uv for quality reporter"

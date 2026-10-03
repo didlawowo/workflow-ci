@@ -126,14 +126,14 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          UV_CACHE="${RUNNER_TEMP:-/tmp}/uv-cache"
-          mkdir -p "$UV_CACHE"
-          echo "UV_CACHE_DIR=$UV_CACHE" >> "$GITHUB_ENV"
+          source ".workflow-ci/.ci/nfs-cache.sh"
+          require_nfs_cache UV_CACHE_DIR
 
       - name: Install uv for policy and mutation helpers
         uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
         with:
           enable-cache: false
+          prune-cache: false
 
       - name: Classify pull request from trusted policy
         id: policy
@@ -438,16 +438,26 @@ jobs:
             MUTATION_PATH="$MUTATION_VENV/bin:$MUTATION_PATH"
           fi
           ISOLATED_HOME="${RUNNER_TEMP:-/tmp}/mutation-home"
-          ISOLATED_UV_CACHE="${RUNNER_TEMP:-/tmp}/mutation-uv-cache"
-          rm -rf "$ISOLATED_HOME" "$ISOLATED_UV_CACHE"
-          mkdir -p "$ISOLATED_HOME" "$ISOLATED_UV_CACHE"
+          source ".workflow-ci/.ci/nfs-cache.sh"
+          require_nfs_cache UV_CACHE_DIR
+          require_nfs_cache GOCACHE
+          require_nfs_cache GOMODCACHE
+          ISOLATED_UV_CACHE="" ISOLATED_GO_CACHE="" ISOLATED_GO_MODCACHE=""
+          trap 'for directory in "$ISOLATED_UV_CACHE" "$ISOLATED_GO_CACHE" "$ISOLATED_GO_MODCACHE"; do [[ -z "$directory" ]] || rm -rf "$directory"; done' EXIT
+          ISOLATED_UV_CACHE="$(mktemp -d "$UV_CACHE_DIR/mutation.XXXXXX")"
+          ISOLATED_GO_CACHE="$(mktemp -d "$GOCACHE/mutation.XXXXXX")"
+          ISOLATED_GO_MODCACHE="$(mktemp -d "$GOMODCACHE/mutation.XXXXXX")"
+          rm -rf "$ISOLATED_HOME"
+          mkdir -p "$ISOLATED_HOME"
 
           # No forge token, persistent HOME or shared dependency cache is
-          # exposed to PR code on self-hosted/ARC runners.
+          # exposed to PR code; only fresh NFS cache namespaces are passed.
           env -i \
             PATH="$MUTATION_PATH" \
             HOME="$ISOLATED_HOME" \
             UV_CACHE_DIR="$ISOLATED_UV_CACHE" \
+            GOCACHE="$ISOLATED_GO_CACHE" \
+            GOMODCACHE="$ISOLATED_GO_MODCACHE" \
             VIRTUAL_ENV="$MUTATION_VENV" \
             CI=true \
             MUTATION_POLICY_LABELS="$MUTATION_POLICY_LABELS" \
@@ -626,14 +636,14 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          UV_CACHE="${RUNNER_TEMP:-/tmp}/uv-cache"
-          mkdir -p "$UV_CACHE"
-          echo "UV_CACHE_DIR=$UV_CACHE" >> "$GITHUB_ENV"
+          source ".workflow-ci/.ci/nfs-cache.sh"
+          require_nfs_cache UV_CACHE_DIR
 
       - name: Install uv for verification helpers
         uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
         with:
           enable-cache: false
+          prune-cache: false
 
       - name: Re-classify pull request independently
         id: policy

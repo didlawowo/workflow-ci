@@ -20,8 +20,8 @@ outputs:
     description: "Go version installed"
     value: ${{ steps.setup.outputs.go-version }}
   cache-hit:
-    description: "Whether the cache was hit"
-    value: ${{ steps.module-cache.outputs.cache-hit }}
+    description: "Compatibility output; NFS caches are reused directly, without archive restore"
+    value: "false"
 
 runs:
   using: "composite"
@@ -31,24 +31,14 @@ runs:
       uses: actions/setup-go@v6
       with:
         go-version: ${{ inputs.go-version }}
-        # setup-go archives both GOMODCACHE and GOCACHE. On ephemeral ARC pods
-        # that produced ~458 MiB restores per job, mostly compiled objects that
-        # are cheap to rebuild on the native worker. Cache only the compressed
-        # module downloads below: they avoid network fetches while staying much
-        # smaller than the combined setup-go archive.
         cache: false
 
-    - name: Resolve Go module download cache
-      id: cache-path
+    - name: Validate runner NFS caches
       shell: bash
-      run: echo "download=$(go env GOMODCACHE)/cache/download" >> "$GITHUB_OUTPUT"
-
-    - name: Restore Go module downloads
-      id: module-cache
-      uses: actions/cache@v5
-      with:
-        path: ${{ steps.cache-path.outputs.download }}
-        key: go-mod-download-${{ runner.os }}-${{ runner.arch }}-${{ steps.setup.outputs.go-version }}-${{ hashFiles(inputs.cache-dependency-path) }}
+      run: |
+        source "$GITHUB_ACTION_PATH/../../../.ci/nfs-cache.sh"
+        require_nfs_cache GOCACHE
+        require_nfs_cache GOMODCACHE
 
     - name: Download dependencies
       shell: bash

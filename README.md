@@ -147,3 +147,25 @@ actions to the exact commit of the tagged workflow and prevents stale cross-vers
 | --- | --- |
 | `SONAR_PROJECT_KEY` | Exact SonarQube project key imported for the repository |
 | `SONAR_ENABLED` | `true` to execute the SonarQube gate; otherwise Sonar is skipped |
+
+### Python and Go caches on ARC runners
+
+Production CI caches are NFS-only. Runners must provide existing absolute
+`UV_CACHE_DIR`, `GOCACHE` and `GOMODCACHE` directories on an `nfs`/`nfs4` mount.
+The runner needs `bash`, GNU `timeout` and util-linux `findmnt`. A bounded
+read/write probe rejects missing, local or unavailable caches before execution;
+there is no runner-local fallback. A later NFS outage still fails the language
+command and requires infrastructure recovery/retry.
+
+Go module and build caches are reused directly, without GitHub cache archives.
+The `setup-go-env` compatibility output `cache-hit` is always `false` because no
+archive restore occurs; `cache-dependency-path` remains accepted for callers.
+Python setup disables GitHub cache restore/save and pruning of shared caches.
+Mutation candidate caches use fresh NFS namespaces to keep them separate from
+trusted cache entries. Forgejo sandbox directories are created under the NFS UV
+cache and retain the existing UID separation.
+
+The manual `bench-uv-cache` workflow remains a comparison of cache strategies,
+including GitHub archives; it does not define the production cache policy.
+Consumers must adopt the published workflow-ci tag to receive this behavior.
+Reverting to the preceding tag restores the previous cache policy.

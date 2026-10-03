@@ -146,6 +146,9 @@ def test_sandbox_drops_identity_privileges_tokens_and_command_files(
     assert "secret-sentinel" not in str(command) and "/private/output" not in str(
         command
     )
+    assert f"UV_CACHE_DIR={tmp_path / 'home/uv-cache'}" in command
+    assert f"GOCACHE={tmp_path / 'home/go-build'}" in command
+    assert f"GOMODCACHE={tmp_path / 'home/go-mod'}" in command
     assert command[-2:] == ["bash", str(tmp_path / "engine/mutation.sh")]
 
 

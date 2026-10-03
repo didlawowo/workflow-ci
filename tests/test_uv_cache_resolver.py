@@ -1,106 +1,90 @@
-"""Regression tests for fail-safe uv cache selection on ARC/NFS runners."""
+"""Execute the actual NFS validator with controlled mount and fault responses."""
 
 import os
 import subprocess
 from pathlib import Path
 
 import pytest
-import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
 
-ACTIONS = [
-    (".github/actions/run-python-tests/action.yml", "Resolve writable uv cache"),
-    (".github/actions/setup-python-env/action.yml", "Resolve writable uv cache"),
-    (
-        ".github/actions/quality-report/action.yml",
-        "Resolve writable uv cache for quality reporter",
-    ),
-]
 
-
-def _resolver_command(path: str, step_name: str) -> str:
-    action = yaml.safe_load((ROOT / path).read_text())
-    step = next(step for step in action["runs"]["steps"] if step["name"] == step_name)
-    return step["run"]
-
-
-def _run_resolver(tmp_path: Path, command: str, *, fake_timeout: bool):
-    runner_temp = tmp_path / "runner-temp"
-    runner_temp.mkdir()
-    requested = tmp_path / "shared-uv-cache"
-    requested.mkdir()
-    github_env = tmp_path / "github-env"
-    github_output = tmp_path / "github-output"
-
-    path = os.environ["PATH"]
-    if fake_timeout:
-        bin_dir = tmp_path / "bin"
-        bin_dir.mkdir()
+def run_validator(
+    tmp_path,
+    *,
+    filesystem="nfs4",
+    configured=True,
+    failure=False,
+    variable="UV_CACHE_DIR",
+    blocked=False,
+):
+    cache = tmp_path / "NFS cache"
+    if blocked:
+        cache.write_text("occupied")
+    else:
+        cache.mkdir()
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    findmnt = bin_dir / "findmnt"
+    findmnt.write_text(f"#!/bin/sh\nprintf '%s\\n' {filesystem}\n")
+    findmnt.chmod(0o700)
+    if failure:
         timeout = bin_dir / "timeout"
-        timeout.write_text(
-            "#!/usr/bin/env bash\n"
-            "set -euo pipefail\n"
-            'count_file="$RUNNER_TEMP/timeout-calls"\n'
-            'n="$(cat "$count_file" 2>/dev/null || echo 0)"\n'
-            'n=$((n + 1)); printf "%s\\n" "$n" > "$count_file"\n'
-            'if [[ "$n" -eq 1 ]]; then\n'
-            "  shift\n"
-            '  "$@"\n'
-            "  exit $?\n"
-            "fi\n"
-            'echo "simulated Remote I/O error for $UV_CACHE_DIR" >&2\n'
-            "exit 74\n"
-        )
+        timeout.write_text("#!/bin/sh\necho 'Remote I/O error' >&2\nexit 74\n")
         timeout.chmod(0o700)
-        path = str(bin_dir) + os.pathsep + path
-
+    env = {**os.environ, "PATH": str(bin_dir) + os.pathsep + os.environ["PATH"]}
+    env.pop(variable, None)
+    if configured:
+        env[variable] = str(cache)
     result = subprocess.run(
-        ["bash", "-euo", "pipefail", "-c", command],
-        env={
-            **os.environ,
-            "PATH": path,
-            "RUNNER_TEMP": str(runner_temp),
-            "UV_CACHE_DIR": str(requested),
-            "GITHUB_ENV": str(github_env),
-            "GITHUB_OUTPUT": str(github_output),
-        },
-        capture_output=True,
+        [
+            "bash",
+            "-euo",
+            "pipefail",
+            "-c",
+            f'source "{ROOT}/.ci/nfs-cache.sh"; require_nfs_cache {variable}; printf "%s" "${variable}"',
+        ],
+        env=env,
         text=True,
+        check=False,
+        capture_output=True,
         timeout=10,
     )
-    return result, requested, runner_temp, github_env, github_output
+    return result, cache
 
 
-@pytest.mark.parametrize(("path", "step_name"), ACTIONS)
-def test_shared_uv_cache_is_used_when_stable(tmp_path, path, step_name):
-    result, requested, runner_temp, github_env, github_output = _run_resolver(
-        tmp_path, _resolver_command(path, step_name), fake_timeout=False
-    )
-
-    assert result.returncode == 0, result.stdout + result.stderr
-    assert f"UV_CACHE_DIR={requested}" in github_env.read_text()
-    assert f"path={requested}" in github_output.read_text()
-    assert "Using shared uv cache" in result.stdout
-    assert not (runner_temp / "uv-cache").exists()
-    assert not list(requested.glob(".workflow-ci-write-test.*"))
+@pytest.mark.parametrize("variable", ["UV_CACHE_DIR", "GOCACHE", "GOMODCACHE"])
+@pytest.mark.parametrize("filesystem", ["nfs", "nfs4"])
+def test_nfs_cache_is_preserved_and_probes_cleaned(tmp_path, filesystem, variable):
+    result, cache = run_validator(tmp_path, filesystem=filesystem, variable=variable)
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == str(cache)
+    if cache.is_dir():
+        assert not list(cache.iterdir())
 
 
-@pytest.mark.parametrize(("path", "step_name"), ACTIONS)
-def test_nfs_failure_between_probe_and_commit_falls_back_locally(
-    tmp_path, path, step_name
-):
-    result, requested, runner_temp, github_env, github_output = _run_resolver(
-        tmp_path, _resolver_command(path, step_name), fake_timeout=True
-    )
+@pytest.mark.parametrize("variable", ["UV_CACHE_DIR", "GOCACHE", "GOMODCACHE"])
+@pytest.mark.parametrize(
+    "options",
+    [
+        {"filesystem": "ext4"},
+        {"configured": False},
+        {"failure": True},
+        {"blocked": True},
+    ],
+)
+def test_invalid_cache_stops_without_fallback(tmp_path, options, variable):
+    result, cache = run_validator(tmp_path, variable=variable, **options)
+    assert result.returncode != 0
+    assert "::error::" in result.stderr
+    assert not result.stdout
+    if cache.is_dir():
+        assert not list(cache.iterdir())
 
-    fallback = runner_temp / "uv-cache"
-    assert result.returncode == 0, result.stdout + result.stderr
-    assert (runner_temp / "timeout-calls").read_text().strip() == "2"
-    assert f"UV_CACHE_DIR={fallback}" in github_env.read_text()
-    assert f"path={fallback}" in github_output.read_text()
-    assert "became unavailable during commit probe" in result.stdout
-    assert "Remote I/O error" in result.stdout
-    assert fallback.is_dir()
-    assert not list(requested.glob(".workflow-ci-write-test.*"))
-    assert not list(fallback.glob(".workflow-ci-write-test.*"))
+
+def test_mutation_cache_namespaces_remain_on_nfs():
+    content = (ROOT / ".github/workflows/mutation-policy.yml").read_text()
+    for variable in ("UV_CACHE_DIR", "GOCACHE", "GOMODCACHE"):
+        assert f"require_nfs_cache {variable}" in content
+        assert f'mktemp -d "${variable}/mutation.XXXXXX"' in content
+    assert "${RUNNER_TEMP:-/tmp}/mutation-uv-cache" not in content
