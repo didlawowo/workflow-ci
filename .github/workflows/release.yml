@@ -233,20 +233,10 @@ jobs:
           NEW_VERSION: ${{ steps.bump.outputs.version }}
         run: |
           set -euo pipefail
-          requested="${UV_CACHE_DIR:-}"
-          cache="${RUNNER_TEMP:-/tmp}/uv-cache"
-          if [[ -n "$requested" ]] && timeout 3 bash -c '
-            set -euo pipefail
-            requested="$1"
-            mkdir -p "$requested"
-            probe="$requested/.workflow-ci-write-test.$"
-            trap '\''rm -f "$probe" 2>/dev/null || true'\'' EXIT
-            : > "$probe"
-          ' _ "$requested" >/dev/null 2>&1; then
-            cache="$requested"
-          else
-            echo "::warning::Requested uv cache is unavailable; using local fallback: $cache"
-          fi
+          # Releases must never depend on the shared NFS uv cache. A stale/EIO
+          # mount can make even a probe fail before the post-bump command runs,
+          # which blocks publication entirely. Use runner-local scratch space.
+          cache="${RUNNER_TEMP:-/tmp}/workflow-ci-uv-cache"
           mkdir -p "$cache"
           probe="$(mktemp "$cache/.workflow-ci-write-test.XXXXXX")"
           rm -f "$probe"
