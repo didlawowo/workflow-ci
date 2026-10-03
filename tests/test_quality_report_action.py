@@ -130,13 +130,15 @@ def test_quality_report_resolves_a_writable_uv_cache():
         for step in steps
         if step["name"] == "Resolve writable uv cache for quality reporter"
     )
-    command = resolver["run"]
+    assert resolver["uses"] == "$/.github/actions/resolve-uv-cache"
 
-    assert 'REQUESTED="${UV_CACHE_DIR:-}"' in command
-    assert 'FALLBACK="${RUNNER_TEMP:-/tmp}/uv-cache"' in command
-    assert "timeout 3 bash -c" in command
-    assert "using local fallback" in command
-    assert 'echo "UV_CACHE_DIR=$CACHE" >> "$GITHUB_ENV"' in command
+    exporter = next(
+        step
+        for step in steps
+        if step["name"] == "Export resolved uv cache for quality reporter"
+    )
+    assert 'steps.uv-cache.outputs.path' in exporter["run"]
+    assert "GITHUB_ENV" in exporter["run"]
 
     installer = next(
         step for step in steps if step["name"] == "Install uv for quality reporter"
