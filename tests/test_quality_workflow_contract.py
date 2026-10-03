@@ -191,7 +191,7 @@ def test_trusted_quality_enforces_ruff_and_sonarqube_quality_gate():
     python_quality = (
         root / ".github" / "actions" / "python-quality-security" / "action.yml"
     ).read_text()
-    assert "Run Ruff linting" in python_quality
+    assert "Run project Ruff linting" in python_quality
     assert "uv run ruff --version" in python_quality
     assert "RUFF=(uv run ruff)" in python_quality
     assert "RUFF=(uvx --from ruff==0.16.8 ruff)" in python_quality
@@ -290,6 +290,11 @@ def test_python_security_action_propagates_requested_check_failures():
     assert "--no-emit-project" in content
     assert 'safety check -r "$SAFETY_INPUT" --output json' in content
     assert "safety check --output json" not in content
+    assert 'echo "status=findings" >> "$GITHUB_OUTPUT"' in content
+    assert 'echo "status=error" >> "$GITHUB_OUTPUT"' in content
+    assert 'jq -e . safety-report.json' in content
+    assert 'SECURITY_SCAN_ERRORS=$((SECURITY_SCAN_ERRORS + 1))' in content
+    assert 'case "${{ steps.safety.outputs.status }}" in' in content
     assert "SECURITY_ISSUES=$((SECURITY_ISSUES + 1))" in content
 
 
