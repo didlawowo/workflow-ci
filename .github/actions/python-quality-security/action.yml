@@ -55,7 +55,7 @@ runs:
         install-dev: "true"
         working-directory: ${{ inputs.working-directory }}
 
-    - name: Run Ruff linting
+    - name: Run project Ruff linting
       id: ruff-lint
       shell: bash
       working-directory: ${{ inputs.working-directory }}
@@ -72,7 +72,7 @@ runs:
         fi
       continue-on-error: true
 
-    - name: Check code formatting
+    - name: Check project Ruff formatting
       id: ruff-format
       shell: bash
       working-directory: ${{ inputs.working-directory }}
@@ -142,10 +142,24 @@ runs:
           : > "$SAFETY_INPUT"
         fi
 
-        if uvx --from safety==3.8.1 safety check -r "$SAFETY_INPUT" --output json > safety-report.json; then
-          echo "status=passed" >> "$GITHUB_OUTPUT"
-        else
-          echo "status=failed" >> "$GITHUB_OUTPUT"
+        SAFETY_STDERR="${RUNNER_TEMP:-/tmp}/safety-stderr.log"
+        rm -f safety-report.json "$SAFETY_STDERR"
+
+        set +e
+        uvx --from safety==3.8.1 safety check -r "$SAFETY_INPUT" --output json \
+          > safety-report.json 2> "$SAFETY_STDERR"
+        SAFETY_RC=$?
+        set -e
+
+        SAFETY_STATUS="$(
+          python3 "$GITHUB_ACTION_PATH/../../scripts/classify_safety_result.py" \
+            "$SAFETY_RC" safety-report.json
+        )"
+        echo "status=$SAFETY_STATUS" >> "$GITHUB_OUTPUT"
+
+        if [[ "$SAFETY_STATUS" == "error" ]]; then
+          # Tool/network/runtime failure: blocking, but not a fake CVE finding.
+          cat "$SAFETY_STDERR" >&2 || true
         fi
       continue-on-error: true
 
@@ -201,9 +215,20 @@ runs:
               ;;
           esac
         fi
-        if [ "${{ steps.safety.outputs.status }}" != "passed" ]; then
-          SECURITY_ISSUES=$((SECURITY_ISSUES + 1))
-        fi
+        case "${{ steps.safety.outputs.status }}" in
+          passed) ;;
+          findings)
+            SECURITY_ISSUES=$((SECURITY_ISSUES + 1))
+            ;;
+          error|"")
+            QUALITY_PASSED=false
+            SECURITY_SCAN_ERRORS=$((SECURITY_SCAN_ERRORS + 1))
+            ;;
+          *)
+            QUALITY_PASSED=false
+            SECURITY_SCAN_ERRORS=$((SECURITY_SCAN_ERRORS + 1))
+            ;;
+        esac
 
         {
           echo "passed=${QUALITY_PASSED}"
