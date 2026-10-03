@@ -290,10 +290,9 @@ def test_python_security_action_propagates_requested_check_failures():
     assert "--no-emit-project" in content
     assert 'safety check -r "$SAFETY_INPUT" --output json' in content
     assert "safety check --output json" not in content
-    assert 'echo "status=findings" >> "$GITHUB_OUTPUT"' in content
-    assert 'echo "status=error" >> "$GITHUB_OUTPUT"' in content
     assert 'classify_safety_result.py' in content
     assert '"$SAFETY_RC" safety-report.json' in content
+    assert 'echo "status=$SAFETY_STATUS" >> "$GITHUB_OUTPUT"' in content
     assert 'SECURITY_SCAN_ERRORS=$((SECURITY_SCAN_ERRORS + 1))' in content
     assert 'case "${{ steps.safety.outputs.status }}" in' in content
     assert "SECURITY_ISSUES=$((SECURITY_ISSUES + 1))" in content
