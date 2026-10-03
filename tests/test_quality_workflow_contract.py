@@ -285,7 +285,7 @@ def test_python_security_action_propagates_requested_check_failures():
     assert "steps.trufflehog.outcome" in content
     assert "steps.safety.outputs.status" in content
     assert 'SAFETY_INPUT="${RUNNER_TEMP:-/tmp}/safety-requirements.txt"' in content
-    assert "uv export \\" in content
+    assert "uv export" in content
     assert "--no-dev" in content
     assert "--no-emit-project" in content
     assert 'safety check -r "$SAFETY_INPUT" --output json' in content
