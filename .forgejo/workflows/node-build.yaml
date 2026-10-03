@@ -1,0 +1,51 @@
+name: Node build
+
+on:
+  workflow_call:
+    inputs:
+      runner:
+        description: Label of an internal Forgejo runner
+        required: true
+        type: string
+      working-directory:
+        type: string
+        default: .
+      node-version:
+        type: string
+        default: '22'
+      build-test-script:
+        description: Optional npm script to verify the built output
+        type: string
+        default: ''
+
+jobs:
+  build:
+    name: Build application
+    runs-on: ${{ inputs.runner }}
+    timeout-minutes: 15
+    container:
+      image: node:${{ inputs.node-version }}-bookworm
+    steps:
+      - uses: https://data.forgejo.org/actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Install dependencies
+        working-directory: ${{ inputs.working-directory }}
+        run: |
+          if [ -f package-lock.json ] || [ -f npm-shrinkwrap.json ]; then
+            npm ci --no-audit --no-fund
+          else
+            npm install --no-audit --no-fund
+          fi
+
+      - name: Typecheck and build
+        working-directory: ${{ inputs.working-directory }}
+        run: npm run build
+
+      - name: Verify built output
+        if: inputs.build-test-script != ''
+        working-directory: ${{ inputs.working-directory }}
+        env:
+          BUILD_TEST_SCRIPT: ${{ inputs.build-test-script }}
+        run: npm run "$BUILD_TEST_SCRIPT"

@@ -1,0 +1,31 @@
+name: Validate Taskfiles
+
+on:
+  workflow_call:
+    inputs:
+      runner:
+        description: Label of an internal Forgejo runner
+        required: true
+        type: string
+      validation-script:
+        description: Validation script in the consumer repository
+        type: string
+        default: scripts/validate-taskfiles.sh
+
+jobs:
+  validate:
+    name: Lint Taskfiles
+    runs-on: ${{ inputs.runner }}
+    timeout-minutes: 10
+    steps:
+      - uses: https://data.forgejo.org/actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Install Task
+        run: sh -c "$(curl -fsSL https://taskfile.dev/install.sh)" -- -d -b /usr/local/bin
+
+      - name: Validate Taskfiles
+        env:
+          VALIDATION_SCRIPT: ${{ inputs.validation-script }}
+        run: bash "$VALIDATION_SCRIPT"
