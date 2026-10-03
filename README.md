@@ -186,7 +186,7 @@ See [Forgejo V1 setup](docs/forgejo-ci-v1.md) and the
 After every new workflow-ci release, update the version used by
 [github-manager](https://github.com/didlawowo/github-manager). Update
 `WORKFLOW_CI_VERSION` in `src/quality_policy.py`, align static workflow/action
-references in `content/` and `forgejo-content/`, and adjust the associated tests.
+references in `.github/workflows/` and `forgejo-content/`, and adjust the associated tests.
 Use an actually published tag, run the github-manager checks, open its update
 PR and verify its CI. Publishing workflow-ci alone does not update managed
 consumer workflows. Any production rollout still requires explicit authorization.
