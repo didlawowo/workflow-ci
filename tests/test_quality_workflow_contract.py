@@ -682,6 +682,8 @@ def test_python_actions_fallback_from_read_only_uv_cache():
         assert "Resolve writable uv cache" in content
         assert 'REQUESTED="${UV_CACHE_DIR:-}"' in content
         assert 'FALLBACK="${RUNNER_TEMP:-/tmp}/uv-cache"' in content
+        assert "timeout 3 bash -c" in content
+        assert "using local fallback" in content
         assert 'echo "UV_CACHE_DIR=$CACHE" >> "$GITHUB_ENV"' in content
         assert "cache-local-path: ${{ steps.uv-cache.outputs.path }}" in content
         assert "enable-cache: false" in content
