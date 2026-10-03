@@ -235,10 +235,17 @@ jobs:
           set -euo pipefail
           requested="${UV_CACHE_DIR:-}"
           cache="${RUNNER_TEMP:-/tmp}/uv-cache"
-          if [[ -n "$requested" ]] && mkdir -p "$requested" 2>/dev/null && \
-            probe="$(mktemp "$requested/.workflow-ci-write-test.XXXXXX" 2>/dev/null)"; then
-            rm -f "$probe"
+          if [[ -n "$requested" ]] && timeout 3 bash -c '
+            set -euo pipefail
+            requested="$1"
+            mkdir -p "$requested"
+            probe="$requested/.workflow-ci-write-test.$"
+            trap '\''rm -f "$probe" 2>/dev/null || true'\'' EXIT
+            : > "$probe"
+          ' _ "$requested" >/dev/null 2>&1; then
             cache="$requested"
+          else
+            echo "::warning::Requested uv cache is unavailable; using local fallback: $cache"
           fi
           mkdir -p "$cache"
           probe="$(mktemp "$cache/.workflow-ci-write-test.XXXXXX")"
