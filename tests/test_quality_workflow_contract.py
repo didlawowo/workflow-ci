@@ -284,6 +284,12 @@ def test_python_security_action_propagates_requested_check_failures():
     assert "steps.mypy.outputs.status" in content
     assert "steps.trufflehog.outcome" in content
     assert "steps.safety.outputs.status" in content
+    assert 'SAFETY_INPUT="${RUNNER_TEMP:-/tmp}/safety-requirements.txt"' in content
+    assert "uv export" in content
+    assert "--no-dev" in content
+    assert "--no-emit-project" in content
+    assert 'safety check -r "$SAFETY_INPUT" --output json' in content
+    assert "safety check --output json" not in content
     assert "SECURITY_ISSUES=$((SECURITY_ISSUES + 1))" in content
 
 
@@ -682,6 +688,8 @@ def test_python_actions_fallback_from_read_only_uv_cache():
         assert "Resolve writable uv cache" in content
         assert 'REQUESTED="${UV_CACHE_DIR:-}"' in content
         assert 'FALLBACK="${RUNNER_TEMP:-/tmp}/uv-cache"' in content
+        assert "timeout 3 bash -c" in content
+        assert "using local fallback" in content
         assert 'echo "UV_CACHE_DIR=$CACHE" >> "$GITHUB_ENV"' in content
         assert "cache-local-path: ${{ steps.uv-cache.outputs.path }}" in content
         assert "enable-cache: false" in content

@@ -134,6 +134,8 @@ def test_quality_report_resolves_a_writable_uv_cache():
 
     assert 'REQUESTED="${UV_CACHE_DIR:-}"' in command
     assert 'FALLBACK="${RUNNER_TEMP:-/tmp}/uv-cache"' in command
+    assert "timeout 3 bash -c" in command
+    assert "using local fallback" in command
     assert 'echo "UV_CACHE_DIR=$CACHE" >> "$GITHUB_ENV"' in command
 
     installer = next(

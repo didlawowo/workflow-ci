@@ -128,7 +128,21 @@ runs:
       shell: bash
       working-directory: ${{ inputs.working-directory }}
       run: |
-        if uvx --from safety==3.8.1 safety check --output json > safety-report.json; then
+        set -euo pipefail
+        SAFETY_INPUT="${RUNNER_TEMP:-/tmp}/safety-requirements.txt"
+        rm -f "$SAFETY_INPUT"
+
+        if [[ -f pyproject.toml ]]; then
+          # Scan the consumer project's production dependency graph, not the
+          # isolated uvx environment that contains Safety itself.
+          uv export             --format requirements.txt             --no-dev             --no-emit-project             --no-hashes             --no-annotate             --no-header             --output-file "$SAFETY_INPUT"
+        elif [[ -f requirements.txt ]]; then
+          cp requirements.txt "$SAFETY_INPUT"
+        else
+          : > "$SAFETY_INPUT"
+        fi
+
+        if uvx --from safety==3.8.1 safety check -r "$SAFETY_INPUT" --output json > safety-report.json; then
           echo "status=passed" >> "$GITHUB_OUTPUT"
         else
           echo "status=failed" >> "$GITHUB_OUTPUT"
