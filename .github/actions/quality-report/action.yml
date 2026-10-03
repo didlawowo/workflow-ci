@@ -104,29 +104,11 @@ runs:
   steps:
     - name: Resolve writable uv cache for quality reporter
       id: uv-cache
+      uses: $/.github/actions/resolve-uv-cache
+
+    - name: Export resolved uv cache for quality reporter
       shell: bash
-      run: |
-        set -euo pipefail
-        REQUESTED="${UV_CACHE_DIR:-}"
-        FALLBACK="${RUNNER_TEMP:-/tmp}/uv-cache"
-        CACHE="$FALLBACK"
-
-        if [[ -n "$REQUESTED" ]] && timeout 3 bash -c '
-          set -euo pipefail
-          requested="$1"
-          mkdir -p "$requested"
-          probe="$requested/.workflow-ci-write-test.$"
-          trap '\''rm -f "$probe" 2>/dev/null || true'\'' EXIT
-          : > "$probe"
-        ' _ "$REQUESTED" >/dev/null 2>&1; then
-          CACHE="$REQUESTED"
-        else
-          echo "::warning::Requested uv cache is unavailable; using local fallback: $FALLBACK"
-        fi
-
-        mkdir -p "$CACHE"
-        echo "path=$CACHE" >> "$GITHUB_OUTPUT"
-        echo "UV_CACHE_DIR=$CACHE" >> "$GITHUB_ENV"
+      run: echo "UV_CACHE_DIR=${{ steps.uv-cache.outputs.path }}" >> "$GITHUB_ENV"
 
     - name: Detect preinstalled uv for quality reporter
       id: uv-runtime
