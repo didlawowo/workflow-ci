@@ -17,7 +17,14 @@ def post_bump_step():
     return next(step for step in steps if step.get("name") == "Post-bump command")
 
 
-def run_post_bump(tmp_path, *, requested=None, runner_temp=None, exit_code=0):
+def run_post_bump(
+    tmp_path,
+    *,
+    requested=None,
+    runner_temp=None,
+    exit_code=0,
+    path_prefix=None,
+):
     child = tmp_path / "child command.sh"
     child.write_text(
         "#!/usr/bin/env bash\n"
@@ -26,7 +33,11 @@ def run_post_bump(tmp_path, *, requested=None, runner_temp=None, exit_code=0):
     )
     result_file = tmp_path / "child result"
     env = {
-        "PATH": os.environ["PATH"],
+        "PATH": (
+            str(path_prefix) + os.pathsep + os.environ["PATH"]
+            if path_prefix is not None
+            else os.environ["PATH"]
+        ),
         "POST_BUMP_COMMAND": f"bash {shlex.quote(str(child))}",
         "NEW_VERSION": "v1.2.3",
         "RESULT_FILE": str(result_file),
@@ -63,6 +74,31 @@ def test_writable_requested_cache_is_preserved_with_spaces(tmp_path):
     assert output.read_text().splitlines() == [str(requested), "v1.2.3"]
     assert_no_probes(requested)
     assert not (runner_temp / "uv-cache").exists()
+
+
+def test_requested_cache_probe_failure_falls_back_under_errexit(tmp_path):
+    requested = tmp_path / "requested cache"
+    requested.mkdir()
+    runner_temp = tmp_path / "runner temp"
+    runner_temp.mkdir()
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    timeout = bin_dir / "timeout"
+    timeout.write_text("#!/usr/bin/env bash\nexit 74\n")
+    timeout.chmod(0o700)
+
+    result, output = run_post_bump(
+        tmp_path,
+        requested=requested,
+        runner_temp=runner_temp,
+        path_prefix=bin_dir,
+    )
+
+    fallback = runner_temp / "uv-cache"
+    assert result.returncode == 0, result.stderr
+    assert output.read_text().splitlines() == [str(fallback), "v1.2.3"]
+    assert "using local fallback" in result.stdout
+    assert_no_probes(fallback)
 
 
 def test_unusable_requested_cache_falls_back(tmp_path):
