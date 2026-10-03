@@ -180,3 +180,13 @@ this public GitHub repository using a fully qualified URL. The workflow jobs
 run on the consumer's internal Forgejo runner, not on GitHub-hosted runners.
 See [Forgejo V1 setup](docs/forgejo-ci-v1.md) and the
 [moto-tracker example](templates/forgejo/moto-tracker-ci.yaml).
+
+## Release follow-up
+
+After every new workflow-ci release, update the version used by
+[github-manager](https://github.com/didlawowo/github-manager). Update
+`WORKFLOW_CI_VERSION` in `src/quality_policy.py`, align static workflow/action
+references in `content/` and `forgejo-content/`, and adjust the associated tests.
+Use an actually published tag, run the github-manager checks, open its update
+PR and verify its CI. Publishing workflow-ci alone does not update managed
+consumer workflows. Any production rollout still requires explicit authorization.
