@@ -85,5 +85,11 @@ def test_action_gates_git_cliff_bump_before_computing_version():
 
     assert "git log" in scope["run"]
     assert "release_commit_gate.py" in scope["run"]
+    assert 'PREFIX="${{ inputs.tag-prefix }}"' in scope["run"]
+    assert 'TAG_PATTERN="${PREFIX}[0-9]*"' in scope["run"]
+    assert 'TAG_PATTERN="[0-9]*"' in scope["run"]
+    assert 'git describe --tags --abbrev=0 --match "$TAG_PATTERN"' in scope["run"]
+    assert 'echo "last-tag=$last" >> "$GITHUB_OUTPUT"' in scope["run"]
     assert compute["if"] == "steps.release-scope.outputs.releasable == 'true'"
     assert "-f /tmp/next-version.txt" in decide["run"]
+    assert 'LAST="${{ steps.release-scope.outputs.last-tag }}"' in decide["run"]
