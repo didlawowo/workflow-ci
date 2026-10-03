@@ -87,20 +87,498 @@ runs:
         FALLBACK="${RUNNER_TEMP:-/tmp}/uv-cache"
         CACHE="$FALLBACK"
 
-        if [[ -n "$REQUESTED" ]] && timeout 3 bash -c '
-          set -euo pipefail
-          requested="$1"
-          mkdir -p "$requested"
-          probe="$requested/.workflow-ci-write-test.$"
-          trap '\''rm -f "$probe" 2>/dev/null || true'\'' EXIT
-          : > "$probe"
-        ' _ "$REQUESTED" >/dev/null 2>&1; then
-          CACHE="$REQUESTED"
+        probe_cache() {
+          timeout 3 bash -c '
+            set -euo pipefail
+            requested="$1"
+            mkdir -p "$requested"
+            probe="$(mktemp "$requested/.workflow-ci-write-test.XXXXXX")"
+            trap '\''rm -f "$probe" 2>/dev/null || true'\'' EXIT
+            printf "%s\n" "workflow-ci" > "$probe"
+            cat "$probe" >/dev/null
+            rm -f "$probe"
+            trap - EXIT
+          ' _ "$1"
+        }
+
+        if [[ -n "$REQUESTED" ]]; then
+          if ! REASON="$(probe_cache "$REQUESTED" 2>&1)"; then
+            REASON="${REASON//
+    - name: Detect preinstalled uv
+      id: uv-runtime
+      if: inputs.use-docker-compose != 'true'
+      shell: bash
+      run: |
+        if command -v uv >/dev/null 2>&1; then
+          echo "preinstalled=true" >> "$GITHUB_OUTPUT"
+          echo "Using preinstalled uv: $(uv --version)"
         else
-          echo "::warning::Requested uv cache is unavailable; using local fallback: $FALLBACK"
+          echo "preinstalled=false" >> "$GITHUB_OUTPUT"
         fi
 
-        mkdir -p "$CACHE"
+    - name: Install uv
+      if: inputs.use-docker-compose != 'true' && steps.uv-runtime.outputs.preinstalled != 'true'
+      uses: astral-sh/setup-uv@v10.1.0
+      with:
+        version: "latest"
+        enable-cache: false
+        cache-local-path: ${{ steps.uv-cache.outputs.path }}
+
+    - name: Setup Python environment
+      if: inputs.use-docker-compose != 'true'
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: |
+        set -euo pipefail
+        uv python install "${{ inputs.python-version }}"
+
+        DEV_MODES="$(
+          uv run --no-project --python "${{ inputs.python-version }}" python - <<'PY'
+        import pathlib
+        import tomllib
+
+        data = tomllib.loads(pathlib.Path("pyproject.toml").read_text(encoding="utf-8"))
+        modes = []
+        if "dev" in data.get("project", {}).get("optional-dependencies", {}):
+            modes.append("extra")
+        if "dev" in data.get("dependency-groups", {}):
+            modes.append("group")
+        print(" ".join(modes))
+        PY
+        )"
+
+        SYNC_ARGS=()
+        case " ${DEV_MODES} " in
+          *" extra "*) SYNC_ARGS+=(--extra dev) ;;
+        esac
+        case " ${DEV_MODES} " in
+          *" group "*) SYNC_ARGS+=(--group dev) ;;
+        esac
+        uv sync "${SYNC_ARGS[@]}"
+
+    # --- Docker Compose mode ---
+    - name: Run tests with Docker Compose
+      if: inputs.use-docker-compose == 'true'
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: |
+        if docker compose version &>/dev/null; then
+          DC="docker compose"
+        else
+          DC="docker-compose"
+        fi
+
+        $DC -f docker-compose.test.yml down -v || true
+        mkdir -p coverage-reports htmlcov
+        chmod 777 coverage-reports htmlcov
+        $DC -f docker-compose.test.yml build ${{ inputs.docker-compose-service }}
+        $DC -f docker-compose.test.yml run --rm ${{ inputs.docker-compose-service }}
+        $DC -f docker-compose.test.yml down -v
+
+    # --- Direct pytest mode ---
+    - name: Run pytest
+      id: run-tests
+      if: inputs.use-docker-compose != 'true'
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: |
+        mkdir -p coverage-reports
+        CUSTOM_CMD="${{ inputs.test-command }}"
+        set +e
+        if [ -n "$CUSTOM_CMD" ]; then
+          eval "$CUSTOM_CMD"
+        else
+          uv run --with pytest --with pytest-cov pytest ${{ inputs.test-paths }} \
+            -v --tb=short \
+            --cov=${{ inputs.coverage-source }} --cov-report=xml:${{ inputs.coverage-report-path }} \
+            --cov-report=term-missing \
+            --junitxml=${{ inputs.junit-report-path }}
+        fi
+        STATUS=$?
+        set -e
+        printf '%s\n' "$STATUS" > coverage-reports/test-exit-code
+        echo "exit-code=$STATUS" >> "$GITHUB_OUTPUT"
+
+    # --- Coverage extraction ---
+    - name: Extract coverage
+      id: coverage
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: |
+        COV_FILE=""
+        for f in "${{ inputs.coverage-report-path }}" coverage-reports/coverage.xml coverage.xml; do
+          if [ -f "$f" ]; then COV_FILE="$f"; break; fi
+        done
+
+        if [ -n "$COV_FILE" ]; then
+          PCT=$(grep -o 'line-rate="[0-9.]*"' "$COV_FILE" | head -1 | grep -o '[0-9.]*' | awk '{printf "%.1f", $1*100}')
+          echo "percentage=${PCT}" >> "$GITHUB_OUTPUT"
+          echo "coverage-file=$(realpath "$COV_FILE")" >> "$GITHUB_OUTPUT"
+        else
+          echo "percentage=0" >> "$GITHUB_OUTPUT"
+          echo "coverage-file=" >> "$GITHUB_OUTPUT"
+        fi
+
+    - name: Extract test evidence
+      id: tests
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: |
+        REPORT=""
+        for f in "${{ inputs.junit-report-path }}" coverage-reports/pytest-report.xml pytest-report.xml; do
+          if [ -f "$f" ]; then REPORT="$f"; break; fi
+        done
+
+        if [ -n "$REPORT" ]; then
+          echo "evidence-found=true" >> "$GITHUB_OUTPUT"
+        else
+          echo "evidence-found=false" >> "$GITHUB_OUTPUT"
+        fi
+
+        uv run python - "$REPORT" "$GITHUB_OUTPUT" <<'PY'
+        import sys
+        import xml.etree.ElementTree as ET
+
+        report, output = sys.argv[1:]
+        values = {"count": 0, "failed": 0, "skipped": 0, "passed": "false"}
+        if report:
+            root = ET.parse(report).getroot()
+            if root.tag in {"testsuite", "testsuites"} and "tests" in root.attrib:
+                suites = [root]
+            else:
+                suites = list(root.findall("./testsuite"))
+            total = sum(int(float(s.attrib.get("tests", 0))) for s in suites)
+            failed = sum(
+                int(float(s.attrib.get("failures", 0)))
+                + int(float(s.attrib.get("errors", 0)))
+                for s in suites
+            )
+            skipped = sum(
+                int(float(s.attrib.get("skipped", s.attrib.get("disabled", 0))))
+                for s in suites
+            )
+            values = {
+                "count": total,
+                "failed": failed,
+                "skipped": skipped,
+                "passed": "true" if failed == 0 else "false",
+            }
+        with open(output, "a", encoding="utf-8") as handle:
+            for key, value in values.items():
+                handle.write(f"{key}={value}\n")
+        PY
+
+    - name: Fail on test failure
+      if: inputs.use-docker-compose != 'true'
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: |
+        STATUS=$(cat coverage-reports/test-exit-code 2>/dev/null || echo 1)
+        if [ "$STATUS" -ne 0 ]; then
+          echo "::error::Python test command failed (exit=$STATUS)."
+          exit 1
+        fi
+        if [ -n "${{ inputs.test-command }}" ] && [ "${{ steps.tests.outputs.evidence-found }}" != "true" ]; then
+          echo "::error::Custom test-command succeeded but did not produce the required JUnit evidence: ${{ inputs.junit-report-path }}"
+          exit 1
+        fi
+        if [ "${{ steps.tests.outputs.passed }}" != "true" ]; then
+          echo "::error::Python test evidence reports failure (failed=${{ steps.tests.outputs.failed }})."
+          exit 1
+        fi
+
+    - name: Check coverage threshold
+      if: inputs.fail-on-coverage == 'true'
+      shell: bash
+      run: |
+        PCT="${{ steps.coverage.outputs.percentage }}"
+        THRESHOLD="${{ inputs.coverage-threshold }}"
+        PASS=$(awk "BEGIN {print ($PCT >= $THRESHOLD) ? 1 : 0}")
+        if [ "$PASS" -ne 1 ]; then
+          echo "Coverage ${PCT}% is below threshold ${THRESHOLD}%"
+          exit 1
+        fi
+
+    - name: Detect preinstalled Codecov CLI
+      id: codecov-runtime
+      if: inputs.upload-coverage == 'true'
+      shell: bash
+      run: |
+        set -euo pipefail
+        if command -v codecov >/dev/null 2>&1 && codecov --version 2>&1 | grep -q '11.3.1'; then
+          echo "binary=$(command -v codecov)" >> "$GITHUB_OUTPUT"
+          echo "Using preinstalled Codecov CLI: $(command -v codecov)"
+        else
+          echo "binary=" >> "$GITHUB_OUTPUT"
+        fi
+
+    - name: Upload coverage to Codecov
+      if: inputs.upload-coverage == 'true' && steps.coverage.outputs.coverage-file != ''
+      uses: codecov/codecov-action@v5
+      with:
+        binary: ${{ steps.codecov-runtime.outputs.binary }}
+        file: ${{ steps.coverage.outputs.coverage-file }}
+        flags: unittests
+        token: ${{ inputs.codecov-token }}
+        fail_ci_if_error: false
+
+    - name: Upload test artifacts
+      uses: actions/upload-artifact@v6
+      continue-on-error: true
+      if: always()
+      with:
+        name: python-test-results
+        path: |
+          ${{ inputs.working-directory }}/coverage-reports/
+          ${{ inputs.working-directory }}/htmlcov/
+        retention-days: 7
+\n'/; }"
+            echo "::warning::Requested uv cache failed initial read/write probe (${REASON:-unknown error}); using local fallback: $FALLBACK"
+          elif ! REASON="$(probe_cache "$REQUESTED" 2>&1)"; then
+            REASON="${REASON//
+    - name: Detect preinstalled uv
+      id: uv-runtime
+      if: inputs.use-docker-compose != 'true'
+      shell: bash
+      run: |
+        if command -v uv >/dev/null 2>&1; then
+          echo "preinstalled=true" >> "$GITHUB_OUTPUT"
+          echo "Using preinstalled uv: $(uv --version)"
+        else
+          echo "preinstalled=false" >> "$GITHUB_OUTPUT"
+        fi
+
+    - name: Install uv
+      if: inputs.use-docker-compose != 'true' && steps.uv-runtime.outputs.preinstalled != 'true'
+      uses: astral-sh/setup-uv@v10.1.0
+      with:
+        version: "latest"
+        enable-cache: false
+        cache-local-path: ${{ steps.uv-cache.outputs.path }}
+
+    - name: Setup Python environment
+      if: inputs.use-docker-compose != 'true'
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: |
+        set -euo pipefail
+        uv python install "${{ inputs.python-version }}"
+
+        DEV_MODES="$(
+          uv run --no-project --python "${{ inputs.python-version }}" python - <<'PY'
+        import pathlib
+        import tomllib
+
+        data = tomllib.loads(pathlib.Path("pyproject.toml").read_text(encoding="utf-8"))
+        modes = []
+        if "dev" in data.get("project", {}).get("optional-dependencies", {}):
+            modes.append("extra")
+        if "dev" in data.get("dependency-groups", {}):
+            modes.append("group")
+        print(" ".join(modes))
+        PY
+        )"
+
+        SYNC_ARGS=()
+        case " ${DEV_MODES} " in
+          *" extra "*) SYNC_ARGS+=(--extra dev) ;;
+        esac
+        case " ${DEV_MODES} " in
+          *" group "*) SYNC_ARGS+=(--group dev) ;;
+        esac
+        uv sync "${SYNC_ARGS[@]}"
+
+    # --- Docker Compose mode ---
+    - name: Run tests with Docker Compose
+      if: inputs.use-docker-compose == 'true'
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: |
+        if docker compose version &>/dev/null; then
+          DC="docker compose"
+        else
+          DC="docker-compose"
+        fi
+
+        $DC -f docker-compose.test.yml down -v || true
+        mkdir -p coverage-reports htmlcov
+        chmod 777 coverage-reports htmlcov
+        $DC -f docker-compose.test.yml build ${{ inputs.docker-compose-service }}
+        $DC -f docker-compose.test.yml run --rm ${{ inputs.docker-compose-service }}
+        $DC -f docker-compose.test.yml down -v
+
+    # --- Direct pytest mode ---
+    - name: Run pytest
+      id: run-tests
+      if: inputs.use-docker-compose != 'true'
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: |
+        mkdir -p coverage-reports
+        CUSTOM_CMD="${{ inputs.test-command }}"
+        set +e
+        if [ -n "$CUSTOM_CMD" ]; then
+          eval "$CUSTOM_CMD"
+        else
+          uv run --with pytest --with pytest-cov pytest ${{ inputs.test-paths }} \
+            -v --tb=short \
+            --cov=${{ inputs.coverage-source }} --cov-report=xml:${{ inputs.coverage-report-path }} \
+            --cov-report=term-missing \
+            --junitxml=${{ inputs.junit-report-path }}
+        fi
+        STATUS=$?
+        set -e
+        printf '%s\n' "$STATUS" > coverage-reports/test-exit-code
+        echo "exit-code=$STATUS" >> "$GITHUB_OUTPUT"
+
+    # --- Coverage extraction ---
+    - name: Extract coverage
+      id: coverage
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: |
+        COV_FILE=""
+        for f in "${{ inputs.coverage-report-path }}" coverage-reports/coverage.xml coverage.xml; do
+          if [ -f "$f" ]; then COV_FILE="$f"; break; fi
+        done
+
+        if [ -n "$COV_FILE" ]; then
+          PCT=$(grep -o 'line-rate="[0-9.]*"' "$COV_FILE" | head -1 | grep -o '[0-9.]*' | awk '{printf "%.1f", $1*100}')
+          echo "percentage=${PCT}" >> "$GITHUB_OUTPUT"
+          echo "coverage-file=$(realpath "$COV_FILE")" >> "$GITHUB_OUTPUT"
+        else
+          echo "percentage=0" >> "$GITHUB_OUTPUT"
+          echo "coverage-file=" >> "$GITHUB_OUTPUT"
+        fi
+
+    - name: Extract test evidence
+      id: tests
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: |
+        REPORT=""
+        for f in "${{ inputs.junit-report-path }}" coverage-reports/pytest-report.xml pytest-report.xml; do
+          if [ -f "$f" ]; then REPORT="$f"; break; fi
+        done
+
+        if [ -n "$REPORT" ]; then
+          echo "evidence-found=true" >> "$GITHUB_OUTPUT"
+        else
+          echo "evidence-found=false" >> "$GITHUB_OUTPUT"
+        fi
+
+        uv run python - "$REPORT" "$GITHUB_OUTPUT" <<'PY'
+        import sys
+        import xml.etree.ElementTree as ET
+
+        report, output = sys.argv[1:]
+        values = {"count": 0, "failed": 0, "skipped": 0, "passed": "false"}
+        if report:
+            root = ET.parse(report).getroot()
+            if root.tag in {"testsuite", "testsuites"} and "tests" in root.attrib:
+                suites = [root]
+            else:
+                suites = list(root.findall("./testsuite"))
+            total = sum(int(float(s.attrib.get("tests", 0))) for s in suites)
+            failed = sum(
+                int(float(s.attrib.get("failures", 0)))
+                + int(float(s.attrib.get("errors", 0)))
+                for s in suites
+            )
+            skipped = sum(
+                int(float(s.attrib.get("skipped", s.attrib.get("disabled", 0))))
+                for s in suites
+            )
+            values = {
+                "count": total,
+                "failed": failed,
+                "skipped": skipped,
+                "passed": "true" if failed == 0 else "false",
+            }
+        with open(output, "a", encoding="utf-8") as handle:
+            for key, value in values.items():
+                handle.write(f"{key}={value}\n")
+        PY
+
+    - name: Fail on test failure
+      if: inputs.use-docker-compose != 'true'
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: |
+        STATUS=$(cat coverage-reports/test-exit-code 2>/dev/null || echo 1)
+        if [ "$STATUS" -ne 0 ]; then
+          echo "::error::Python test command failed (exit=$STATUS)."
+          exit 1
+        fi
+        if [ -n "${{ inputs.test-command }}" ] && [ "${{ steps.tests.outputs.evidence-found }}" != "true" ]; then
+          echo "::error::Custom test-command succeeded but did not produce the required JUnit evidence: ${{ inputs.junit-report-path }}"
+          exit 1
+        fi
+        if [ "${{ steps.tests.outputs.passed }}" != "true" ]; then
+          echo "::error::Python test evidence reports failure (failed=${{ steps.tests.outputs.failed }})."
+          exit 1
+        fi
+
+    - name: Check coverage threshold
+      if: inputs.fail-on-coverage == 'true'
+      shell: bash
+      run: |
+        PCT="${{ steps.coverage.outputs.percentage }}"
+        THRESHOLD="${{ inputs.coverage-threshold }}"
+        PASS=$(awk "BEGIN {print ($PCT >= $THRESHOLD) ? 1 : 0}")
+        if [ "$PASS" -ne 1 ]; then
+          echo "Coverage ${PCT}% is below threshold ${THRESHOLD}%"
+          exit 1
+        fi
+
+    - name: Detect preinstalled Codecov CLI
+      id: codecov-runtime
+      if: inputs.upload-coverage == 'true'
+      shell: bash
+      run: |
+        set -euo pipefail
+        if command -v codecov >/dev/null 2>&1 && codecov --version 2>&1 | grep -q '11.3.1'; then
+          echo "binary=$(command -v codecov)" >> "$GITHUB_OUTPUT"
+          echo "Using preinstalled Codecov CLI: $(command -v codecov)"
+        else
+          echo "binary=" >> "$GITHUB_OUTPUT"
+        fi
+
+    - name: Upload coverage to Codecov
+      if: inputs.upload-coverage == 'true' && steps.coverage.outputs.coverage-file != ''
+      uses: codecov/codecov-action@v5
+      with:
+        binary: ${{ steps.codecov-runtime.outputs.binary }}
+        file: ${{ steps.coverage.outputs.coverage-file }}
+        flags: unittests
+        token: ${{ inputs.codecov-token }}
+        fail_ci_if_error: false
+
+    - name: Upload test artifacts
+      uses: actions/upload-artifact@v6
+      continue-on-error: true
+      if: always()
+      with:
+        name: python-test-results
+        path: |
+          ${{ inputs.working-directory }}/coverage-reports/
+          ${{ inputs.working-directory }}/htmlcov/
+        retention-days: 7
+\n'/; }"
+            echo "::warning::Requested uv cache became unavailable during commit probe (${REASON:-unknown error}); using local fallback: $FALLBACK"
+          else
+            CACHE="$REQUESTED"
+            echo "::notice::Using shared uv cache: $CACHE"
+          fi
+        fi
+
+        if [[ "$CACHE" == "$FALLBACK" ]]; then
+          mkdir -p "$FALLBACK"
+          LOCAL_PROBE="$(mktemp "$FALLBACK/.workflow-ci-write-test.XXXXXX")"
+          rm -f "$LOCAL_PROBE"
+          echo "::notice::Using local uv cache fallback: $FALLBACK"
+        fi
+
         echo "path=$CACHE" >> "$GITHUB_OUTPUT"
         echo "UV_CACHE_DIR=$CACHE" >> "$GITHUB_ENV"
 
