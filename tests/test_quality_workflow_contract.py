@@ -689,13 +689,18 @@ def test_python_actions_fallback_from_read_only_uv_cache():
         root / ".github" / "actions" / "run-python-tests" / "action.yml"
     ).read_text()
 
+    resolver = (
+        root / ".github" / "actions" / "resolve-uv-cache" / "action.yml"
+    ).read_text()
+    assert "timeout 3 bash -c" in resolver
+    assert 'mktemp "$requested/.workflow-ci-write-test.XXXXXX"' in resolver
+    assert 'echo "mode=$mode"' in resolver
+    assert 'echo "reason=$reason"' in resolver
+
     for content in (setup, tests):
-        assert "Resolve writable uv cache" in content
-        assert 'REQUESTED="${UV_CACHE_DIR:-}"' in content
-        assert 'FALLBACK="${RUNNER_TEMP:-/tmp}/uv-cache"' in content
-        assert "timeout 3 bash -c" in content
-        assert "using local fallback" in content
-        assert 'echo "UV_CACHE_DIR=$CACHE" >> "$GITHUB_ENV"' in content
+        assert "uses: $/.github/actions/resolve-uv-cache" in content
+        assert 'echo "UV_CACHE_DIR=${{ steps.uv-cache.outputs.path }}" >> "$GITHUB_ENV"' in content
+        assert "timeout 3 bash -c" not in content
         assert "cache-local-path: ${{ steps.uv-cache.outputs.path }}" in content
         assert "enable-cache: false" in content
 

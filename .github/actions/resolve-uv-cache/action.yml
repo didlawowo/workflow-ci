@@ -1,0 +1,71 @@
+name: "Resolve UV Cache"
+description: "Resolve a writable uv cache with bounded shared-cache probing and local fallback"
+
+outputs:
+  path:
+    description: "Writable uv cache path selected for this job"
+    value: ${{ steps.resolve.outputs.path }}
+  mode:
+    description: "shared when the requested cache is healthy, otherwise local"
+    value: ${{ steps.resolve.outputs.mode }}
+  reason:
+    description: "Selection reason for diagnostics"
+    value: ${{ steps.resolve.outputs.reason }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Resolve writable uv cache
+      id: resolve
+      shell: bash
+      run: |
+        set -euo pipefail
+        requested="${UV_CACHE_DIR:-}"
+        fallback="${RUNNER_TEMP:-/tmp}/uv-cache"
+        cache="$fallback"
+        mode="local"
+        reason="not-requested"
+
+        probe_cache() {
+          timeout 3 bash -c '
+            set -euo pipefail
+            requested="$1"
+            mkdir -p "$requested"
+            probe="$(mktemp "$requested/.workflow-ci-write-test.XXXXXX")"
+            trap '\''rm -f "$probe" 2>/dev/null || true'\'' EXIT
+            printf "%s\\n" "workflow-ci" > "$probe"
+            cat "$probe" >/dev/null
+            rm -f "$probe"
+            trap - EXIT
+          ' _ "$1"
+        }
+
+        if [[ -n "$requested" ]]; then
+          if ! probe_error="$(probe_cache "$requested" 2>&1)"; then
+            probe_error="$(printf '%s' "$probe_error" | tr '\\n' ';')"
+            reason="requested-initial-probe-failed"
+            echo "::warning::Requested uv cache failed initial read/write probe (${probe_error:-unknown error}); using local fallback: $fallback"
+          elif ! probe_error="$(probe_cache "$requested" 2>&1)"; then
+            probe_error="$(printf '%s' "$probe_error" | tr '\\n' ';')"
+            reason="requested-commit-probe-failed"
+            echo "::warning::Requested uv cache became unavailable during commit probe (${probe_error:-unknown error}); using local fallback: $fallback"
+          else
+            cache="$requested"
+            mode="shared"
+            reason="shared-ok"
+            echo "::notice::Using shared uv cache: $cache"
+          fi
+        fi
+
+        if [[ "$cache" == "$fallback" ]]; then
+          mkdir -p "$fallback"
+          local_probe="$(mktemp "$fallback/.workflow-ci-write-test.XXXXXX")"
+          rm -f "$local_probe"
+          echo "::notice::Using local uv cache fallback: $fallback"
+        fi
+
+        {
+          echo "path=$cache"
+          echo "mode=$mode"
+          echo "reason=$reason"
+        } >> "$GITHUB_OUTPUT"
