@@ -223,6 +223,11 @@ jobs:
       # `pyproject.toml`). Et volontairement AVANT le commit, pour que `git add -A`
       # embarque ce qu'elle produit dans le commit de release plutôt que de laisser
       # une dérive derrière.
+      - name: Resolve writable uv cache for post-bump
+        id: post-bump-uv-cache
+        if: steps.recovery.outputs.pending != 'true' && steps.bump.outputs.released == 'true' && inputs.post-bump-command != ''
+        uses: ./.workflow-ci/.github/actions/resolve-uv-cache
+
       - name: Post-bump command
         if: steps.recovery.outputs.pending != 'true' && steps.bump.outputs.released == 'true' && inputs.post-bump-command != ''
         env:
@@ -231,26 +236,9 @@ jobs:
           # le shell avant même d'être une commande.
           POST_BUMP_COMMAND: ${{ inputs.post-bump-command }}
           NEW_VERSION: ${{ steps.bump.outputs.version }}
+          UV_CACHE_DIR: ${{ steps.post-bump-uv-cache.outputs.path }}
         run: |
           set -euo pipefail
-          requested="${UV_CACHE_DIR:-}"
-          cache="${RUNNER_TEMP:-/tmp}/uv-cache"
-          if [[ -n "$requested" ]] && timeout 3 bash -c '
-            set -euo pipefail
-            requested="$1"
-            mkdir -p "$requested"
-            probe="$requested/.workflow-ci-write-test.$"
-            trap '\''rm -f "$probe" 2>/dev/null || true'\'' EXIT
-            : > "$probe"
-          ' _ "$requested" >/dev/null 2>&1; then
-            cache="$requested"
-          else
-            echo "::warning::Requested uv cache is unavailable; using local fallback: $cache"
-          fi
-          mkdir -p "$cache"
-          probe="$(mktemp "$cache/.workflow-ci-write-test.XXXXXX")"
-          rm -f "$probe"
-          export UV_CACHE_DIR="$cache"
           echo "Running post-bump command:"
           echo "$POST_BUMP_COMMAND"
           bash -euo pipefail -c "$POST_BUMP_COMMAND"
