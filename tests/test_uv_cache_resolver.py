@@ -49,7 +49,7 @@ def _run_resolver(tmp_path: Path, command: str, *, fake_timeout: bool):
             '  "$@"\n'
             "  exit $?\n"
             "fi\n"
-            'echo "mkdir: cannot stat '"'"'$UV_CACHE_DIR'"'"': Remote I/O error" >&2\n'
+            'echo "simulated Remote I/O error for $UV_CACHE_DIR" >&2\n'
             "exit 74\n"
         )
         timeout.chmod(0o700)
