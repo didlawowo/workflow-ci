@@ -29,7 +29,7 @@ runs:
       run: |
         set -euo pipefail
 
-        requested="$REQUESTED_UV_CACHE"
+        requested="${REQUESTED_UV_CACHE:-${UV_CACHE_DIR:-}}"
         fallback="${RUNNER_TEMP:-/tmp}/uv-cache"
         cache="$fallback"
         mode="local"
