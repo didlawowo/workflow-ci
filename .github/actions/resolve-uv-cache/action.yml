@@ -1,0 +1,66 @@
+name: "Resolve UV Cache"
+description: "Resolve a writable uv cache with bounded shared-cache probing and local fallback"
+
+inputs:
+  requested:
+    description: "Requested shared uv cache path. Empty means use the runner-local fallback."
+    required: false
+    default: ""
+
+outputs:
+  path:
+    description: "Writable uv cache path selected for this job"
+    value: ${{ steps.resolve.outputs.path }}
+  mode:
+    description: "shared when the requested cache is healthy, otherwise local"
+    value: ${{ steps.resolve.outputs.mode }}
+  reason:
+    description: "Selection reason: shared-ok, not-requested, or requested-unavailable"
+    value: ${{ steps.resolve.outputs.reason }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Resolve writable uv cache
+      id: resolve
+      shell: bash
+      env:
+        REQUESTED_UV_CACHE: ${{ inputs.requested }}
+      run: |
+        set -euo pipefail
+
+        requested="$REQUESTED_UV_CACHE"
+        fallback="${RUNNER_TEMP:-/tmp}/uv-cache"
+        cache="$fallback"
+        mode="local"
+        reason="not-requested"
+
+        if [[ -n "$requested" ]]; then
+          if timeout 3 bash -c '
+            set -euo pipefail
+            requested="$1"
+            mkdir -p "$requested"
+            probe="$(mktemp "$requested/.workflow-ci-write-test.XXXXXX")"
+            trap '\''rm -f -- "$probe" 2>/dev/null || true'\'' EXIT
+            : > "$probe"
+          ' _ "$requested" >/dev/null 2>&1; then
+            cache="$requested"
+            mode="shared"
+            reason="shared-ok"
+          else
+            reason="requested-unavailable"
+            echo "::warning::Requested uv cache is unavailable; using local fallback: $fallback"
+          fi
+        fi
+
+        mkdir -p "$cache"
+        probe="$(mktemp "$cache/.workflow-ci-write-test.XXXXXX")"
+        rm -f -- "$probe"
+
+        {
+          echo "path=$cache"
+          echo "mode=$mode"
+          echo "reason=$reason"
+        } >> "$GITHUB_OUTPUT"
+
+        echo "::notice::UV cache mode=$mode reason=$reason path=$cache"
