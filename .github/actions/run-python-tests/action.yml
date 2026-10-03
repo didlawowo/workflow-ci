@@ -87,20 +87,40 @@ runs:
         FALLBACK="${RUNNER_TEMP:-/tmp}/uv-cache"
         CACHE="$FALLBACK"
 
-        if [[ -n "$REQUESTED" ]] && timeout 3 bash -c '
-          set -euo pipefail
-          requested="$1"
-          mkdir -p "$requested"
-          probe="$requested/.workflow-ci-write-test.$"
-          trap '\''rm -f "$probe" 2>/dev/null || true'\'' EXIT
-          : > "$probe"
-        ' _ "$REQUESTED" >/dev/null 2>&1; then
-          CACHE="$REQUESTED"
-        else
-          echo "::warning::Requested uv cache is unavailable; using local fallback: $FALLBACK"
+        probe_cache() {
+          timeout 3 bash -c '
+            set -euo pipefail
+            requested="$1"
+            mkdir -p "$requested"
+            probe="$(mktemp "$requested/.workflow-ci-write-test.XXXXXX")"
+            trap '\''rm -f "$probe" 2>/dev/null || true'\'' EXIT
+            printf "%s\\n" "workflow-ci" > "$probe"
+            cat "$probe" >/dev/null
+            rm -f "$probe"
+            trap - EXIT
+          ' _ "$1"
+        }
+
+        if [[ -n "$REQUESTED" ]]; then
+          if ! REASON="$(probe_cache "$REQUESTED" 2>&1)"; then
+            REASON="$(printf '%s' "$REASON" | tr '\\n' ';')"
+            echo "::warning::Requested uv cache failed initial read/write probe (${REASON:-unknown error}); using local fallback: $FALLBACK"
+          elif ! REASON="$(probe_cache "$REQUESTED" 2>&1)"; then
+            REASON="$(printf '%s' "$REASON" | tr '\\n' ';')"
+            echo "::warning::Requested uv cache became unavailable during commit probe (${REASON:-unknown error}); using local fallback: $FALLBACK"
+          else
+            CACHE="$REQUESTED"
+            echo "::notice::Using shared uv cache: $CACHE"
+          fi
         fi
 
-        mkdir -p "$CACHE"
+        if [[ "$CACHE" == "$FALLBACK" ]]; then
+          mkdir -p "$FALLBACK"
+          LOCAL_PROBE="$(mktemp "$FALLBACK/.workflow-ci-write-test.XXXXXX")"
+          rm -f "$LOCAL_PROBE"
+          echo "::notice::Using local uv cache fallback: $FALLBACK"
+        fi
+
         echo "path=$CACHE" >> "$GITHUB_OUTPUT"
         echo "UV_CACHE_DIR=$CACHE" >> "$GITHUB_ENV"
 
