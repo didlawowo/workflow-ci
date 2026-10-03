@@ -59,7 +59,11 @@ inputs:
     required: false
     default: "false"
   scan:
-    description: "Run Trivy security scan"
+    description: |
+      Optional CI-side Trivy image scan. Disabled by default: the central OCI
+      registry owns asynchronous vulnerability scanning after push. Enable this
+      only for a repository that explicitly wants duplicate build-time evidence;
+      workflow-ci must not keep builds/releases pending on the registry scan.
     required: false
     default: "false"
   upload-sarif:
