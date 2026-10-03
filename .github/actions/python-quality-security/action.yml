@@ -151,15 +151,14 @@ runs:
         SAFETY_RC=$?
         set -e
 
-        if [[ "$SAFETY_RC" -eq 0 ]]; then
-          echo "status=passed" >> "$GITHUB_OUTPUT"
-        elif [[ -s safety-report.json ]] && jq -e . safety-report.json >/dev/null 2>&1; then
-          # Safety returns non-zero for vulnerability findings while still
-          # producing a valid machine-readable report.
-          echo "status=findings" >> "$GITHUB_OUTPUT"
-        else
+        SAFETY_STATUS="$(
+          python3 "$GITHUB_ACTION_PATH/../../scripts/classify_safety_result.py" \
+            "$SAFETY_RC" safety-report.json
+        )"
+        echo "status=$SAFETY_STATUS" >> "$GITHUB_OUTPUT"
+
+        if [[ "$SAFETY_STATUS" == "error" ]]; then
           # Tool/network/runtime failure: blocking, but not a fake CVE finding.
-          echo "status=error" >> "$GITHUB_OUTPUT"
           cat "$SAFETY_STDERR" >&2 || true
         fi
       continue-on-error: true
