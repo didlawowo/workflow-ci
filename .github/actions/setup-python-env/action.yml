@@ -32,13 +32,17 @@ runs:
         FALLBACK="${RUNNER_TEMP:-/tmp}/uv-cache"
         CACHE="$FALLBACK"
 
-        if [[ -n "$REQUESTED" ]]; then
-          mkdir -p "$REQUESTED" 2>/dev/null || true
-          PROBE="$REQUESTED/.workflow-ci-write-test-$"
-          if ( : > "$PROBE" ) 2>/dev/null; then
-            rm -f "$PROBE"
-            CACHE="$REQUESTED"
-          fi
+        if [[ -n "$REQUESTED" ]] && timeout 3 bash -c '
+          set -euo pipefail
+          requested="$1"
+          mkdir -p "$requested"
+          probe="$requested/.workflow-ci-write-test.$"
+          trap '\''rm -f "$probe" 2>/dev/null || true'\'' EXIT
+          : > "$probe"
+        ' _ "$REQUESTED" >/dev/null 2>&1; then
+          CACHE="$REQUESTED"
+        else
+          echo "::warning::Requested uv cache is unavailable; using local fallback: $FALLBACK"
         fi
 
         mkdir -p "$CACHE"
