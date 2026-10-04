@@ -8,6 +8,7 @@ Reusable GitHub Actions composite actions and workflow templates for CI/CD pipel
 
 | Action                  | Description                                                |
 | ----------------------- | ---------------------------------------------------------- |
+| [`detect-image-changes`](.github/actions/detect-image-changes/README.md) | Skip image rebuilds for releases containing only declared non-image changes |
 | `docker-build-push`     | Build, push, scan (Trivy), sign (Cosign), SBOM, provenance |
 | `trivy-filesystem-scan` | Vulnerability, secret, misconfiguration, license scanning  |
 
