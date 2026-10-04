@@ -150,7 +150,7 @@ actions to the exact commit of the tagged workflow and prevents stale cross-vers
 
 ### Python and Go caches on ARC runners
 
-Production CI caches are NFS-only. Runners must provide existing absolute
+Python and Go language caches are NFS-only. Runners must provide existing absolute
 `UV_CACHE_DIR`, `GOCACHE` and `GOMODCACHE` directories on an `nfs`/`nfs4` mount.
 The runner needs `bash`, GNU `timeout` and util-linux `findmnt`. A bounded
 read/write probe rejects missing, local or unavailable caches before execution;
