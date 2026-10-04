@@ -290,10 +290,10 @@ def test_python_security_action_propagates_requested_check_failures():
     assert "--no-emit-project" in content
     assert 'safety check -r "$SAFETY_INPUT" --output json' in content
     assert "safety check --output json" not in content
-    assert 'classify_safety_result.py' in content
+    assert "classify_safety_result.py" in content
     assert '"$SAFETY_RC" safety-report.json' in content
     assert 'echo "status=$SAFETY_STATUS" >> "$GITHUB_OUTPUT"' in content
-    assert 'SECURITY_SCAN_ERRORS=$((SECURITY_SCAN_ERRORS + 1))' in content
+    assert "SECURITY_SCAN_ERRORS=$((SECURITY_SCAN_ERRORS + 1))" in content
     assert 'case "${{ steps.safety.outputs.status }}" in' in content
     assert "SECURITY_ISSUES=$((SECURITY_ISSUES + 1))" in content
 
@@ -446,7 +446,10 @@ def test_internal_workflow_ci_refs_follow_immutable_version_contract():
                 continue
             if "uses:" not in line:
                 continue
-            assert f"@{version}" in line, f"{path}: mutable/stale internal ref: {line}"
+            expected_ref = "v1.16.0" if path.name == "moto-tracker-ci.yaml" else version
+            assert f"@{expected_ref}" in line, (
+                f"{path}: mutable/stale internal ref: {line}"
+            )
 
     release = (root / ".github" / "workflows" / "release.yml").read_text()
     assert "workflow-ci-ref:" in release
@@ -551,8 +554,7 @@ def test_quality_evidence_separates_blocking_gate_from_best_effort_publication()
         "scope-key: ${{ format('{0}-{1}', inputs.repo-type, inputs.working-directory) }}"
         in content
     )
-    assert "Configure writable reporter cache" in publisher
-    assert 'CACHE="${RUNNER_TEMP:-/tmp}/quality-reporter-uv-cache"' in publisher
+    assert "quality-reporter-uv-cache" not in publisher
     assert "Materialize trusted mutation evidence" in publisher
     assert "continue-on-error: true" in publisher
     assert "needs.mutation.outputs.report-b64" in publisher
@@ -621,7 +623,7 @@ def test_release_workflow_never_commits_workflow_ci_checkout():
     assert "git reset -- .workflow-ci 2>/dev/null || true" in content
 
 
-def test_mutation_jobs_force_uv_cache_into_runner_temp():
+def test_mutation_jobs_require_runner_nfs_cache():
     root = Path(__file__).resolve().parents[1]
     content = (root / ".github" / "workflows" / "mutation-policy.yml").read_text()
 
@@ -632,8 +634,8 @@ def test_mutation_jobs_force_uv_cache_into_runner_temp():
 
     for job in (mutation_run, mutation_verify):
         assert "Configure writable uv cache" in job
-        assert 'UV_CACHE="${RUNNER_TEMP:-/tmp}/uv-cache"' in job
-        assert 'echo "UV_CACHE_DIR=$UV_CACHE" >> "$GITHUB_ENV"' in job
+        assert "require_nfs_cache UV_CACHE_DIR" in job
+        assert 'UV_CACHE="${RUNNER_TEMP:-/tmp}/uv-cache"' not in job
         assert "enable-cache: false" in job
 
     assert "UV_CACHE_DIR: ${{ runner.temp }}/uv-cache" not in content
@@ -680,22 +682,12 @@ def test_mutation_diagnostics_accept_machine_readable_stats_without_mutmut_binar
         )
 
 
-def test_python_actions_fallback_from_read_only_uv_cache():
+def test_python_actions_require_nfs_without_local_fallback():
     root = Path(__file__).resolve().parents[1]
-    setup = (
-        root / ".github" / "actions" / "setup-python-env" / "action.yml"
-    ).read_text()
-    tests = (
-        root / ".github" / "actions" / "run-python-tests" / "action.yml"
-    ).read_text()
-
-    for content in (setup, tests):
-        assert "Resolve writable uv cache" in content
-        assert 'REQUESTED="${UV_CACHE_DIR:-}"' in content
-        assert 'FALLBACK="${RUNNER_TEMP:-/tmp}/uv-cache"' in content
-        assert "timeout 3 bash -c" in content
-        assert "using local fallback" in content
-        assert 'echo "UV_CACHE_DIR=$CACHE" >> "$GITHUB_ENV"' in content
+    for name in ("setup-python-env", "run-python-tests", "quality-report"):
+        content = (root / ".github/actions" / name / "action.yml").read_text()
+        assert "require_nfs_cache UV_CACHE_DIR" in content
+        assert "${RUNNER_TEMP:-/tmp}/uv-cache" not in content
         assert "cache-local-path: ${{ steps.uv-cache.outputs.path }}" in content
         assert "enable-cache: false" in content
 

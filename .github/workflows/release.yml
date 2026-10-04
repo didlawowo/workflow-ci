@@ -233,44 +233,10 @@ jobs:
           NEW_VERSION: ${{ steps.bump.outputs.version }}
         run: |
           set -euo pipefail
-          requested="${UV_CACHE_DIR:-}"
-          fallback="${RUNNER_TEMP:-/tmp}/uv-cache"
-          cache="$fallback"
-
-          probe_cache() {
-            timeout 3 bash -c '
-              set -euo pipefail
-              requested="$1"
-              mkdir -p "$requested"
-              probe="$(mktemp "$requested/.workflow-ci-write-test.XXXXXX")"
-              trap '\''rm -f "$probe" 2>/dev/null || true'\'' EXIT
-              printf "%s\\n" "workflow-ci" > "$probe"
-              cat "$probe" >/dev/null
-              rm -f "$probe"
-              trap - EXIT
-            ' _ "$1"
-          }
-
-          if [[ -n "$requested" ]]; then
-            if ! reason="$(probe_cache "$requested" 2>&1)"; then
-              reason="$(printf '%s' "$reason" | tr '\\n' ';')"
-              echo "::warning::Requested uv cache failed initial read/write probe (${reason:-unknown error}); using local fallback: $fallback"
-            elif ! reason="$(probe_cache "$requested" 2>&1)"; then
-              reason="$(printf '%s' "$reason" | tr '\\n' ';')"
-              echo "::warning::Requested uv cache became unavailable during commit probe (${reason:-unknown error}); using local fallback: $fallback"
-            else
-              cache="$requested"
-              echo "::notice::Using shared uv cache: $cache"
-            fi
-          fi
-
-          if [[ "$cache" == "$fallback" ]]; then
-            mkdir -p "$fallback"
-            probe="$(mktemp "$fallback/.workflow-ci-write-test.XXXXXX")"
-            rm -f "$probe"
-            echo "::notice::Using local uv cache fallback: $fallback"
-          fi
-          export UV_CACHE_DIR="$cache"
+          source ".workflow-ci/.ci/nfs-cache.sh"
+          require_nfs_cache UV_CACHE_DIR
+          require_nfs_cache GOCACHE
+          require_nfs_cache GOMODCACHE
           echo "Running post-bump command:"
           echo "$POST_BUMP_COMMAND"
           bash -euo pipefail -c "$POST_BUMP_COMMAND"

@@ -141,7 +141,9 @@ def prepare(event: dict) -> None:
     repository = os.environ["POLICY_REPOSITORY"]
     head_repo = pr["head"]["repo"]["full_name"]
     token = os.environ["POLICY_TOKEN"]
-    root = Path(tempfile.mkdtemp(prefix="workflow-ci-forgejo-"))
+    root = Path(
+        tempfile.mkdtemp(prefix="workflow-ci-forgejo-", dir=os.environ["UV_CACHE_DIR"])
+    )
     try:
         trusted, proposed = root / "base", root / "verify"
         fetch(trusted, server, repository, base, token)
@@ -215,6 +217,8 @@ def sandbox_command(root: Path, engine: str, base: str, head: str) -> list[str]:
         f"HOME={root / 'home'}",
         f"RUNNER_TEMP={root / 'home'}",
         f"UV_CACHE_DIR={root / 'home' / 'uv-cache'}",
+        f"GOCACHE={root / 'home' / 'go-build'}",
+        f"GOMODCACHE={root / 'home' / 'go-mod'}",
         "UV_LINK_MODE=copy",
         "CI=true",
         f"MUTATION_BASE_SHA={base}",

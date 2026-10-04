@@ -5,9 +5,7 @@ import shlex
 import subprocess
 from pathlib import Path
 
-import pytest
 import yaml
-
 
 WORKFLOW = Path(__file__).resolve().parents[1] / ".github/workflows/release.yml"
 
@@ -32,11 +30,16 @@ def run_post_bump(
         'exit "$CHILD_EXIT_CODE"\n'
     )
     result_file = tmp_path / "child result"
+    bin_dir = tmp_path / "mount-bin"
+    bin_dir.mkdir()
+    findmnt = bin_dir / "findmnt"
+    findmnt.write_text("#!/bin/sh\necho nfs4\n")
+    findmnt.chmod(0o700)
     env = {
         "PATH": (
             str(path_prefix) + os.pathsep + os.environ["PATH"]
             if path_prefix is not None
-            else os.environ["PATH"]
+            else str(bin_dir) + os.pathsep + os.environ["PATH"]
         ),
         "POST_BUMP_COMMAND": f"bash {shlex.quote(str(child))}",
         "NEW_VERSION": "v1.2.3",
@@ -45,11 +48,27 @@ def run_post_bump(
     }
     if requested is not None:
         env["UV_CACHE_DIR"] = str(requested)
+        if not requested.exists():
+            requested.mkdir()
+    for variable in ("GOCACHE", "GOMODCACHE"):
+        directory = tmp_path / variable
+        directory.mkdir()
+        env[variable] = str(directory)
     if runner_temp is not None:
         env["RUNNER_TEMP"] = str(runner_temp)
     result = subprocess.run(
-        ["bash", "-euo", "pipefail", "-c", post_bump_step()["run"]],
+        [
+            "bash",
+            "-euo",
+            "pipefail",
+            "-c",
+            post_bump_step()["run"].replace(
+                ".workflow-ci/.ci/nfs-cache.sh",
+                str(WORKFLOW.parents[2] / ".ci/nfs-cache.sh"),
+            ),
+        ],
         env=env,
+        check=False,
         capture_output=True,
         text=True,
         timeout=10,
@@ -94,82 +113,31 @@ def test_requested_cache_probe_failure_falls_back_under_errexit(tmp_path):
         path_prefix=bin_dir,
     )
 
-    fallback = runner_temp / "uv-cache"
-    assert result.returncode == 0, result.stderr
-    assert output.read_text().splitlines() == [str(fallback), "v1.2.3"]
-    assert "using local fallback" in result.stdout
-    assert_no_probes(fallback)
+    assert result.returncode != 0
+    assert not output.exists()
+    assert not (runner_temp / "uv-cache").exists()
 
 
-def test_unusable_requested_cache_falls_back(tmp_path):
-    requested = tmp_path / "not a directory"
+def test_unset_cache_blocks_child(tmp_path):
+    result, output = run_post_bump(tmp_path)
+    assert result.returncode != 0
+    assert not output.exists()
+
+
+def test_unusable_cache_blocks_child(tmp_path):
+    requested = tmp_path / "file"
     requested.write_text("occupied")
-    runner_temp = tmp_path / "runner temp"
-    runner_temp.mkdir()
-
-    result, output = run_post_bump(
-        tmp_path, requested=requested, runner_temp=runner_temp
-    )
-
-    fallback = runner_temp / "uv-cache"
-    assert result.returncode == 0, result.stderr
-    assert output.read_text().splitlines() == [str(fallback), "v1.2.3"]
-    assert_no_probes(fallback)
-
-
-def test_read_only_requested_cache_falls_back_for_non_root(tmp_path):
-    if os.geteuid() == 0:
-        pytest.skip("root can write despite chmod; ENOTDIR is covered separately")
-    requested = tmp_path / "read only cache"
-    requested.mkdir()
-    requested.chmod(0o500)
-    runner_temp = tmp_path / "runner temp"
-    runner_temp.mkdir()
-    try:
-        result, output = run_post_bump(
-            tmp_path, requested=requested, runner_temp=runner_temp
-        )
-    finally:
-        requested.chmod(0o700)
-
-    fallback = runner_temp / "uv-cache"
-    assert result.returncode == 0, result.stderr
-    assert output.read_text().splitlines() == [str(fallback), "v1.2.3"]
-    assert_no_probes(requested)
-    assert_no_probes(fallback)
-
-
-def test_unset_cache_uses_runner_temp(tmp_path):
-    runner_temp = tmp_path / "runner temp"
-    runner_temp.mkdir()
-
-    result, output = run_post_bump(tmp_path, runner_temp=runner_temp)
-
-    fallback = runner_temp / "uv-cache"
-    assert result.returncode == 0, result.stderr
-    assert output.read_text().splitlines() == [str(fallback), "v1.2.3"]
-    assert_no_probes(fallback)
-
-
-def test_unwritable_fallback_prevents_child_execution(tmp_path):
-    runner_temp = tmp_path / "runner temp"
-    runner_temp.write_text("not a directory")
-
-    result, output = run_post_bump(tmp_path, runner_temp=runner_temp)
-
+    result, output = run_post_bump(tmp_path, requested=requested)
     assert result.returncode != 0
     assert not output.exists()
 
 
 def test_child_failure_code_is_propagated(tmp_path):
-    runner_temp = tmp_path / "runner temp"
-    runner_temp.mkdir()
-
-    result, output = run_post_bump(tmp_path, runner_temp=runner_temp, exit_code=37)
-
+    requested = tmp_path / "nfs"
+    result, output = run_post_bump(tmp_path, requested=requested, exit_code=37)
     assert result.returncode == 37
-    assert output.read_text().splitlines() == [str(runner_temp / "uv-cache"), "v1.2.3"]
-    assert_no_probes(runner_temp / "uv-cache")
+    assert output.read_text().splitlines() == [str(requested), "v1.2.3"]
+    assert_no_probes(requested)
 
 
 def test_existing_release_guard_and_local_scope_are_unchanged():

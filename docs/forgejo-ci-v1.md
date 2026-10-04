@@ -37,8 +37,10 @@ Actions de l'agent lors de la livraison :
 1. Faire relire et publier ces ajouts dans le dépôt canonique `didlawowo/workflow-ci`.
 2. Publier une release selon le mécanisme existant du dépôt.
 3. Remplacer les trois références du template par le tag effectivement publié
-   contenant les workflows. `v1.8.0` est une référence d'exemple, pas une release
-   annoncée comme disponible.
+   contenant les corrections. Le template utilise `v1.16.0`, première release
+   publiée contenant les trois workflows. Ce tag ne contient pas encore la
+   validation NFS ajoutée par la PR #159 : adopter la release de cette correction
+   pour appliquer la politique NFS obligatoire.
 4. Copier `templates/forgejo/moto-tracker-ci.yaml` dans
    `moto-tracker/.forgejo/workflows/ci.yaml` puis ouvrir une PR pilote.
 5. Vérifier le run Forgejo réel : expansion des trois workflows, checkout du
@@ -81,3 +83,19 @@ Le pilote permet de vérifier ces points avant d'onboarder d'autres dépôts.
 Le rollback consiste à restaurer le fichier CI autonome précédent de
 moto-tracker. Aucun changement de données ni de déploiement applicatif n'est
 introduit par cette migration.
+
+## Politique de cache Python NFS
+
+Le job Python conserve le `UV_CACHE_DIR` fourni par le runner. Le répertoire
+absolu doit exister, être inscriptible et appartenir à un montage `nfs`/`nfs4`
+visible dans le conteneur du job. Le contrôle lecture/écriture est borné à six
+secondes et précède l'installation de uv et des dépendances. Un chemin absent,
+local ou indisponible bloque le job ; aucun cache local de secours n'est créé.
+Le runner doit fournir bash, GNU timeout et util-linux findmnt. Configurer
+uniquement le montage sur l'hôte sans le rendre visible dans le job ne suffit pas.
+
+Le workflow Forgejo embarque le même validateur que `.ci/nfs-cache.sh` pour
+éviter un checkout de code du consommateur comme source du contrôle. Un test
+vérifie leur identité et l'ordre des étapes. Les autres contrats couvrent la
+base PostgreSQL, les paramètres npm et la dépendance à la validation Taskfiles.
+Ces tests ne remplacent pas la recette distante Forgejo après publication.

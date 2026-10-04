@@ -368,14 +368,6 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
-      - name: Configure writable reporter cache
-        shell: bash
-        run: |
-          set -euo pipefail
-          CACHE="${RUNNER_TEMP:-/tmp}/quality-reporter-uv-cache"
-          mkdir -p "$CACHE"
-          echo "UV_CACHE_DIR=$CACHE" >> "$GITHUB_ENV"
-
       - name: Materialize trusted mutation evidence
         id: mutation-evidence-inline
         if: needs.mutation.outputs.required == 'true'

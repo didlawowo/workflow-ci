@@ -20,15 +20,20 @@ concurrency:
   cancel-in-progress: true
 jobs:
   python-central-runner:
-    runs-on: ${{ vars.LIGHT_RUNNER || vars.RUNNER || format('arc-runner-{0}', github.event.repository.name) }}
+    runs-on: ${{ vars.RUNNER || format('arc-runner-{0}', github.event.repository.name) }}
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
+      - name: Validate NFS cache
+        run: |
+          source ".ci/nfs-cache.sh"
+          require_nfs_cache UV_CACHE_DIR
       - uses: astral-sh/setup-uv@v10.1.0
         with:
           enable-cache: false
+          prune-cache: false
       - name: Real dependency-bearing consumer without a local mutation script
         run: bash tests/run_central_mutation_smoke.sh
       - name: Real Forgejo adapter sandbox without a live forge dependency

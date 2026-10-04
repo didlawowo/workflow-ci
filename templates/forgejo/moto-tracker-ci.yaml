@@ -1,4 +1,4 @@
-# Example release pin: replace v1.8.0 with a published tag containing these workflows.
+# Published Forgejo V1 pin; adopt a newer release to receive the NFS-only policy.
 # Copy to moto-tracker/.forgejo/workflows/ci.yaml.
 name: CI
 
@@ -15,13 +15,13 @@ concurrency:
 
 jobs:
   taskfiles:
-    uses: https://github.com/didlawowo/workflow-ci/.forgejo/workflows/taskfiles.yaml@v1.8.0
+    uses: https://github.com/didlawowo/workflow-ci/.forgejo/workflows/taskfiles.yaml@v1.16.0
     with:
       runner: ubuntu-latest
 
   backend-tests:
     needs: [taskfiles]
-    uses: https://github.com/didlawowo/workflow-ci/.forgejo/workflows/python-postgres.yaml@v1.8.0
+    uses: https://github.com/didlawowo/workflow-ci/.forgejo/workflows/python-postgres.yaml@v1.16.0
     with:
       runner: ubuntu-latest
       working-directory: backend
@@ -29,7 +29,7 @@ jobs:
 
   pwa-build:
     needs: [taskfiles]
-    uses: https://github.com/didlawowo/workflow-ci/.forgejo/workflows/node-build.yaml@v1.8.0
+    uses: https://github.com/didlawowo/workflow-ci/.forgejo/workflows/node-build.yaml@v1.16.0
     with:
       runner: ubuntu-latest
       working-directory: pwa
