@@ -1,0 +1,39 @@
+name: Detect image changes
+description: Compare release tags to decide whether an application image needs rebuilding
+inputs:
+  current-tag:
+    description: Existing stable release tag to compare (not the checkout HEAD)
+    default: ${{ github.event.release.tag_name || github.ref_name }}
+  previous-tag:
+    description: Optional explicit base release tag; otherwise nearest first-parent release
+    default: ""
+  tag-prefix:
+    description: Stable release tag family prefix
+    default: v
+  app-paths:
+    description: Multiline repository-relative Git glob patterns included in the image
+    default: "**"
+  non-image-paths:
+    description: Multiline Git glob exclusions; take precedence over app-paths
+    default: |
+      helm/**
+      docs/**
+outputs:
+  app-changed:
+    description: true when at least one image-impacting file changed
+    value: ${{ steps.detect.outputs.app-changed }}
+  previous-tag:
+    description: Release tag used as comparison base
+    value: ${{ steps.detect.outputs.previous-tag }}
+runs:
+  using: composite
+  steps:
+    - id: detect
+      shell: bash
+      env:
+        CURRENT_TAG: ${{ inputs.current-tag }}
+        PREVIOUS_TAG: ${{ inputs.previous-tag }}
+        TAG_PREFIX: ${{ inputs.tag-prefix }}
+        APP_PATHS: ${{ inputs.app-paths }}
+        NON_IMAGE_PATHS: ${{ inputs.non-image-paths }}
+      run: python3 "$GITHUB_ACTION_PATH/../../../image_changes.py"
