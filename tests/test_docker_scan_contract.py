@@ -275,7 +275,18 @@ def test_vulnerability_policy_and_non_security_fallbacks_are_unchanged():
     assert "exit-code:" not in STEPS["Run Trivy vulnerability scanner"]
     hub_login = STEPS["Login to Docker Hub (authenticated base image pulls)"]
     assert "continue-on-error: true" in hub_login
-    assert "ignore-error=true" in STEPS["Build and push Docker image"]
+    for block in STEPS.values():
+        if "uses: docker/build-push-action@" in block:
+            assert "cache-to:" not in block
+            assert "steps.cache-plan.outputs.cache-from" in block
+    cache_input = TEXT.split("  cache-required:\n", 1)[1].split("  cache-scope:\n", 1)[
+        0
+    ]
+    assert '    default: "false"' in cache_input
+    export = STEPS["Export and verify registry caches"]
+    assert "CACHE_REQUIRED: ${{ inputs.cache-required }}" in export
+    assert "continue-on-error:" not in export
+    assert 'run: python3 "$GITHUB_ACTION_PATH/cache.py" export' in export
 
 
 @pytest.mark.parametrize(
