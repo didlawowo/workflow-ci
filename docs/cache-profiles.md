@@ -36,6 +36,39 @@ Les actions composites `setup-python-env` et `setup-go-env` utilisent ce helper.
 `setup-node-env` configure `NPM_CONFIG_CACHE` explicitement avant
 `actions/setup-node` lorsque le profil `local` est demandé.
 
+## Persistance par archives (profil `local`)
+
+Les répertoires actifs restent locaux. La réutilisation entre jobs passe par
+une archive `cache.tar` unique et bornée :
+
+| Variable | Rôle |
+| --- | --- |
+| `WORKFLOW_ARCHIVE_ROOT` | Racine partagée des archives (chemin absolu, canonique). Absente → aucun partage, reconstruction à froid. |
+| `GITHUB_REF_PROTECTED` | `true` → namespace `protected`, sinon `ephemeral`. |
+
+- Clé : `sha256` de (dépôt, OS, architecture, type, version d'outil, empreinte
+  de lockfile).
+- Namespaces : `<dépôt>/protected/<clé>/cache.tar` et
+  `<dépôt>/ephemeral/<clé>/cache.tar`.
+- Un job de PR peut **lire** le namespace `protected` (démarrage à chaud) mais
+  n'écrit **jamais** dedans ; un job protégé ne lit pas `ephemeral`.
+- Publication **atomique** (rename) et **immuable** : le premier écrivain
+  gagne, une clé existante n'est jamais réécrite.
+- Restauration refusée si l'archive contient un chemin absolu, une traversée,
+  un lien symbolique qui sort du cache, un hardlink, un device, ou dépasse les
+  limites (512 Mio / 100 000 fichiers). Toute erreur laisse reconstruire à froid.
+
+Usage dans un job (profil `local` uniquement) :
+
+```yaml
+- uses: didlawowo/workflow-ci/.github/actions/runner-cache@<tag>
+  with: { mode: restore, kind: uv, version: 0.12, fingerprint: ${{ hashFiles('uv.lock') }} }
+# ... étapes du job ...
+- uses: didlawowo/workflow-ci/.github/actions/runner-cache@<tag>
+  if: always()
+  with: { mode: publish, kind: uv, version: 0.12, fingerprint: ${{ hashFiles('uv.lock') }} }
+```
+
 ## Quand ne pas mettre de cache
 
 - Cache absent, invalide ou corrompu : la reconstruction à froid locale doit
