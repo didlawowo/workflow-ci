@@ -30,6 +30,13 @@ outputs:
 runs:
   using: "composite"
   steps:
+    - name: Configure local runner cache profile
+      if: env.WORKFLOW_CACHE_PROFILE == 'local'
+      shell: bash
+      run: |
+        source "$GITHUB_ACTION_PATH/../../../.ci/nfs-cache.sh"
+        require_runner_cache NPM_CONFIG_CACHE
+
     - name: Install pnpm
       if: inputs.package-manager == 'pnpm'
       uses: pnpm/action-setup@v4
