@@ -548,8 +548,6 @@ runs:
         CACHE_NATIVE: ${{ steps.execution-mode.outputs.use-native }}
         CACHE_REQUIRED: ${{ inputs.cache-required }}
         CACHE_PLAIN_HTTP: ${{ inputs.registry-plain-http }}
-        CACHE_USERNAME: ${{ inputs.registry-username }}
-        CACHE_PASSWORD: ${{ inputs.registry-password }}
       run: python3 "$GITHUB_ACTION_PATH/cache.py" export
 
     - name: Sign image with Cosign

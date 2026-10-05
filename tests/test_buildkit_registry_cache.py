@@ -4,7 +4,6 @@ import importlib.util
 import json
 import subprocess
 from pathlib import Path
-from unittest.mock import patch
 
 import pytest
 
@@ -112,40 +111,25 @@ def test_successful_build_without_cache_manifest_is_not_reported_as_success(caps
         CACHE.export(ENV | {"CACHE_REQUIRED": "true"}, run)
 
 
-def test_http_verification_uses_explicit_http_and_auth_without_logging_credentials():
-    class Response:
-        def __enter__(self):
-            return self
+@pytest.mark.parametrize("plain_http", ["true", "false"])
+def test_verification_uses_docker_registry_authentication(plain_http):
+    calls = []
 
-        def __exit__(self, *args):
-            pass
+    def run(cmd, **kwargs):
+        calls.append(cmd)
+        return subprocess.CompletedProcess(cmd, 0, json.dumps(MANIFEST))
 
-        def read(self):
-            return json.dumps(MANIFEST).encode()
-
-    with patch.object(
-        CACHE.urllib.request, "urlopen", return_value=Response()
-    ) as request:
-        assert (
-            CACHE.inspect_cache(
-                ENV
-                | {
-                    "CACHE_PLAIN_HTTP": "true",
-                    "CACHE_USERNAME": "test",
-                    "CACHE_PASSWORD": "fixture",
-                },
-                "registry.example:5000/team/image:buildcache-release-linux-amd64",
-                None,
-            )
-            == MANIFEST
-        )
-    called = request.call_args.args[0]
+    ref = "registry.example:5000/team/image:buildcache-release-linux-amd64"
     assert (
-        called.full_url
-        == "http://registry.example:5000/v2/team/image/manifests/buildcache-release-linux-amd64"
+        CACHE.inspect_cache(ENV | {"CACHE_PLAIN_HTTP": plain_http}, ref, run)
+        == MANIFEST
     )
-    assert called.get_header("Authorization").startswith("Basic ")
-    assert request.call_args.kwargs["timeout"] == 15
+    expected = (
+        ["docker", "manifest", "inspect", "--insecure", ref]
+        if plain_http == "true"
+        else ["docker", "buildx", "imagetools", "inspect", "--raw", ref]
+    )
+    assert calls == [expected]
 
 
 def test_action_exports_only_after_image_build_and_never_on_pr():
