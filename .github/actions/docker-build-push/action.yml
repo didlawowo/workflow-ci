@@ -90,6 +90,10 @@ inputs:
     description: "Generate provenance attestation"
     required: false
     default: "false"
+  cache-required:
+    description: "Fail publication if the per-platform registry cache cannot be exported and verified"
+    required: false
+    default: "false"
   cache-scope:
     description: "GitHub Actions cache scope"
     required: false
@@ -149,6 +153,9 @@ inputs:
     default: "tcp://buildkitd-arm64.arc-system.svc.cluster.local:1234"
 
 outputs:
+  cache-exported:
+    description: "true when every per-platform registry cache was exported and verified"
+    value: ${{ steps.cache-export.outputs.exported }}
   digest:
     description: "Built image digest"
     value: ${{ steps.build.outputs.digest || steps.build-retry.outputs.digest }}
@@ -448,6 +455,15 @@ runs:
       with:
         cosign-release: "v3.0.6"
 
+    - name: Plan registry caches
+      id: cache-plan
+      shell: bash
+      env:
+        CACHE_IMAGE: ${{ inputs.image-name }}
+        CACHE_SCOPE: ${{ inputs.cache-scope }}
+        CACHE_PLATFORMS: ${{ inputs.platforms }}
+      run: python3 "$GITHUB_ACTION_PATH/cache.py" plan
+
     - name: Build and push Docker image
       id: build
       continue-on-error: ${{ steps.execution-mode.outputs.use-native == 'true' }}
@@ -482,18 +498,10 @@ runs:
         tags: ${{ steps.meta.outputs.tags }}
         labels: ${{ inputs.labels }}
         build-args: ${{ inputs.build-args }}
-        # Registry cache on the in-cluster OCI registry instead of type=gha,
-        # which round-trips through GitHub's cache API from self-hosted runners.
-        # Stored as a dedicated `buildcache-<scope>` tag on the image repo.
-        # cache-to only on push (release builds): that's when write creds are
-        # present and when the expensive multi-arch layers are produced; CI
-        # builds read from that cache (cache-from is non-fatal on a miss).
-        # image-manifest+oci-mediatypes = compatibility with plain OCI registries.
-        # ignore-error=true = a cache EXPORT failure must NOT fail the build
-        # (otherwise a registry that rejects the cache manifest would break every
-        # release). Worst case = no cache, never a red build.
-        cache-from: type=registry,ref=${{ inputs.image-name }}:buildcache-${{ inputs.cache-scope }}
-        cache-to: ${{ inputs.push == 'true' && format('type=registry,mode=max,image-manifest=true,oci-mediatypes=true,ignore-error=true,ref={0}:buildcache-{1}', inputs.image-name, inputs.cache-scope) || '' }}
+        # Read platform caches plus the legacy shared tag during migration.
+        # Export separately after the image to avoid concurrent blob uploads
+        # and competing multi-node writes to one shared cache manifest.
+        cache-from: ${{ steps.cache-plan.outputs.cache-from }}
         sbom: ${{ inputs.sbom }}
         provenance: ${{ inputs.provenance == 'true' && 'mode=max' || 'false' }}
 
@@ -513,8 +521,7 @@ runs:
         tags: ${{ steps.meta.outputs.tags }}
         labels: ${{ inputs.labels }}
         build-args: ${{ inputs.build-args }}
-        cache-from: type=registry,ref=${{ inputs.image-name }}:buildcache-${{ inputs.cache-scope }}
-        cache-to: ${{ inputs.push == 'true' && format('type=registry,mode=max,image-manifest=true,oci-mediatypes=true,ignore-error=true,ref={0}:buildcache-{1}', inputs.image-name, inputs.cache-scope) || '' }}
+        cache-from: ${{ steps.cache-plan.outputs.cache-from }}
         sbom: ${{ inputs.sbom }}
         provenance: ${{ inputs.provenance == 'true' && 'mode=max' || 'false' }}
 
@@ -524,6 +531,26 @@ runs:
       run: |
         echo "::error::Remote BuildKit build failed twice; refusing to hide a persistent build failure."
         exit 1
+
+    - name: Export and verify registry caches
+      id: cache-export
+      if: inputs.push == 'true'
+      shell: bash
+      env:
+        CACHE_IMAGE: ${{ inputs.image-name }}
+        CACHE_SCOPE: ${{ inputs.cache-scope }}
+        CACHE_PLATFORMS: ${{ inputs.platforms }}
+        CACHE_CONTEXT: ${{ inputs.context }}
+        CACHE_DOCKERFILE: ${{ inputs.dockerfile }}
+        CACHE_TARGET: ${{ inputs.dockerfile-target }}
+        CACHE_BUILD_ARGS: ${{ inputs.build-args }}
+        CACHE_LABELS: ${{ inputs.labels }}
+        CACHE_NATIVE: ${{ steps.execution-mode.outputs.use-native }}
+        CACHE_REQUIRED: ${{ inputs.cache-required }}
+        CACHE_PLAIN_HTTP: ${{ inputs.registry-plain-http }}
+        CACHE_USERNAME: ${{ inputs.registry-username }}
+        CACHE_PASSWORD: ${{ inputs.registry-password }}
+      run: python3 "$GITHUB_ACTION_PATH/cache.py" export
 
     - name: Sign image with Cosign
       if: inputs.sign == 'true' && inputs.push == 'true'
