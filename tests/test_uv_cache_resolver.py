@@ -5,6 +5,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
+import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -90,3 +91,39 @@ def test_mutation_cache_namespaces_remain_on_nfs():
         assert f"require_nfs_cache {variable}" in content
         assert f'mktemp -d "${variable}/mutation.XXXXXX"' in content
     assert "${RUNNER_TEMP:-/tmp}/mutation-uv-cache" not in content
+
+
+def test_mutation_loads_trusted_cache_helper_from_pr_directory(tmp_path):
+    workflow = yaml.safe_load(
+        (ROOT / ".github/workflows/mutation-policy.yml").read_text()
+    )
+    step = next(
+        step
+        for job in workflow["jobs"].values()
+        for step in job.get("steps", [])
+        if step.get("name") == "Run trusted mutation runner against PR code"
+    )
+    workspace = tmp_path / "workspace with spaces"
+    trusted = workspace / ".workflow-ci/.ci"
+    trusted.mkdir(parents=True)
+    (trusted / "nfs-cache.sh").write_text('printf "trusted-helper"\n')
+    pr = workspace / step["working-directory"]
+    untrusted = pr / ".workflow-ci/.ci"
+    untrusted.mkdir(parents=True)
+    (untrusted / "nfs-cache.sh").write_text("exit 99\n")
+    command = next(
+        line.strip()
+        for line in step["run"].splitlines()
+        if line.strip().startswith("source ")
+    )
+    result = subprocess.run(
+        ["bash", "-euo", "pipefail", "-c", command],
+        cwd=pr,
+        env={**os.environ, "GITHUB_WORKSPACE": str(workspace)},
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=10,
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == "trusted-helper"
