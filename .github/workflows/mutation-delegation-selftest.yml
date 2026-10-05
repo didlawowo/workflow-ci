@@ -43,5 +43,5 @@ jobs:
           if [[ "$(id -u)" == "0" ]]; then
             uv run --no-project --python 3.12 python tests/run_forgejo_mutation_smoke.py
           else
-            sudo env "PATH=$PATH" uv run --no-project --python 3.12 python tests/run_forgejo_mutation_smoke.py
+            sudo env "PATH=$PATH" "UV_CACHE_DIR=$UV_CACHE_DIR" uv run --no-project --python 3.12 python tests/run_forgejo_mutation_smoke.py
           fi
