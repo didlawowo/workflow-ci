@@ -1,0 +1,44 @@
+name: "Runner Cache Archive"
+description: "Restore or publish a local runner cache as a bounded immutable archive"
+
+inputs:
+  mode:
+    description: "restore or publish"
+    required: true
+  kind:
+    description: "Cache kind: uv, npm, go-mod or go-build"
+    required: true
+  version:
+    description: "Tool version that produced the cache"
+    required: true
+  fingerprint:
+    description: "Hash of the lockfile or other relevant inputs"
+    required: true
+
+runs:
+  using: "composite"
+  steps:
+    - name: Resolve local runner cache
+      if: env.WORKFLOW_CACHE_PROFILE == 'local'
+      shell: bash
+      run: |
+        set -euo pipefail
+        source "$GITHUB_ACTION_PATH/../../../.ci/nfs-cache.sh"
+        case "${{ inputs.kind }}" in
+          uv) require_runner_cache UV_CACHE_DIR ;;
+          npm) require_runner_cache NPM_CONFIG_CACHE ;;
+          go-mod) require_runner_cache GOMODCACHE ;;
+          go-build) require_runner_cache GOCACHE ;;
+          *) echo "::error::Unsupported cache kind: ${{ inputs.kind }}"; exit 1 ;;
+        esac
+
+    - name: Run runner cache archive
+      if: env.WORKFLOW_CACHE_PROFILE == 'local'
+      shell: bash
+      run: |
+        set -euo pipefail
+        python3 "$GITHUB_ACTION_PATH/../../../.ci/cache_archive.py" \
+          "${{ inputs.mode }}" \
+          --kind "${{ inputs.kind }}" \
+          --version "${{ inputs.version }}" \
+          --fingerprint "${{ inputs.fingerprint }}"
