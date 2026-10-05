@@ -126,7 +126,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          source ".workflow-ci/.ci/nfs-cache.sh"
+          source "$GITHUB_WORKSPACE/.workflow-ci/.ci/nfs-cache.sh"
           require_nfs_cache UV_CACHE_DIR
 
       - name: Install uv for policy and mutation helpers
@@ -438,7 +438,7 @@ jobs:
             MUTATION_PATH="$MUTATION_VENV/bin:$MUTATION_PATH"
           fi
           ISOLATED_HOME="${RUNNER_TEMP:-/tmp}/mutation-home"
-          source ".workflow-ci/.ci/nfs-cache.sh"
+          source "$GITHUB_WORKSPACE/.workflow-ci/.ci/nfs-cache.sh"
           require_nfs_cache UV_CACHE_DIR
           require_nfs_cache GOCACHE
           require_nfs_cache GOMODCACHE
@@ -636,7 +636,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          source ".workflow-ci/.ci/nfs-cache.sh"
+          source "$GITHUB_WORKSPACE/.workflow-ci/.ci/nfs-cache.sh"
           require_nfs_cache UV_CACHE_DIR
 
       - name: Install uv for verification helpers
