@@ -79,6 +79,26 @@ def test_explicit_paths_and_exclusion_precedence(repo):
     assert not app_changed(repo, head, ["config/**"], ["config/runtime.yml"])
 
 
+@pytest.mark.parametrize("ignore_source", ["config", "gitmodules"])
+def test_submodule_commit_change_rebuilds_despite_ignore_setting(repo, ignore_source):
+    updated = commit("docs/guide.md")
+    Path(".gitmodules").write_text(
+        '[submodule "app"]\n\tpath = vendor/app\n\turl = https://example.invalid/app\n'
+        + ("\tignore = all\n" if ignore_source == "gitmodules" else "")
+    )
+    if ignore_source == "config":
+        git("config", "diff.ignoreSubmodules", "all")
+    git("add", ".gitmodules")
+    git("update-index", "--add", "--cacheinfo", f"160000,{repo},vendor/app")
+    git("commit", "-qm", "initial submodule")
+    base = git("rev-parse", "HEAD")
+    git("update-index", "--cacheinfo", f"160000,{updated},vendor/app")
+    git("commit", "-qm", "update submodule")
+    head = git("rev-parse", "HEAD")
+    assert app_changed(base, head, ["**"], ["docs/**"])
+    assert not app_changed(base, head, ["**"], ["vendor/**"])
+
+
 def test_deletion_and_rename_out_of_image_paths_rebuild(repo):
     Path("docs").mkdir()
     git("mv", "src/app.py", "docs/moved.py")

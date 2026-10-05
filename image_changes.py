@@ -68,6 +68,7 @@ def app_changed(base, head, includes, excludes):
             "--quiet",
             "--no-ext-diff",
             "--no-renames",
+            "--ignore-submodules=none",
             base,
             head,
             "--",
