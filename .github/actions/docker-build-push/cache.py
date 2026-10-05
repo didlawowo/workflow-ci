@@ -1,12 +1,10 @@
 """Export registry caches sequentially after the image, one tag per platform."""
 
-import base64
 import json
 import os
 import re
 import subprocess
 import sys
-import urllib.request
 from pathlib import Path
 
 
@@ -76,26 +74,12 @@ def command(env, platform, ref):
 
 
 def inspect_cache(env, ref, run):
+    # Docker reuses login credentials and handles Registry Basic/Bearer challenges.
+    cmd = ["docker", "buildx", "imagetools", "inspect", "--raw", ref]
     if env.get("CACHE_PLAIN_HTTP") == "true":
-        host, repository = ref.split("/", 1)
-        repository, tag = repository.rsplit(":", 1)
-        headers = {"Accept": "application/vnd.oci.image.manifest.v1+json"}
-        user, password = env.get("CACHE_USERNAME"), env.get("CACHE_PASSWORD")
-        if user and password:
-            headers["Authorization"] = (
-                "Basic " + base64.b64encode((user + ":" + password).encode()).decode()
-            )
-        request = urllib.request.Request(
-            "http://" + host + "/v2/" + repository + "/manifests/" + tag,
-            headers=headers,
-        )
-        try:
-            with urllib.request.urlopen(request, timeout=15) as response:
-                return json.load(response)
-        except (OSError, ValueError):
-            return {}
+        cmd = ["docker", "manifest", "inspect", "--insecure", ref]
     result = run(
-        ["docker", "buildx", "imagetools", "inspect", "--raw", ref],
+        cmd,
         check=False,
         capture_output=True,
         text=True,
