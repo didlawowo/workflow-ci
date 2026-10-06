@@ -66,14 +66,6 @@ inputs:
       workflow-ci must not keep builds/releases pending on the registry scan.
     required: false
     default: "false"
-  upload-sarif:
-    description: "Publish validated Trivy SARIF to GitHub Code Scanning (disabled by default)"
-    required: false
-    default: "false"
-  upload-scan-artifacts:
-    description: "Archive raw Trivy SARIF as a GitHub Actions artifact (disabled by default)"
-    required: false
-    default: "false"
   scan-severity:
     description: "Trivy scan severity levels"
     required: false
@@ -576,15 +568,9 @@ runs:
           echo "skip-setup=true" >> "$GITHUB_OUTPUT"
           echo "Using preinstalled Trivy: $(command -v trivy)"
         else
-          echo "skip-setup=false" >> "$GITHUB_OUTPUT"
+          echo "::error title=Trivy unavailable::scan=true requires a preinstalled Trivy v0.70.0 binary on the runner."
+          exit 1
         fi
-
-    - name: Install Trivy when absent
-      if: inputs.scan == 'true' && steps.trivy-runtime.outputs.skip-setup != 'true'
-      uses: aquasecurity/setup-trivy@v0.2.6
-      with:
-        version: "v0.70.0"
-        cache: false
 
     - name: Resolve Trivy cache
       id: trivy-cache
@@ -775,68 +761,3 @@ runs:
         cat "$SUMMARY_FILE" >> "$GITHUB_STEP_SUMMARY"
         echo "file=$SUMMARY_FILE" >> "$GITHUB_OUTPUT"
 
-    - name: Publish Trivy summary on pull request
-      id: trivy-pr-comment
-      if: inputs.scan == 'true' && github.event_name == 'pull_request'
-      continue-on-error: true
-      uses: actions/github-script@v8
-      env:
-        TRIVY_SUMMARY_FILE: ${{ steps.trivy-summary.outputs.file }}
-        TRIVY_COMMENT_MARKER: '<!-- workflow-ci:trivy-report:${{ steps.meta.outputs.full-name }} -->'
-      with:
-        github-token: ${{ github.token }}
-        script: |
-          const fs = require('fs');
-          const body = fs.readFileSync(process.env.TRIVY_SUMMARY_FILE, 'utf8');
-          const marker = process.env.TRIVY_COMMENT_MARKER;
-          const { owner, repo } = context.repo;
-          const issue_number = context.issue.number;
-          const comments = await github.paginate(github.rest.issues.listComments, {
-            owner, repo, issue_number, per_page: 100
-          });
-          const existing = comments.find(comment =>
-            comment.user?.type === 'Bot' && comment.body?.includes(marker)
-          );
-          if (existing) {
-            await github.rest.issues.updateComment({
-              owner, repo, comment_id: existing.id, body
-            });
-          } else {
-            await github.rest.issues.createComment({
-              owner, repo, issue_number, body
-            });
-          }
-
-    - name: Warn when PR scan comment failed
-      if: inputs.scan == 'true' && github.event_name == 'pull_request' && steps.trivy-pr-comment.outcome == 'failure'
-      shell: bash
-      run: |
-        echo "::warning title=Trivy PR comment failed::The scan summary is available in the workflow summary and SARIF artifact, but the PR comment could not be created or updated. Grant pull-requests: write if PR comments are desired."
-
-    - name: Upload Trivy scan results
-      id: upload-sarif
-      if: inputs.scan == 'true' && inputs.upload-sarif == 'true'
-      continue-on-error: true
-      uses: github/codeql-action/upload-sarif@v4
-      with:
-        sarif_file: ${{ steps.meta.outputs.sarif-file }}
-        category: trivy-${{ steps.meta.outputs.target-name }}-scan
-
-    - name: Warn when SARIF publication failed
-      if: inputs.scan == 'true' && inputs.upload-sarif == 'true' && steps.upload-sarif.outcome == 'failure'
-      shell: bash
-      run: |
-        echo "::warning title=Code Scanning upload failed::Trivy completed and the SARIF report was validated, but GitHub Code Scanning publication failed. The raw SARIF artifact is still archived; check actions:read/security-events:write permissions and repository Code Scanning eligibility."
-
-    # Keep diagnostics after a scanner, validation or Code Scanning failure.
-    # This does not neutralize the earlier failure and must not run if no scan
-    # was attempted (e.g. the Docker build failed or scanning was disabled).
-    - name: Upload scan artifacts
-      if: ${{ !cancelled() && inputs.scan == 'true' && inputs.upload-scan-artifacts == 'true' && (steps.trivy.outcome == 'success' || steps.trivy.outcome == 'failure') }}
-      uses: actions/upload-artifact@v6
-      continue-on-error: true
-      with:
-        name: ${{ steps.meta.outputs.artifact-name }}
-        path: ${{ steps.meta.outputs.sarif-file }}
-        retention-days: 7
-        if-no-files-found: error
