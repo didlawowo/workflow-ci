@@ -24,7 +24,7 @@ def test_python_actions_honor_nested_projects_and_explicit_evidence():
     assert 'data.get("dependency-groups", {})' in tests
     assert "SYNC_ARGS+=(--group dev)" in tests
     assert "SYNC_ARGS+=(--extra dev)" in tests
-    assert "uv run --with pytest --with pytest-cov pytest" in tests
+    assert "uv run --no-sync --with pytest --with pytest-cov pytest" in tests
     assert "coverage-report-path:" in tests
     assert "coverage-source:" in tests
     assert "--cov=${{ inputs.coverage-source }}" in tests
