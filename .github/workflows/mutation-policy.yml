@@ -124,8 +124,16 @@ jobs:
 
       - name: Configure writable uv cache
         shell: bash
+        env:
+          RUNNER_NAME: ${{ runner.name }}
         run: |
           set -euo pipefail
+          if [[ "$RUNNER_NAME" == phoenix-* ]]; then
+            export WORKFLOW_CACHE_PROFILE=local
+            export WORKFLOW_LOCAL_ROOT="$RUNNER_TEMP"
+            echo "WORKFLOW_CACHE_PROFILE=local" >> "$GITHUB_ENV"
+            echo "WORKFLOW_LOCAL_ROOT=$RUNNER_TEMP" >> "$GITHUB_ENV"
+          fi
           source "$GITHUB_WORKSPACE/.workflow-ci/.ci/nfs-cache.sh"
           require_nfs_cache UV_CACHE_DIR
 
@@ -451,7 +459,7 @@ jobs:
           mkdir -p "$ISOLATED_HOME"
 
           # No forge token, persistent HOME or shared dependency cache is
-          # exposed to PR code; only fresh NFS cache namespaces are passed.
+          # exposed to PR code; only fresh runner-cache namespaces are passed.
           env -i \
             PATH="$MUTATION_PATH" \
             HOME="$ISOLATED_HOME" \
@@ -634,8 +642,16 @@ jobs:
 
       - name: Configure writable uv cache
         shell: bash
+        env:
+          RUNNER_NAME: ${{ runner.name }}
         run: |
           set -euo pipefail
+          if [[ "$RUNNER_NAME" == phoenix-* ]]; then
+            export WORKFLOW_CACHE_PROFILE=local
+            export WORKFLOW_LOCAL_ROOT="$RUNNER_TEMP"
+            echo "WORKFLOW_CACHE_PROFILE=local" >> "$GITHUB_ENV"
+            echo "WORKFLOW_LOCAL_ROOT=$RUNNER_TEMP" >> "$GITHUB_ENV"
+          fi
           source "$GITHUB_WORKSPACE/.workflow-ci/.ci/nfs-cache.sh"
           require_nfs_cache UV_CACHE_DIR
 
