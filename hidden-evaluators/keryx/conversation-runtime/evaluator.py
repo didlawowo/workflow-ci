@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import random
 import subprocess
+import time
 from pathlib import Path
 
 
@@ -243,27 +244,51 @@ func TestWorkflowCIHiddenRetryIsExactlyOnce(t *testing.T) {{
     if not path.parent.is_dir():
         raise RuntimeError("candidate does not expose pkg/handlers")
     path.write_text(source, encoding="utf-8")
+    go_env = subprocess.run(
+        ["go", "env", "GOVERSION", "GOCACHE", "GOMODCACHE"],
+        cwd=candidate,
+        capture_output=True,
+        text=True,
+        timeout=10,
+        check=False,
+    )
+    environment_detail = (go_env.stdout + "\n" + go_env.stderr).strip()
+    started = time.monotonic()
     try:
-        completed = subprocess.run(
-            [
-                "go",
-                "test",
-                "./pkg/handlers",
-                "-run",
-                "^TestWorkflowCIHidden",
-                "-count=1",
-            ],
-            cwd=candidate,
-            capture_output=True,
-            text=True,
-            timeout=300,
-        )
+        try:
+            completed = subprocess.run(
+                [
+                    "go",
+                    "test",
+                    "./pkg/handlers",
+                    "-run",
+                    "^TestWorkflowCIHidden",
+                    "-count=1",
+                ],
+                cwd=candidate,
+                capture_output=True,
+                text=True,
+                timeout=300,
+            )
+        except subprocess.TimeoutExpired as exc:
+            elapsed = time.monotonic() - started
+            stdout = exc.stdout.decode(errors="replace") if isinstance(exc.stdout, bytes) else (exc.stdout or "")
+            stderr = exc.stderr.decode(errors="replace") if isinstance(exc.stderr, bytes) else (exc.stderr or "")
+            raise RuntimeError(
+                "Keryx hidden Go evaluator timed out "
+                f"after {elapsed:.1f}s; go_env={environment_detail!r}; "
+                f"stdout_tail={stdout[-1500:]!r}; stderr_tail={stderr[-1500:]!r}"
+            ) from exc
     finally:
         path.unlink(missing_ok=True)
 
+    elapsed = time.monotonic() - started
     if completed.returncode != 0:
         detail = (completed.stdout + "\n" + completed.stderr).strip()
-        raise AssertionError(detail[-3000:])
+        raise AssertionError(
+            f"hidden Go test failed after {elapsed:.1f}s; "
+            f"go_env={environment_detail!r}; output_tail={detail[-3000:]}"
+        )
 
 
 def evaluate(candidate: Path, seed: int) -> list[dict[str, str]]:
