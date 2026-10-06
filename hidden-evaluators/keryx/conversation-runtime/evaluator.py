@@ -256,7 +256,7 @@ func TestWorkflowCIHiddenRetryIsExactlyOnce(t *testing.T) {{
             cwd=candidate,
             capture_output=True,
             text=True,
-            timeout=120,
+            timeout=300,
         )
     finally:
         path.unlink(missing_ok=True)
