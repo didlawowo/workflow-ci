@@ -4,29 +4,20 @@ All notable changes to this project are documented here.
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 and follows the [Conventional Commits](https://www.conventionalcommits.org) spec.
 
-## [1.17.0] - 2026-10-05
+## [1.17.2] - 2026-10-06
 
 ### Bug Fixes
 
-- *(ci)* Use absolute workflow cache helper path
+- *(ci)* Make self-tests runner-safe on Phoenix
 
-- *(ci)* Preserve NFS uv cache in Forgejo smoke
+- *(ci)* Support Phoenix system runners in mutation policy
 
-- *(docker)* Detect submodule changes despite Git ignore settings
+- *(ci)* Complete registry-authoritative OCI scan cleanup
 
+- *(ci)* Complete registry-authoritative OCI scan cleanup
 
-### Documentation
+- *(ci)* Complete registry-authoritative OCI scan cleanup
 
-- Require automatic github-manager release follow-up
-
-
-### Features
-
-- *(docker)* Detect image-impacting release changes
-
-
-### Tests
-
-- *(mutation)* Verify trusted NFS helper from PR directory
+- *(ci)* Complete registry-authoritative OCI scan cleanup
 
 
