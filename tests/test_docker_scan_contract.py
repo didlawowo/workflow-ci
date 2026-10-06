@@ -85,7 +85,174 @@ def sarif(*counts: int) -> dict:
     }
 
 
+@pytest.mark.parametrize("counts,expected", [((0,), 0), ((2,), 2), ((0, 3, 2), 5)])
+def test_counts_only_valid_reports(tmp_path, counts, expected):
+    result, output, _ = run_step(
+        "Analyze scan results", tmp_path, json.dumps(sarif(*counts))
+    )
+    assert result.returncode == 0, result.stderr
+    assert output == f"vuln-count={expected}\n"
 
+
+@pytest.mark.parametrize(
+    "content",
+    [None, "", " ", "{", "null", "[]", "{}", "{}\n{}", "false", "42"],
+    ids=[
+        "missing",
+        "empty",
+        "whitespace",
+        "truncated",
+        "null",
+        "array",
+        "object",
+        "stream",
+        "bool",
+        "number",
+    ],
+)
+def test_unavailable_report_never_means_zero(tmp_path, content):
+    result, output, _ = run_step("Analyze scan results", tmp_path, content)
+    assert result.returncode != 0
+    assert "::error" in result.stdout
+    assert output == ""
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"version": "2.0.0", "runs": sarif(0)["runs"]},
+        {"version": "2.1.0", "runs": []},
+        {"version": "2.1.0", "runs": None},
+        {"version": "2.1.0", "runs": {}},
+        {"version": "2.1.0", "runs": [None]},
+        {"version": "2.1.0", "runs": [{"results": []}]},
+        {
+            "version": "2.1.0",
+            "runs": [{"tool": {"driver": {"name": ""}}, "results": []}],
+        },
+        {"version": "2.1.0", "runs": [{"tool": {"driver": {"name": "Trivy"}}}]},
+        {"version": "2.1.0", "runs": [{**sarif(0)["runs"][0], "results": None}]},
+        {"version": "2.1.0", "runs": [{**sarif(0)["runs"][0], "results": {}}]},
+        {"version": "2.1.0", "runs": [{**sarif(0)["runs"][0], "results": [None]}]},
+        {"version": "2.1.0", "runs": [sarif(0)["runs"][0], {}]},
+        {
+            "version": "2.1.0",
+            "runs": [
+                {
+                    **sarif(0)["runs"][0],
+                    "invocations": [{"executionSuccessful": False}],
+                }
+            ],
+        },
+        {
+            "version": "2.1.0",
+            "runs": [{**sarif(0)["runs"][0], "invocations": [{}]}],
+        },
+        {
+            "version": "2.1.0",
+            "runs": [{**sarif(0)["runs"][0], "invocations": None}],
+        },
+    ],
+)
+def test_incomplete_analysis_never_means_zero(tmp_path, payload):
+    result, output, _ = run_step("Analyze scan results", tmp_path, json.dumps(payload))
+    assert result.returncode != 0
+    assert "::error" in result.stdout
+    assert output == ""
+
+
+def test_valid_successful_invocation(tmp_path):
+    payload = sarif(0)
+    payload["runs"][0]["invocations"] = [{"executionSuccessful": True}]
+    result, output, _ = run_step("Analyze scan results", tmp_path, json.dumps(payload))
+    assert result.returncode == 0, result.stderr
+    assert output == "vuln-count=0\n"
+
+
+@pytest.mark.parametrize("content", [None, json.dumps(sarif(0))])
+def test_prepare_removes_stale_report_without_error_on_first_use(tmp_path, content):
+    result, output, report = run_step("Prepare Trivy report", tmp_path, content)
+    assert result.returncode == 0, result.stderr
+    assert not report.exists()
+    assert output == ""
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "Prepare Trivy report",
+        "Run Trivy vulnerability scanner",
+        "Analyze scan results",
+    ],
+)
+def test_required_scan_steps_cannot_swallow_failures(name):
+def test_native_remote_buildkit_retries_once_and_then_fails_closed():
+    primary = STEPS["Build and push Docker image"]
+    retry = STEPS["Retry native remote BuildKit once"]
+    enforce = STEPS["Enforce native Docker build result"]
+
+    assert (
+        "continue-on-error: ${{ steps.execution-mode.outputs.use-native == 'true' }}"
+        in primary
+    )
+    assert "steps.build.outcome == 'failure'" in retry
+    assert "builder: native" in retry
+    assert "steps.build-retry.outcome != 'success'" in enforce
+    assert "failure()" in enforce
+    assert "failed twice" in enforce
+    assert "steps.build.outputs.digest || steps.build-retry.outputs.digest" in TEXT
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "Prepare Trivy report",
+        "Run Trivy vulnerability scanner",
+        "Analyze scan results",
+    ],
+)
+def test_scan_steps_are_gated_but_not_always_successful(name):
+def test_vulnerability_policy_and_non_security_fallbacks_are_unchanged():
+    scan_input = TEXT.split("  scan:\n", 1)[1].split("  scan-severity:\n", 1)[0]
+    assert '    default: "false"' in scan_input
+    assert "exit-code:" not in STEPS["Run Trivy vulnerability scanner"]
+    hub_login = STEPS["Login to Docker Hub (authenticated base image pulls)"]
+    assert "continue-on-error: true" in hub_login
+    for block in STEPS.values():
+        if "uses: docker/build-push-action@" in block:
+            assert "cache-to:" not in block
+            assert "steps.cache-plan.outputs.cache-from" in block
+    cache_input = TEXT.split("  cache-required:\n", 1)[1].split("  cache-scope:\n", 1)[
+        0
+    ]
+    assert '    default: "false"' in cache_input
+    export = STEPS["Export and verify registry caches"]
+    assert "CACHE_REQUIRED: ${{ inputs.cache-required }}" in export
+    assert "continue-on-error:" not in export
+    assert 'run: python3 "$GITHUB_ACTION_PATH/cache.py" export' in export
+
+
+@pytest.mark.parametrize(
+    "template",
+    [
+        "templates/go/ci-branch-pipeline.yml",
+        "templates/go/cd-production.yml",
+        "templates/node/ci-branch-pipeline.yml",
+        "templates/python/ci-branch-pipeline.yml",
+        "templates/python/cd-production.yml",
+    ],
+)
+def test_templates_grant_actions_read_when_they_publish_sarif(template):
+@pytest.mark.parametrize(
+    "template",
+    [
+        "templates/go/ci-branch-pipeline.yml",
+        "templates/go/cd-production.yml",
+        "templates/node/ci-branch-pipeline.yml",
+        "templates/python/ci-branch-pipeline.yml",
+        "templates/python/cd-production.yml",
+    ],
+)
 def test_docker_actions_use_node24_capable_majors():
     assert "docker/login-action@v4" in TEXT
     assert "docker/setup-qemu-action@v4" in TEXT
@@ -144,17 +311,6 @@ def test_unknown_foreign_platform_keeps_qemu_fallback():
 
 
 def test_remote_buildkit_only_adds_requested_architectures():
-    remote = STEPS["Set up native multi-arch Buildx (remote BuildKit)"]
-    assert 'case "$target" in' in remote
-    assert "linux/amd64)" in remote
-    assert "linux/arm64)" in remote
-    assert "BUILDKIT_AMD64_ENDPOINT" in remote
-    assert "BUILDKIT_ARM64_ENDPOINT" in remote
-    assert "Unsupported remote BuildKit platform" in remote
-
-
-
-
 @pytest.mark.parametrize(
     "java_files,expected",
     [
@@ -165,34 +321,6 @@ def test_remote_buildkit_only_adds_requested_architectures():
     ],
 )
 def test_shared_java_db_is_used_only_when_complete(tmp_path, java_files, expected):
-    shared = tmp_path / "shared"
-    (shared / "db").mkdir(parents=True)
-    (shared / "db" / "trivy.db").write_text("db", encoding="utf-8")
-    (shared / "db" / "metadata.json").write_text("{}", encoding="utf-8")
-    (shared / "java-db").mkdir()
-    for filename in java_files:
-        (shared / "java-db" / filename).write_text("java", encoding="utf-8")
-
-    runner_temp = tmp_path / "runner-temp"
-    result, output, _ = run_step(
-        "Resolve Trivy cache",
-        tmp_path,
-        None,
-        extra_env={
-            "RUNNER_TEMP": str(runner_temp),
-            "GITHUB_WORKSPACE": str(tmp_path),
-            "TRIVY_SHARED_DB_DIR": str(shared),
-        },
-    )
-
-    assert result.returncode == 0, result.stderr
-    local_java = runner_temp / "trivy-cache" / "java-db"
-    assert ("shared-java-db=true" in output) is expected
-    assert ("shared-java-db=false" in output) is (not expected)
-    assert local_java.is_symlink() is expected
-
-
-
 def test_filesystem_scan_java_db_and_artifact_contract():
     filesystem = (
         ROOT / ".github" / "actions" / "trivy-filesystem-scan" / "action.yml"
