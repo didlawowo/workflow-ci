@@ -530,3 +530,10 @@ def test_cosign_prefers_runner_binary_and_fallback_is_same_version():
     assert "v3.0.6" in detect
     assert "steps.cosign-runtime.outputs.preinstalled != 'true'" in install
     assert 'cosign-release: "v3.0.6"' in install
+
+def test_build_action_has_no_nested_scan_or_publication_actions():
+    assert "aquasecurity/setup-trivy@" not in TEXT
+    assert "actions/github-script@" not in TEXT
+    assert "github/codeql-action/" not in TEXT
+    assert "actions/upload-artifact@" not in TEXT
+    assert "scan=true requires a preinstalled Trivy" in TEXT
