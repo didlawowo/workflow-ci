@@ -23,7 +23,12 @@ REMOVED = tuple(LOCAL_VARIABLES) + ("UV_LINK_MODE", "WORKFLOW_LOCAL_ROOT")
 def base_env(tmp_path):
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
-    return bin_dir, {**os.environ, "PATH": str(bin_dir) + os.pathsep + os.environ["PATH"]}
+    env = {**os.environ, "PATH": str(bin_dir) + os.pathsep + os.environ["PATH"]}
+    # Never let subprocess tests append cache variables to the real GitHub job
+    # environment file; that would leak temporary pytest paths into later steps.
+    env.pop("GITHUB_ENV", None)
+    env.pop("GITHUB_OUTPUT", None)
+    return bin_dir, env
 
 
 def mock_findmnt(bin_dir, fstype):
