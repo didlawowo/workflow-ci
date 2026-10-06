@@ -283,6 +283,12 @@ def test_keryx_runtime_evaluator_executes_ephemeral_go_tests() -> None:
     assert "&fakeTranscriber" not in source
     assert "createThread(t," not in source
     assert "completedWith(" not in source
+    assert '["go", "env", "GOVERSION", "GOCACHE", "GOMODCACHE"]' in source
+    assert "time.monotonic()" in source
+    assert "except subprocess.TimeoutExpired as exc:" in source
+    assert "stdout_tail=" in source
+    assert "stderr_tail=" in source
+    assert "go_env=" in source
 
 
 def test_hidden_required_skipped_check_cannot_aggregate_to_pass() -> None:
