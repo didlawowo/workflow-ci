@@ -79,6 +79,14 @@ jobs:
           fetch-depth: 1
           persist-credentials: false
 
+      - name: Set up Go toolchain and cache for Go candidates
+        if: ${{ hashFiles('candidate/go.sum') != '' }}
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: candidate/go.mod
+          cache: true
+          cache-dependency-path: candidate/go.sum
+
       - name: Verify trusted, base and candidate identities
         shell: bash
         run: |
