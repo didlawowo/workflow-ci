@@ -84,7 +84,7 @@ runs:
       run: |
         set -euo pipefail
         source "$GITHUB_ACTION_PATH/../../../.ci/nfs-cache.sh"
-        require_nfs_cache UV_CACHE_DIR
+        require_runner_cache UV_CACHE_DIR
         echo "path=$UV_CACHE_DIR" >> "$GITHUB_OUTPUT"
         echo "UV_CACHE_DIR=$UV_CACHE_DIR" >> "$GITHUB_ENV"
 
