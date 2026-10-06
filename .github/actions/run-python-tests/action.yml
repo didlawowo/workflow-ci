@@ -138,7 +138,11 @@ runs:
         case " ${DEV_MODES} " in
           *" group "*) SYNC_ARGS+=(--group dev) ;;
         esac
-        uv sync "${SYNC_ARGS[@]}"
+        if [[ -f uv.lock ]]; then
+          uv sync --frozen "${SYNC_ARGS[@]}"
+        else
+          uv sync "${SYNC_ARGS[@]}"
+        fi
 
     # --- Docker Compose mode ---
     - name: Run tests with Docker Compose
@@ -172,7 +176,7 @@ runs:
         if [ -n "$CUSTOM_CMD" ]; then
           eval "$CUSTOM_CMD"
         else
-          uv run --with pytest --with pytest-cov pytest ${{ inputs.test-paths }} \
+          uv run --no-sync --with pytest --with pytest-cov pytest ${{ inputs.test-paths }} \
             -v --tb=short \
             --cov=${{ inputs.coverage-source }} --cov-report=xml:${{ inputs.coverage-report-path }} \
             --cov-report=term-missing \
