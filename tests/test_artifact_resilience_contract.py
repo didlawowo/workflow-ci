@@ -12,7 +12,6 @@ BEST_EFFORT_ARTIFACT_FILES = (
     ".github/actions/run-python-tests/action.yml",
     ".github/actions/python-quality-security/action.yml",
     ".github/actions/trivy-filesystem-scan/action.yml",
-    ".github/actions/docker-build-push/action.yml",
     ".github/actions/quality-report/action.yml",
     ".github/workflows/mutation-policy.yml",
     "templates/forgejo/mutation-policy.yml",
