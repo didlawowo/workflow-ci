@@ -50,11 +50,10 @@ jobs:
         shell: bash
         env:
           RUNNER_NAME: ${{ runner.name }}
-          REPOSITORY_NAME: ${{ github.event.repository.name }}
         run: |
           if [[ "$RUNNER_NAME" == phoenix-* ]]; then
             echo "WORKFLOW_CACHE_PROFILE=local" >> "$GITHUB_ENV"
-            echo "WORKFLOW_LOCAL_ROOT=/var/cache/github-runner/$REPOSITORY_NAME" >> "$GITHUB_ENV"
+            echo "WORKFLOW_LOCAL_ROOT=$RUNNER_TEMP" >> "$GITHUB_ENV"
           fi
       - name: Validate runner cache
         run: |
