@@ -37,8 +37,8 @@ runs:
       shell: bash
       run: |
         source "$GITHUB_ACTION_PATH/../../../.ci/nfs-cache.sh"
-        require_nfs_cache GOCACHE
-        require_nfs_cache GOMODCACHE
+        require_runner_cache GOCACHE
+        require_runner_cache GOMODCACHE
 
     - name: Download dependencies
       shell: bash
