@@ -15,7 +15,7 @@ def test_arc_runner_fast_path_tools_have_portable_fallbacks():
     ).read_text()
 
     assert "Detect preinstalled Trivy" in docker
-    assert "aquasecurity/setup-trivy@v0.2.6" in docker
+    assert "aquasecurity/setup-trivy@" not in docker
     assert "Detect preinstalled Cosign" in docker
     assert "sigstore/cosign-installer@v3" in docker
     assert "trufflehog.sh" in python_quality
