@@ -16,7 +16,7 @@ def workflow(name):
 def test_python_checks_nfs_before_installing_or_running_uv():
     steps = workflow("python-postgres")["jobs"]["tests"]["steps"]
     validation = next(s for s in steps if s.get("name") == "Validate runner NFS cache")
-    canonical = (ROOT / ".ci/nfs-cache.sh").read_text().splitlines()[1:]
+    canonical = (ROOT / ".ci/nfs-cache.sh").read_text().split("require_runner_cache()", 1)[0].splitlines()[1:]
     assert (
         validation["run"]
         == "\n".join(canonical + ["require_nfs_cache UV_CACHE_DIR"]) + "\n"
