@@ -634,7 +634,7 @@ def test_mutation_jobs_require_runner_nfs_cache():
 
     for job in (mutation_run, mutation_verify):
         assert "Configure writable uv cache" in job
-        assert "require_nfs_cache UV_CACHE_DIR" in job
+        assert "require_runner_cache UV_CACHE_DIR" in job
         assert 'UV_CACHE="${RUNNER_TEMP:-/tmp}/uv-cache"' not in job
         assert "enable-cache: false" in job
 
@@ -686,7 +686,7 @@ def test_python_actions_require_nfs_without_local_fallback():
     root = Path(__file__).resolve().parents[1]
     for name in ("setup-python-env", "run-python-tests", "quality-report"):
         content = (root / ".github/actions" / name / "action.yml").read_text()
-        assert "require_nfs_cache UV_CACHE_DIR" in content
+        assert "require_runner_cache UV_CACHE_DIR" in content
         assert "${RUNNER_TEMP:-/tmp}/uv-cache" not in content
         assert "cache-local-path: ${{ steps.uv-cache.outputs.path }}" in content
         assert "enable-cache: false" in content
