@@ -151,8 +151,7 @@ actions to the exact commit of the tagged workflow and prevents stale cross-vers
 
 ### Python and Go caches on ARC runners
 
-Python and Go language caches are NFS-only. Runners must provide existing absolute
-`UV_CACHE_DIR`, `GOCACHE` and `GOMODCACHE` directories on an `nfs`/`nfs4` mount.
+Python and Go language caches use an explicit runner profile. `WORKFLOW_CI_CACHE_PROFILE=nfs` (default) requires existing absolute `UV_CACHE_DIR`, `GOCACHE` and `GOMODCACHE` directories on an `nfs`/`nfs4` mount. `WORKFLOW_CI_CACHE_PROFILE=local` accepts writable absolute non-NFS directories supplied by the runner for pilot pools.
 The runner needs `bash`, GNU `timeout` and util-linux `findmnt`. A bounded
 read/write probe rejects missing, local or unavailable caches before execution;
 there is no runner-local fallback. A later NFS outage still fails the language
