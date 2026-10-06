@@ -85,6 +85,28 @@ def test_invalid_cache_stops_without_fallback(tmp_path, options, variable):
         assert not list(cache.iterdir())
 
 
+def test_local_profile_accepts_local_cache_and_rejects_nfs(tmp_path):
+    command = f'source "{ROOT}/.ci/nfs-cache.sh"; require_runner_cache UV_CACHE_DIR; printf "%s" "$UV_CACHE_DIR"'
+    result, cache = run_validator(tmp_path, filesystem="ext4", command=command)
+    result = subprocess.run(
+        ["bash", "-euo", "pipefail", "-c", command],
+        env={**os.environ, "UV_CACHE_DIR": str(cache), "WORKFLOW_CI_CACHE_PROFILE": "local", "PATH": os.environ["PATH"]},
+        text=True, capture_output=True, check=False, timeout=10,
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == str(cache)
+
+def test_invalid_cache_profile_is_rejected(tmp_path):
+    cache = tmp_path / "cache"
+    cache.mkdir()
+    result = subprocess.run(
+        ["bash", "-euo", "pipefail", "-c", f'source "{ROOT}/.ci/nfs-cache.sh"; require_runner_cache UV_CACHE_DIR'],
+        env={**os.environ, "UV_CACHE_DIR": str(cache), "WORKFLOW_CI_CACHE_PROFILE": "bogus"},
+        text=True, capture_output=True, check=False, timeout=10,
+    )
+    assert result.returncode != 0
+    assert "WORKFLOW_CI_CACHE_PROFILE" in result.stderr
+
 def test_mutation_cache_namespaces_remain_on_nfs():
     content = (ROOT / ".github/workflows/mutation-policy.yml").read_text()
     for variable in ("UV_CACHE_DIR", "GOCACHE", "GOMODCACHE"):
