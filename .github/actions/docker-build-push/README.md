@@ -71,3 +71,10 @@ These tests execute the actual shell extracted from `action.yml` and verify the 
 
 The repository controls which architectures are built through `platforms`
 (`linux/amd64`, `linux/arm64`, or both).
+
+
+## Scan execution model
+
+The build composite no longer references Trivy setup, PR comment, SARIF upload or artifact-upload actions. GitHub resolves nested action dependencies during job preparation even when their step-level conditions are false, so keeping those references penalized the default scan=false build path.
+
+When scan=true, Trivy v0.70.0 must already be present on the runner. Publishing scan evidence belongs in a separate workflow/job rather than the build critical path.
