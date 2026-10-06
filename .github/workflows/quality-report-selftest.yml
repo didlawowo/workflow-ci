@@ -46,17 +46,23 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
-      - name: Select runner cache profile
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+      - name: Validate runner cache
         shell: bash
         env:
           RUNNER_NAME: ${{ runner.name }}
         run: |
+          set -euo pipefail
           if [[ "$RUNNER_NAME" == phoenix-* ]]; then
-            echo "WORKFLOW_CACHE_PROFILE=local" >> "$GITHUB_ENV"
-            echo "WORKFLOW_LOCAL_ROOT=$RUNNER_TEMP" >> "$GITHUB_ENV"
+            export WORKFLOW_CACHE_PROFILE=local
+            export WORKFLOW_LOCAL_ROOT="$RUNNER_TEMP"
           fi
-      - name: Validate runner cache
-        run: |
+          # Preflight only: do not leak the selected cache profile into unit tests
+          # that deliberately exercise NFS/local cache behavior in subprocesses.
+          GITHUB_ENV=/dev/null
+          export GITHUB_ENV
           source ".ci/nfs-cache.sh"
           require_nfs_cache UV_CACHE_DIR
 
@@ -76,6 +82,9 @@ jobs:
       - name: Build PR quality report
         if: always()
         uses: ./.github/actions/quality-report
+        env:
+          WORKFLOW_CACHE_PROFILE: ${{ startsWith(runner.name, 'phoenix-') && 'local' || 'nfs' }}
+          WORKFLOW_LOCAL_ROOT: ${{ runner.temp }}
         with:
           junit-glob: coverage-reports/pytest-report.xml
           coverage-glob: coverage-reports/coverage.xml
