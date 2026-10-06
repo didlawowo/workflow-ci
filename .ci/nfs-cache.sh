@@ -23,3 +23,37 @@ require_nfs_cache() {
   fi
   export "${variable?}"
 }
+
+require_runner_cache() {
+  local variable="$1" profile="${WORKFLOW_CI_CACHE_PROFILE:-nfs}" cache="${!1:-}"
+  case "$profile" in
+    nfs)
+      require_nfs_cache "$variable"
+      ;;
+    local)
+      if [[ "$cache" != /* ]]; then
+        echo "::error::$variable must name an absolute runner-local directory." >&2
+        return 1
+      fi
+      if ! timeout 6 bash -euo pipefail -c '
+        cache="$1"
+        mkdir -p "$cache"
+        [[ -d "$cache" && ! -L "$cache" ]]
+        filesystem="$(findmnt -n -T "$cache" -o FSTYPE)"
+        [[ "$filesystem" != nfs && "$filesystem" != nfs4 ]]
+        probe="$(mktemp "$cache/.workflow-ci-write-test.XXXXXX")"
+        trap "rm -f \"$probe\"" EXIT
+        printf "%s\n" workflow-ci > "$probe"
+        cat "$probe" >/dev/null
+      ' _ "$cache"; then
+        echo "::error::$variable is unavailable, unwritable or still on NFS in local profile." >&2
+        return 1
+      fi
+      export "${variable?}"
+      ;;
+    *)
+      echo "::error::WORKFLOW_CI_CACHE_PROFILE must be 'nfs' or 'local', got '$profile'." >&2
+      return 1
+      ;;
+  esac
+}
