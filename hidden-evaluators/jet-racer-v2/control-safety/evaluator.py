@@ -91,7 +91,7 @@ def _teleop_invariants(
     )
     assert rearmed.armed is True
     stopped = session.update(
-        _state(DualSenseState, rng, base + 5, {"cross"}), now=now[0] + 0.003
+        _state(DualSenseState, rng, base + 5, {"circle"}), now=now[0] + 0.003
     )
     assert stopped.armed is False and stopped.throttle == 0.0
 
@@ -105,10 +105,11 @@ def _watchdog_invariants(Watchdog, rng):
     )
 
     assert watchdog.check() is False
+    now[0] = 0.0
     watchdog.feed()
-    now[0] += timeout
+    now[0] = timeout
     assert watchdog.check() is False, "timeout is strict, not >="
-    now[0] += max(1e-6, timeout / 1000)
+    now[0] = timeout + max(1e-6, timeout / 1000)
     assert watchdog.check() is True
     assert len(calls) == 1
     assert watchdog.check() is False
