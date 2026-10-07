@@ -526,6 +526,25 @@ def test_forgejo_mutation_policy_template_matches_label_refresh_contract():
         assert job in forgejo
 
 
+def test_quality_evidence_configures_local_cache_profile_on_phoenix():
+    content = WORKFLOW.read_text()
+
+    execution = content.split("  independent-verification:", 1)[1].split(
+        "  trusted-gate:", 1
+    )[0]
+
+    assert "Configure runner cache profile" in execution
+    assert 'if [[ "$RUNNER_NAME" == phoenix-* ]]; then' in execution
+    assert 'echo "WORKFLOW_CACHE_PROFILE=local" >> "$GITHUB_ENV"' in execution
+    assert 'echo "WORKFLOW_LOCAL_ROOT=$RUNNER_TEMP" >> "$GITHUB_ENV"' in execution
+
+    configure = execution.index("Configure runner cache profile")
+    python_tests = execution.index("Verify Python tests")
+    python_quality = execution.index("Verify Python quality and security")
+    assert configure < python_tests
+    assert configure < python_quality
+
+
 def test_quality_evidence_separates_blocking_gate_from_best_effort_publication():
     content = WORKFLOW.read_text()
 
