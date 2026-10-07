@@ -44,5 +44,13 @@ jobs:
           if [[ "$(id -u)" == "0" ]]; then
             uv run --no-project --python 3.12 python tests/run_forgejo_mutation_smoke.py
           else
-            sudo env "PATH=$PATH" "UV_CACHE_DIR=$UV_CACHE_DIR" uv run --no-project --python 3.12 python tests/run_forgejo_mutation_smoke.py
+            ROOT_UV_CACHE="${RUNNER_TEMP:-/tmp}/forgejo-root-uv-cache"
+            sudo rm -rf "$ROOT_UV_CACHE"
+            sudo mkdir -p "$ROOT_UV_CACHE"
+            sudo env \
+              "PATH=$PATH" \
+              "UV_CACHE_DIR=$ROOT_UV_CACHE" \
+              "PIP_INDEX_URL=${PIP_INDEX_URL:-https://pypi.org/simple}" \
+              "UV_DEFAULT_INDEX=${UV_DEFAULT_INDEX:-https://pypi.org/simple}" \
+              uv run --no-project --python 3.12 python tests/run_forgejo_mutation_smoke.py
           fi
