@@ -102,16 +102,6 @@ inputs:
 runs:
   using: "composite"
   steps:
-    - name: Resolve writable uv cache for quality reporter
-      id: uv-cache
-      shell: bash
-      run: |
-        set -euo pipefail
-        source "$GITHUB_ACTION_PATH/../../../.ci/nfs-cache.sh"
-        require_nfs_cache UV_CACHE_DIR
-        echo "path=$UV_CACHE_DIR" >> "$GITHUB_OUTPUT"
-        echo "UV_CACHE_DIR=$UV_CACHE_DIR" >> "$GITHUB_ENV"
-
     - name: Detect preinstalled uv for quality reporter
       id: uv-runtime
       shell: bash
@@ -129,7 +119,6 @@ runs:
       with:
         version: "latest"
         enable-cache: false
-        cache-local-path: ${{ steps.uv-cache.outputs.path }}
         prune-cache: false
 
     - name: Provision quality reporter Python
