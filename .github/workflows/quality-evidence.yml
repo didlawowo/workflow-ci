@@ -131,15 +131,6 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
-      - name: Configure runner cache profile
-        shell: bash
-        run: |
-          set -euo pipefail
-          if [[ "$RUNNER_NAME" == phoenix-* ]]; then
-            echo "WORKFLOW_CACHE_PROFILE=local" >> "$GITHUB_ENV"
-            echo "WORKFLOW_LOCAL_ROOT=$RUNNER_TEMP" >> "$GITHUB_ENV"
-          fi
-
       - name: Resolve coverage threshold
         id: threshold
         shell: bash
