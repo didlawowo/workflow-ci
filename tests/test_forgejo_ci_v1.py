@@ -2,9 +2,7 @@
 
 from pathlib import Path
 
-import pytest
 import yaml
-from test_uv_cache_resolver import run_validator
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -13,44 +11,20 @@ def workflow(name):
     return yaml.safe_load((ROOT / f".forgejo/workflows/{name}.yaml").read_text())
 
 
-def test_python_checks_nfs_before_installing_or_running_uv():
+def test_python_inherits_runner_package_proxy_without_nfs_cache_gate():
     steps = workflow("python-postgres")["jobs"]["tests"]["steps"]
-    validation = next(s for s in steps if s.get("name") == "Validate runner NFS cache")
-    canonical = (ROOT / ".ci/nfs-cache.sh").read_text().splitlines()[1:]
-    assert (
-        validation["run"]
-        == "\n".join(canonical + ["require_nfs_cache UV_CACHE_DIR"]) + "\n"
+    names = [step.get("name") for step in steps]
+    assert "Validate runner NFS cache" not in names
+    install_uv = next(i for i, step in enumerate(steps) if step.get("name") == "Install uv")
+    install_deps = next(
+        i for i, step in enumerate(steps) if step.get("name") == "Install dependencies"
     )
-    assert steps.index(validation) < next(
-        i for i, s in enumerate(steps) if s.get("name") == "Install uv"
-    )
+    assert install_uv < install_deps
     assert "persist-credentials" in steps[0]["with"]
     assert steps[0]["with"]["persist-credentials"] is False
-
-
-@pytest.mark.parametrize(
-    "options",
-    [
-        {},
-        {"filesystem": "ext4"},
-        {"configured": False},
-        {"failure": True},
-        {"blocked": True},
-    ],
-)
-def test_forgejo_nfs_guard_executes_actual_yaml(tmp_path, options):
-    steps = workflow("python-postgres")["jobs"]["tests"]["steps"]
-    command = next(
-        s["run"] for s in steps if s.get("name") == "Validate runner NFS cache"
-    )
-    result, cache = run_validator(
-        tmp_path, command=command + 'printf "%s" "$UV_CACHE_DIR"', **options
-    )
-    assert (result.returncode == 0) == (not options), result.stderr
-    if not options:
-        assert result.stdout == str(cache)
-    else:
-        assert "::error::" in result.stderr
+    text = (ROOT / ".forgejo/workflows/python-postgres.yaml").read_text()
+    assert "WORKFLOW_CACHE_PROFILE" not in text
+    assert "require_nfs_cache" not in text
 
 
 def test_postgres_service_and_disposable_database_contract():
