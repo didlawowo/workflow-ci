@@ -4,20 +4,15 @@ All notable changes to this project are documented here.
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 and follows the [Conventional Commits](https://www.conventionalcommits.org) spec.
 
-## [1.17.2] - 2026-10-06
+## [1.17.3] - 2026-10-07
 
 ### Bug Fixes
 
-- *(ci)* Make self-tests runner-safe on Phoenix
+- *(quality)* Use local cache profile on Phoenix trusted jobs
 
-- *(ci)* Support Phoenix system runners in mutation policy
 
-- *(ci)* Complete registry-authoritative OCI scan cleanup
+### Tests
 
-- *(ci)* Complete registry-authoritative OCI scan cleanup
-
-- *(ci)* Complete registry-authoritative OCI scan cleanup
-
-- *(ci)* Complete registry-authoritative OCI scan cleanup
+- *(quality)* Cover Phoenix local cache profile
 
 
