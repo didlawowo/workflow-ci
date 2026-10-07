@@ -1,0 +1,38 @@
+minimum_pre_commit_version: "4.0.0"
+fail_fast: true
+
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: check-merge-conflict
+      - id: check-json
+      - id: check-yaml
+      - id: check-added-large-files
+        args: ["--maxkb=1024"]
+
+  - repo: local
+    hooks:
+      - id: node-lint
+        name: Node lint
+        entry: bash -lc 'npm run lint --if-present'
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-commit]
+
+      - id: node-format
+        name: Node format check
+        entry: bash -lc 'npm run format:check --if-present'
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-commit]
+
+      - id: node-test
+        name: Node tests (pre-push)
+        entry: bash -lc 'npm test --if-present'
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-push]
