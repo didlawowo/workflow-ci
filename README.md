@@ -196,3 +196,27 @@ references in `.github/workflows/` and `forgejo-content/`, and adjust the associ
 Use an actually published tag, run the github-manager checks, open its update
 PR and verify its CI. Publishing workflow-ci alone does not update managed
 consumer workflows. Any production rollout still requires explicit authorization.
+
+
+## Shared local pre-commit contract
+
+Workflow CI owns the default local developer gates for managed repositories.
+
+Templates:
+- `templates/python/.pre-commit-config.yaml`
+- `templates/node/.pre-commit-config.yaml`
+- `templates/go/.pre-commit-config.yaml`
+
+The contract separates fast commit-time checks from full pre-push tests:
+- **pre-commit**: syntax/configuration, lint, formatting and type/static checks;
+- **pre-push**: the repository test suite.
+
+Consumers install both hooks with:
+
+```bash
+pre-commit install --hook-type pre-commit --hook-type pre-push --install-hooks
+```
+
+CI can verify that the local contract still passes with the shared composite action
+`.github/actions/precommit-contract`. Consumer workflow templates must reference
+an immutable published tag, never `main`.
