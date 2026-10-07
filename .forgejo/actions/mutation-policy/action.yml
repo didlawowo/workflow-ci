@@ -23,11 +23,6 @@ outputs:
 runs:
   using: composite
   steps:
-    - name: Validate runner NFS cache
-      shell: bash
-      run: |
-        source "$GITHUB_ACTION_PATH/../../../.ci/nfs-cache.sh"
-        require_nfs_cache UV_CACHE_DIR
     - uses: https://github.com/astral-sh/setup-uv@v10.1.0
       with:
         enable-cache: false
