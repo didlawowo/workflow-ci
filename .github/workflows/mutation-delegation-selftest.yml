@@ -30,6 +30,7 @@ jobs:
         run: |
           source ".ci/nfs-cache.sh"
           require_nfs_cache UV_CACHE_DIR
+          python_index_fallback_if_unreachable
       - uses: astral-sh/setup-uv@v10.1.0
         with:
           enable-cache: false
