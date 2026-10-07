@@ -98,7 +98,7 @@ else
     docker create -w /repo \
       "ghcr.io/trufflesecurity/trufflehog:$TRUFFLEHOG_VERSION" "${ARGS[@]}"
   )"
-  docker cp "$ROOT/." "$DOCKER_CONTAINER:/repo"
+  tar -C "$ROOT" -cf - . | docker cp - "$DOCKER_CONTAINER:/repo"
   docker start -a "$DOCKER_CONTAINER" \
     > "$TMP/results.jsonl" 2> "$TMP/stderr.log" || SCAN_EXIT=$?
   docker rm -f "$DOCKER_CONTAINER" >/dev/null
