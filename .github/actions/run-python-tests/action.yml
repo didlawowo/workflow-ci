@@ -200,7 +200,17 @@ runs:
         done
 
         if [ -n "$COV_FILE" ]; then
-          PCT=$(grep -o 'line-rate="[0-9.]*"' "$COV_FILE" | head -1 | grep -o '[0-9.]*' | awk '{printf "%.1f", $1*100}')
+          PCT=$(python3 - "$COV_FILE" <<'PY'
+        import sys
+        import xml.etree.ElementTree as ET
+
+        root = ET.parse(sys.argv[1]).getroot()
+        line_rate = root.attrib.get("line-rate")
+        if line_rate is None:
+            raise SystemExit("coverage XML is missing the root line-rate attribute")
+        print(f"{float(line_rate) * 100:.1f}")
+        PY
+          )
           echo "percentage=${PCT}" >> "$GITHUB_OUTPUT"
           echo "coverage-file=$(realpath "$COV_FILE")" >> "$GITHUB_OUTPUT"
         else
@@ -282,11 +292,15 @@ runs:
       run: |
         PCT="${{ steps.coverage.outputs.percentage }}"
         THRESHOLD="${{ inputs.coverage-threshold }}"
-        PASS=$(awk "BEGIN {print ($PCT >= $THRESHOLD) ? 1 : 0}")
-        if [ "$PASS" -ne 1 ]; then
-          echo "Coverage ${PCT}% is below threshold ${THRESHOLD}%"
-          exit 1
-        fi
+        python3 - "$PCT" "$THRESHOLD" <<'PY'
+        import sys
+
+        percentage, threshold = map(float, sys.argv[1:])
+        if percentage < threshold:
+            raise SystemExit(
+                f"Coverage {percentage:.1f}% is below threshold {threshold:.1f}%"
+            )
+        PY
 
     - name: Detect preinstalled Codecov CLI
       id: codecov-runtime
