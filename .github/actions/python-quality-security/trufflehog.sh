@@ -7,12 +7,16 @@ FINDINGS=''
 MODE=unknown
 SCAN_EXIT=1
 TMP=''
+DOCKER_CONTAINER=''
 TRUFFLEHOG_VERSION=3.97.7
 finish() {
   rc=$?
   trap - EXIT
   if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
     printf 'status=%s\nfindings=%s\nmode=%s\nexit-code=%s\n' "$STATUS" "$FINDINGS" "$MODE" "$SCAN_EXIT" >> "$GITHUB_OUTPUT"
+  fi
+  if [[ -n "$DOCKER_CONTAINER" ]]; then
+    docker rm -f "$DOCKER_CONTAINER" >/dev/null 2>&1 || true
   fi
   [[ -z "$TMP" ]] || rm -rf -- "$TMP"
   if [[ "$STATUS" == error ]]; then
@@ -85,9 +89,20 @@ if [[ -n "$LOCAL_TRUFFLEHOG" ]]; then
   "$LOCAL_TRUFFLEHOG" "${ARGS[@]}" \
     > "$TMP/results.jsonl" 2> "$TMP/stderr.log" || SCAN_EXIT=$?
 else
-  docker run --rm -v "$ROOT:/repo:ro" -w /repo \
-    "ghcr.io/trufflesecurity/trufflehog:$TRUFFLEHOG_VERSION" "${ARGS[@]}" \
+  # The Docker daemon may run outside the runner host namespace (for example
+  # Phoenix system runners talking to DinD/remote Docker). Bind-mounting
+  # GITHUB_WORKSPACE would then expose a path that does not exist from the
+  # daemon's point of view. Materialize the checkout through the Docker API
+  # instead so the fallback is namespace-agnostic.
+  DOCKER_CONTAINER="$(
+    docker create -w /repo \
+      "ghcr.io/trufflesecurity/trufflehog:$TRUFFLEHOG_VERSION" "${ARGS[@]}"
+  )"
+  docker cp "$ROOT/." "$DOCKER_CONTAINER:/repo"
+  docker start -a "$DOCKER_CONTAINER" \
     > "$TMP/results.jsonl" 2> "$TMP/stderr.log" || SCAN_EXIT=$?
+  docker rm -f "$DOCKER_CONTAINER" >/dev/null
+  DOCKER_CONTAINER=''
 fi
 if ! jq -se 'all(.[]; type == "object" and .Verified == true)' "$TMP/results.jsonl" >/dev/null; then
   exit 1
