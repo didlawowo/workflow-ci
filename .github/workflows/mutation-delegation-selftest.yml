@@ -26,10 +26,15 @@ jobs:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
-      - name: Validate NFS cache
+      - name: Validate runner cache
         run: |
+          set -euo pipefail
+          if [[ "$RUNNER_NAME" == phoenix-* ]]; then
+            export WORKFLOW_CACHE_PROFILE=local
+            export WORKFLOW_LOCAL_ROOT="$RUNNER_TEMP"
+          fi
           source ".ci/nfs-cache.sh"
-          require_nfs_cache UV_CACHE_DIR
+          require_runner_cache UV_CACHE_DIR
           python_index_fallback_if_unreachable
       - uses: astral-sh/setup-uv@v10.1.0
         with:
