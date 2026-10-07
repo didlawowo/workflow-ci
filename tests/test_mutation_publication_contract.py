@@ -89,7 +89,7 @@ def test_mutation_policy_does_not_inject_large_base64_outputs_into_environment()
     assert "EVIDENCE_B64" not in env
     assert "RESULTS_B64" not in env
     assert "${{ needs.mutation-run.outputs.evidence-b64 }}" in materialize["run"]
-    assert "${{ needs.mutation-run.outputs.results-b64 }}" in materialize["run"]
+    assert "${{ needs.mutation-run.outputs.results-gzip-b64 }}" in materialize["run"]
     assert "B64_EVIDENCE" in materialize["run"]
     assert "B64_RESULTS" in materialize["run"]
 
