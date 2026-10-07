@@ -57,6 +57,7 @@ jobs:
       depth: ${{ steps.policy.outputs.depth }}
       evidence-file: ${{ steps.inline-evidence.outputs.file }}
       evidence-b64: ${{ steps.inline-evidence.outputs.evidence-b64 }}
+      results-gzip-b64: ${{ steps.inline-evidence.outputs.results-gzip-b64 }}
     steps:
       - name: Fetch central workflow implementation without submodule traversal
         env:
@@ -521,6 +522,7 @@ jobs:
         run: |
           set -euo pipefail
           EVIDENCE="${{ steps.evidence.outputs.path }}"
+          RESULTS="pr/.quality/mutmut-results.txt"
           test -s "$EVIDENCE"
           FILE="$(basename "$EVIDENCE")"
           EVIDENCE_B64="$(base64 -w0 "$EVIDENCE")"
@@ -530,6 +532,16 @@ jobs:
           fi
           echo "file=$FILE" >> "$GITHUB_OUTPUT"
           echo "evidence-b64=$EVIDENCE_B64" >> "$GITHUB_OUTPUT"
+          if [[ -s "$RESULTS" ]]; then
+            RESULTS_GZIP_B64="$(gzip -c "$RESULTS" | base64 -w0)"
+            if [[ "${#RESULTS_GZIP_B64}" -gt 300000 ]]; then
+              echo "::error::Compressed mutation diagnostics are too large for trusted job outputs."
+              exit 1
+            fi
+            echo "results-gzip-b64=$RESULTS_GZIP_B64" >> "$GITHUB_OUTPUT"
+          else
+            echo "results-gzip-b64=" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Upload untrusted mutation evidence
         if: always() && steps.policy.outputs.required == 'true' && steps.evidence.outputs.path != ''
@@ -764,7 +776,8 @@ jobs:
           mkdir -p .mutation-evidence
 
           EVIDENCE_B64_FILE="${RUNNER_TEMP:-/tmp}/mutation-evidence-${GITHUB_RUN_ID}.b64"
-          trap 'rm -f "$EVIDENCE_B64_FILE"' EXIT
+          RESULTS_B64_FILE="${RUNNER_TEMP:-/tmp}/mutation-results-${GITHUB_RUN_ID}.b64"
+          trap 'rm -f "$EVIDENCE_B64_FILE" "$RESULTS_B64_FILE"' EXIT
 
           cat > "$EVIDENCE_B64_FILE" <<'B64_EVIDENCE'
           ${{ needs.mutation-run.outputs.evidence-b64 }}
@@ -774,6 +787,13 @@ jobs:
             exit 1
           fi
           base64 -d "$EVIDENCE_B64_FILE" > ".mutation-evidence/$EVIDENCE_FILE"
+
+          cat > "$RESULTS_B64_FILE" <<'B64_RESULTS'
+          ${{ needs.mutation-run.outputs.results-gzip-b64 }}
+          B64_RESULTS
+          if grep -q '[^[:space:]]' "$RESULTS_B64_FILE"; then
+            base64 -d "$RESULTS_B64_FILE" | gzip -dc > .mutation-evidence/mutmut-results.txt
+          fi
       - name: Validate mutation evidence for changed Python functions
         id: validate
         if: steps.policy.outputs.required == 'true'
