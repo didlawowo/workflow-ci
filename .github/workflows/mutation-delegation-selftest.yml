@@ -39,7 +39,16 @@ jobs:
           ROOT_UV_CACHE="${RUNNER_TEMP:-/tmp}/forgejo-root-uv-cache"
           rm -rf "$ROOT_UV_CACHE"
           mkdir -p "$ROOT_UV_CACHE"
-          env \
-            "PATH=$PATH" \
-            "UV_CACHE_DIR=$ROOT_UV_CACHE" \
-            uv run --no-project --python 3.12 python tests/run_forgejo_mutation_smoke.py
+          if [[ "$(id -u)" == "0" ]]; then
+            env \
+              "PATH=$PATH" \
+              "UV_CACHE_DIR=$ROOT_UV_CACHE" \
+              uv run --no-project --python 3.12 python tests/run_forgejo_mutation_smoke.py
+          elif sudo -n true >/dev/null 2>&1; then
+            sudo -n env \
+              "PATH=$PATH" \
+              "UV_CACHE_DIR=$ROOT_UV_CACHE" \
+              uv run --no-project --python 3.12 python tests/run_forgejo_mutation_smoke.py
+          else
+            echo "::notice::Skipping root-to-65532 Forgejo boundary smoke: runner has no root/passwordless sudo."
+          fi
