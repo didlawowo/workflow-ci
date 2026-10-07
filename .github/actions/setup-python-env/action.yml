@@ -93,4 +93,38 @@ runs:
         case " ${DEV_MODES} " in
           *" group "*) SYNC_ARGS+=(--group dev) ;;
         esac
-        uv sync "${SYNC_ARGS[@]}"
+
+        CONTRACT="$GITHUB_ACTION_PATH/../../../.ci/mutation_contract.py"
+        LOCKED_REGISTRY="$(uv run --no-project --python "${{ inputs.python-version }}" python "$CONTRACT" locked-internal-registry)"
+        USE_LOCK_EXPORT_FALLBACK=false
+        if [[ -n "$LOCKED_REGISTRY" ]] &&
+           ! curl -fsS --connect-timeout 2 --max-time 3 "${LOCKED_REGISTRY%/}/pip/" >/dev/null 2>&1; then
+          USE_LOCK_EXPORT_FALLBACK=true
+          echo "::warning::Locked Python registry is unreachable ($LOCKED_REGISTRY); preserving locked versions and downloading them from PyPI."
+        fi
+
+        if [[ "$USE_LOCK_EXPORT_FALLBACK" == true ]]; then
+          REQUIREMENTS_FILE="$(mktemp)"
+          CLEAN_REQUIREMENTS_FILE="$(mktemp)"
+          uv export --frozen --no-emit-project --no-hashes "${SYNC_ARGS[@]}" --output-file "$REQUIREMENTS_FILE"
+          sed -E '/^--(index-url|extra-index-url|find-links)([ =]|$)/d' "$REQUIREMENTS_FILE" > "$CLEAN_REQUIREMENTS_FILE"
+          if grep -Fq ".svc.cluster.local" "$CLEAN_REQUIREMENTS_FILE"; then
+            echo "::error::Frozen dependency export still contains an internal registry URL."
+            exit 1
+          fi
+
+          PROJECT_ENV="${UV_PROJECT_ENVIRONMENT:-.venv}"
+          if [[ "$PROJECT_ENV" != /* ]]; then
+            PROJECT_ENV="$PWD/$PROJECT_ENV"
+          fi
+          if [[ ! -x "$PROJECT_ENV/bin/python" ]]; then
+            uv venv "$PROJECT_ENV" --python "${{ inputs.python-version }}"
+          fi
+          PIP_INDEX_URL="https://pypi.org/simple" UV_DEFAULT_INDEX="https://pypi.org/simple" \
+            uv pip install --python "$PROJECT_ENV/bin/python" -r "$CLEAN_REQUIREMENTS_FILE"
+          PIP_INDEX_URL="https://pypi.org/simple" UV_DEFAULT_INDEX="https://pypi.org/simple" \
+            uv pip install --python "$PROJECT_ENV/bin/python" --no-deps -e .
+          rm -f "$REQUIREMENTS_FILE" "$CLEAN_REQUIREMENTS_FILE"
+        else
+          uv sync "${SYNC_ARGS[@]}"
+        fi
