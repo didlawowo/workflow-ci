@@ -84,18 +84,20 @@ Le rollback consiste à restaurer le fichier CI autonome précédent de
 moto-tracker. Aucun changement de données ni de déploiement applicatif n'est
 introduit par cette migration.
 
-## Politique de cache Python NFS
+## Dépendances et stockage runner
 
-Le job Python conserve le `UV_CACHE_DIR` fourni par le runner. Le répertoire
-absolu doit exister, être inscriptible et appartenir à un montage `nfs`/`nfs4`
-visible dans le conteneur du job. Le contrôle lecture/écriture est borné à six
-secondes et précède l'installation de uv et des dépendances. Un chemin absent,
-local ou indisponible bloque le job ; aucun cache local de secours n'est créé.
-Le runner doit fournir bash, GNU timeout et util-linux findmnt. Configurer
-uniquement le montage sur l'hôte sans le rendre visible dans le job ne suffit pas.
+Le workflow Forgejo ne définit pas de stratégie de cache de dépendances propre.
+Le runner doit fournir les endpoints package adaptés à son environnement, comme
+pour les autres runners : proxy Python interne pour `uv`/pip et registre npm
+interne pour Node lorsque ces services sont disponibles.
 
-Le workflow Forgejo embarque le même validateur que `.ci/nfs-cache.sh` pour
-éviter un checkout de code du consommateur comme source du contrôle. Un test
-vérifie leur identité et l'ordre des étapes. Les autres contrats couvrent la
-base PostgreSQL, les paramètres npm et la dépendance à la validation Taskfiles.
+Un problème de DNS ou de connectivité vers un proxy se traite dans
+l’infrastructure du runner. Le workflow ne doit pas basculer silencieusement
+vers un registre public ni créer un cache local persistant pour masquer cette
+panne.
+
+Le stockage local reste adapté aux fichiers temporaires du job et aux workspaces
+jetables. Les contrôles NFS explicites restent réservés aux workflows qui ont
+véritablement besoin d’un stockage NFS persistant.
+
 Ces tests ne remplacent pas la recette distante Forgejo après publication.
