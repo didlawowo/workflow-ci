@@ -24,19 +24,12 @@ outputs:
     description: "Node.js version installed"
     value: ${{ steps.setup.outputs.node-version }}
   cache-hit:
-    description: "Whether the cache was hit"
-    value: ${{ steps.setup.outputs.cache-hit }}
+    description: "Compatibility output; package reuse is provided by the configured registry proxy"
+    value: "false"
 
 runs:
   using: "composite"
   steps:
-    - name: Configure local runner cache profile
-      if: env.WORKFLOW_CACHE_PROFILE == 'local'
-      shell: bash
-      run: |
-        source "$GITHUB_ACTION_PATH/../../../.ci/nfs-cache.sh"
-        require_runner_cache NPM_CONFIG_CACHE
-
     - name: Install pnpm
       if: inputs.package-manager == 'pnpm'
       uses: pnpm/action-setup@v4
@@ -60,8 +53,6 @@ runs:
       uses: actions/setup-node@v4
       with:
         node-version: ${{ inputs.node-version }}
-        cache: ${{ inputs.package-manager }}
-        cache-dependency-path: ${{ steps.lockfile.outputs.path }}
 
     - name: Install dependencies
       shell: bash
