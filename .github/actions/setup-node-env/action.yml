@@ -1,5 +1,5 @@
 name: "Setup Node.js Environment"
-description: "Setup Node.js with npm/pnpm caching"
+description: "Setup Node.js and install dependencies through the runner-configured registry"
 
 inputs:
   node-version:
@@ -35,18 +35,6 @@ runs:
       uses: pnpm/action-setup@v4
       with:
         version: latest
-
-    - name: Resolve dependency lockfile
-      id: lockfile
-      shell: bash
-      run: |
-        case "${{ inputs.package-manager }}" in
-          npm) LOCKFILE="package-lock.json" ;;
-          pnpm) LOCKFILE="pnpm-lock.yaml" ;;
-          yarn) LOCKFILE="yarn.lock" ;;
-          *) echo "::error::Unsupported package manager: ${{ inputs.package-manager }}"; exit 1 ;;
-        esac
-        echo "path=${{ inputs.working-directory }}/$LOCKFILE" >> "$GITHUB_OUTPUT"
 
     - name: Setup Node.js
       id: setup
