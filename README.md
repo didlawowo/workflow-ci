@@ -16,7 +16,7 @@ Reusable GitHub Actions composite actions and workflow templates for CI/CD pipel
 
 | Action                    | Description                      |
 | ------------------------- | -------------------------------- |
-| `setup-python-env`        | Python + uv + cache              |
+| `setup-python-env`        | Python + uv; packages use runner-configured Proxpi |
 | `run-python-tests`        | pytest + coverage + Codecov      |
 | `python-quality-security` | ruff, bandit, trufflehog, safety |
 
@@ -24,7 +24,7 @@ Reusable GitHub Actions composite actions and workflow templates for CI/CD pipel
 
 | Action                | Description                         |
 | --------------------- | ----------------------------------- |
-| `setup-go-env`        | Go + cache + mod download           |
+| `setup-go-env`        | Go + module download via runner-configured GOPROXY |
 | `run-go-tests`        | go test -race + coverage + Codecov  |
 | `go-quality-security` | golangci-lint, go vet, gofmt, gosec |
 
@@ -32,7 +32,7 @@ Reusable GitHub Actions composite actions and workflow templates for CI/CD pipel
 
 | Action                  | Description                        |
 | ----------------------- | ---------------------------------- |
-| `setup-node-env`        | Node.js + npm/pnpm/yarn cache      |
+| `setup-node-env`        | Node.js + package manager via runner-configured registry |
 | `run-node-tests`        | test script + Playwright + Codecov |
 | `node-quality-security` | eslint + npm/pnpm/yarn audit       |
 
@@ -149,30 +149,35 @@ actions to the exact commit of the tagged workflow and prevents stale cross-vers
 | `SONAR_PROJECT_KEY` | Exact SonarQube project key imported for the repository |
 | `SONAR_ENABLED` | `true` to execute the SonarQube gate; otherwise Sonar is skipped |
 
-### Python and Go caches on ARC runners
+### Dependency proxies and runner-local storage
 
-Python and Go language caches are NFS-only. Runners must provide existing absolute
-`UV_CACHE_DIR`, `GOCACHE` and `GOMODCACHE` directories on an `nfs`/`nfs4` mount.
-The runner needs `bash`, GNU `timeout` and util-linux `findmnt`. A bounded
-read/write probe rejects missing, local or unavailable caches before execution;
-there is no runner-local fallback. A later NFS outage still fails the language
-command and requires infrastructure recovery/retry.
+Dependency reuse is centralized behind the package proxies operated by the runner
+infrastructure:
 
-Language-cache self-tests use the standard runner; the light pool does not
-provide the required NFS cache environment.
+- Python / PyPI → **Proxpi**;
+- npm / pnpm / Yarn registry traffic → **Verdaccio**;
+- Go modules → **Athens** through `GOPROXY`.
 
-Go module and build caches are reused directly, without GitHub cache archives.
-The `setup-go-env` compatibility output `cache-hit` is always `false` because no
-archive restore occurs; `cache-dependency-path` remains accepted for callers.
-Python setup disables GitHub cache restore/save and pruning of shared caches.
-Mutation candidate caches use fresh NFS namespaces to keep them separate from
-trusted cache entries. Forgejo sandbox directories are created under the NFS UV
-cache and retain the existing UID separation.
+`workflow-ci` does not choose different registries based on the runner name and
+does not fall back to public registries when an internal proxy is unreachable.
+Endpoint selection belongs to infrastructure:
 
-The manual `bench-uv-cache` workflow remains a comparison of cache strategies,
-including GitHub archives; it does not define the production cache policy.
-Consumers must adopt the published workflow-ci tag to receive this behavior.
-Reverting to the preceding tag restores the previous cache policy.
+- ARC runners use the Kubernetes Service DNS names (`*.svc.cluster.local`);
+- system/out-of-cluster runners use LAN DNS endpoints to the same services.
+
+A proxy resolution or connectivity failure is therefore an infrastructure error,
+not a signal to create a new per-runner package cache or rewrite a lockfile.
+
+Local ephemeral storage remains appropriate for checkouts, workspaces, build
+intermediates and isolated mutation sandboxes. These directories are scratch:
+they must be disposable without changing dependency resolution or reproducibility.
+
+The NFS helper remains available only for workflows that explicitly require
+runner-provided persistent NFS storage. Generic Python, Node and Go setup actions
+do not require NFS dependency caches.
+
+See [Package proxies and runner storage](docs/cache-profiles.md) for the
+architecture and troubleshooting order.
 
 ## Forgejo reusable workflows (V1)
 
