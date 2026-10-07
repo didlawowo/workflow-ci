@@ -19,14 +19,7 @@ def test_python_checks_nfs_before_installing_or_running_uv():
     canonical = (ROOT / ".ci/nfs-cache.sh").read_text().splitlines()[1:]
     assert (
         validation["run"]
-        == "\n".join(
-            canonical
-            + [
-                "require_nfs_cache UV_CACHE_DIR",
-                "python_index_fallback_if_unreachable",
-            ]
-        )
-        + "\n"
+        == "\n".join(canonical + ["require_nfs_cache UV_CACHE_DIR"]) + "\n"
     )
     assert steps.index(validation) < next(
         i for i, s in enumerate(steps) if s.get("name") == "Install uv"
