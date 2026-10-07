@@ -5,7 +5,6 @@ import subprocess
 from pathlib import Path
 
 import pytest
-import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -85,45 +84,24 @@ def test_invalid_cache_stops_without_fallback(tmp_path, options, variable):
         assert not list(cache.iterdir())
 
 
-def test_mutation_cache_namespaces_remain_on_nfs():
+def test_mutation_uses_runner_local_scratch_not_shared_dependency_caches():
     content = (ROOT / ".github/workflows/mutation-policy.yml").read_text()
-    for variable in ("UV_CACHE_DIR", "GOCACHE", "GOMODCACHE"):
-        assert f"require_nfs_cache {variable}" in content
-        assert f'mktemp -d "${variable}/mutation.XXXXXX"' in content
-    assert "${RUNNER_TEMP:-/tmp}/mutation-uv-cache" not in content
+    assert 'ISOLATED_ROOT="${RUNNER_TEMP:-/tmp}/mutation-scratch"' in content
+    assert 'mktemp -d "$ISOLATED_ROOT/uv.XXXXXX"' in content
+    assert 'mktemp -d "$ISOLATED_ROOT/go-build.XXXXXX"' in content
+    assert 'mktemp -d "$ISOLATED_ROOT/go-mod.XXXXXX"' in content
+    assert 'mktemp -d "$UV_CACHE_DIR/mutation.XXXXXX"' not in content
+    assert 'mktemp -d "$GOCACHE/mutation.XXXXXX"' not in content
+    assert 'mktemp -d "$GOMODCACHE/mutation.XXXXXX"' not in content
 
 
-def test_mutation_loads_trusted_cache_helper_from_pr_directory(tmp_path):
-    workflow = yaml.safe_load(
-        (ROOT / ".github/workflows/mutation-policy.yml").read_text()
-    )
-    step = next(
-        step
-        for job in workflow["jobs"].values()
-        for step in job.get("steps", [])
-        if step.get("name") == "Run trusted mutation runner against PR code"
-    )
-    workspace = tmp_path / "workspace with spaces"
-    trusted = workspace / ".workflow-ci/.ci"
-    trusted.mkdir(parents=True)
-    (trusted / "nfs-cache.sh").write_text('printf "trusted-helper"\n')
-    pr = workspace / step["working-directory"]
-    untrusted = pr / ".workflow-ci/.ci"
-    untrusted.mkdir(parents=True)
-    (untrusted / "nfs-cache.sh").write_text("exit 99\n")
-    command = next(
-        line.strip()
-        for line in step["run"].splitlines()
-        if line.strip().startswith("source ")
-    )
-    result = subprocess.run(
-        ["bash", "-euo", "pipefail", "-c", command],
-        cwd=pr,
-        env={**os.environ, "GITHUB_WORKSPACE": str(workspace)},
-        capture_output=True,
-        text=True,
-        check=False,
-        timeout=10,
-    )
-    assert result.returncode == 0, result.stderr
-    assert result.stdout == "trusted-helper"
+def test_mutation_pr_code_receives_only_isolated_dependency_cache_paths():
+    content = (ROOT / ".github/workflows/mutation-policy.yml").read_text()
+    step = content.split("- name: Run trusted mutation runner against PR code", 1)[1]
+    step = step.split("- name: Capture mutmut diagnostics", 1)[0]
+    assert "env -i" in step
+    assert 'UV_CACHE_DIR="$ISOLATED_UV_CACHE"' in step
+    assert 'GOCACHE="$ISOLATED_GO_CACHE"' in step
+    assert 'GOMODCACHE="$ISOLATED_GO_MODCACHE"' in step
+    assert 'source "$GITHUB_WORKSPACE/.workflow-ci/.ci/nfs-cache.sh"' not in step
+    assert "require_nfs_cache" not in step
