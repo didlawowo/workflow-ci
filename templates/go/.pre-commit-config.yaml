@@ -1,0 +1,37 @@
+minimum_pre_commit_version: "4.0.0"
+fail_fast: true
+
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: check-merge-conflict
+      - id: check-yaml
+      - id: check-added-large-files
+        args: ["--maxkb=1024"]
+
+  - repo: local
+    hooks:
+      - id: gofmt
+        name: gofmt (check-only)
+        entry: bash -lc 'test -z "$(gofmt -l .)"'
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-commit]
+
+      - id: go-vet
+        name: go vet
+        entry: go vet ./...
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-commit]
+
+      - id: go-test
+        name: Go tests (pre-push)
+        entry: go test ./...
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-push]
