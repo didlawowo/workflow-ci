@@ -78,17 +78,6 @@ outputs:
 runs:
   using: "composite"
   steps:
-    - name: Resolve writable uv cache
-      id: uv-cache
-      shell: bash
-      run: |
-        set -euo pipefail
-        source "$GITHUB_ACTION_PATH/../../../.ci/nfs-cache.sh"
-        require_nfs_cache UV_CACHE_DIR
-        python_index_fallback_if_unreachable
-        echo "path=$UV_CACHE_DIR" >> "$GITHUB_OUTPUT"
-        echo "UV_CACHE_DIR=$UV_CACHE_DIR" >> "$GITHUB_ENV"
-
     - name: Detect preinstalled uv
       id: uv-runtime
       if: inputs.use-docker-compose != 'true'
@@ -107,7 +96,6 @@ runs:
       with:
         version: "latest"
         enable-cache: false
-        cache-local-path: ${{ steps.uv-cache.outputs.path }}
 
     - name: Setup Python environment
       if: inputs.use-docker-compose != 'true'
