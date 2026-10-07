@@ -272,6 +272,17 @@ def test_mutation_verify_is_read_only_and_scoped_to_changed_functions():
     )
 
 
+def test_python_setup_preserves_frozen_lock_when_internal_registry_is_unreachable():
+    root = Path(__file__).resolve().parents[1]
+    content = (root / ".github" / "actions" / "setup-python-env" / "action.yml").read_text()
+
+    assert "locked-internal-registry" in content
+    assert "uv export --frozen --no-emit-project --no-hashes" in content
+    assert 'grep -Fq ".svc.cluster.local"' in content
+    assert 'UV_DEFAULT_INDEX="https://pypi.org/simple"' in content
+    assert 'uv pip install --python "$PROJECT_ENV/bin/python" --no-deps -e .' in content
+
+
 def test_python_security_action_propagates_requested_check_failures():
     root = Path(__file__).resolve().parents[1]
     content = (
