@@ -186,3 +186,12 @@ def test_composite_actions_declare_the_profile_contract():
         content = (ROOT / f".github/actions/{action}/action.yml").read_text()
         assert "nfs-cache.sh" in content
         assert "require_nfs_cache" in content or "require_runner_cache" in content
+
+
+def test_python_setup_retries_proxpi_failures_on_public_pypi():
+    content = (ROOT / ".github/actions/setup-python-env/action.yml").read_text()
+    assert 'case "$CURRENT_INDEX" in' in content
+    assert '*proxpi*)' in content
+    assert 'retrying once with public PyPI' in content
+    assert 'UV_DEFAULT_INDEX="https://pypi.org/simple"' in content
+    assert 'uv sync "${SYNC_ARGS[@]}"' in content
