@@ -46,6 +46,53 @@ def test_project_dependencies_preserve_lock_and_both_dev_schemas(tmp_path, locke
     assert args[-4:] == ["--group", "dev", "--extra", "dev"]
 
 
+def test_locked_internal_registry_detects_kubernetes_proxy(tmp_path):
+    (tmp_path / "pyproject.toml").write_text('[project]\nname="consumer"\n')
+    (tmp_path / "uv.lock").write_text(
+        'version = 1\n'
+        '[[package]]\n'
+        'name = "pytest"\n'
+        'version = "9.1.1"\n'
+        'source = { registry = "http://proxpi.arc-system.svc.cluster.local:5000/index/" }\n'
+    )
+    assert (
+        contract.locked_internal_registry(tmp_path)
+        == "http://proxpi.arc-system.svc.cluster.local:5000/index"
+    )
+
+
+def test_locked_internal_registry_ignores_public_index(tmp_path):
+    (tmp_path / "uv.lock").write_text(
+        'version = 1\n'
+        '[[package]]\n'
+        'name = "pytest"\n'
+        'version = "9.1.1"\n'
+        'source = { registry = "https://pypi.org/simple" }\n'
+    )
+    assert contract.locked_internal_registry(tmp_path) == ""
+
+
+def test_project_export_selection_matches_dev_schemas(tmp_path):
+    (tmp_path / "pyproject.toml").write_text(
+        '[project.optional-dependencies]\ndev=["pytest"]\n[dependency-groups]\ndev=["pytest-cov"]\n'
+    )
+    assert contract.project_export_selection(tmp_path) == [
+        "--group",
+        "dev",
+        "--extra",
+        "dev",
+    ]
+
+
+def test_python_runner_preserves_lock_versions_when_internal_proxy_is_down():
+    script = (ROOT / ".ci" / "mutation.sh").read_text(encoding="utf-8")
+    assert "locked-internal-registry" in script
+    assert "uv export --frozen --no-emit-project --no-hashes" in script
+    assert 'UV_DEFAULT_INDEX="https://pypi.org/simple"' in script
+    assert 'uv pip install --python "$PYTHON" --no-deps -e .' in script
+    assert 'grep -Fq ".svc.cluster.local" "$CLEAN_REQUIREMENTS_FILE"' in script
+
+
 def test_python_evidence_covers_unicode_methods_and_ignores_outside_scope(tmp_path):
     write(
         tmp_path,
