@@ -121,23 +121,18 @@ def test_reporter_retry_and_log_isolation(
     assert not list(tmp_path.glob("quality-reporter.*"))
 
 
-def test_quality_report_resolves_a_writable_uv_cache():
+def test_quality_report_uses_uv_without_managed_dependency_cache():
     action_path = ROOT / ".github/actions/quality-report/action.yml"
     action = yaml.safe_load(action_path.read_text())
     steps = action["runs"]["steps"]
-    resolver = next(
-        step
-        for step in steps
-        if step["name"] == "Resolve writable uv cache for quality reporter"
-    )
-    command = resolver["run"]
 
-    assert 'source "$GITHUB_ACTION_PATH/../../../.ci/nfs-cache.sh"' in command
-    assert "require_nfs_cache UV_CACHE_DIR" in command
-    assert "RUNNER_TEMP" not in command
+    assert all(step.get("name") != "Resolve writable uv cache for quality reporter" for step in steps)
+    text = action_path.read_text()
+    assert "require_nfs_cache UV_CACHE_DIR" not in text
+    assert "cache-local-path:" not in text
 
     installer = next(
         step for step in steps if step["name"] == "Install uv for quality reporter"
     )
-    assert installer["with"]["cache-local-path"] == "${{ steps.uv-cache.outputs.path }}"
+    assert installer["with"]["enable-cache"] is False
     assert installer["with"]["prune-cache"] is False
