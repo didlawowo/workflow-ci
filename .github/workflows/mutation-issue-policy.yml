@@ -42,11 +42,6 @@ jobs:
           path: .workflow-ci
           persist-credentials: false
 
-      - name: Validate NFS cache for policy helpers
-        run: |
-          source ".workflow-ci/.ci/nfs-cache.sh"
-          require_nfs_cache UV_CACHE_DIR
-
       - name: Explain mandatory mutation testing
         env:
           POLICY_PROVIDER: github
@@ -82,11 +77,6 @@ jobs:
           ref: ${{ job.workflow_sha }}
           path: .workflow-ci
           persist-credentials: false
-
-      - name: Validate NFS cache for policy helpers
-        run: |
-          source ".workflow-ci/.ci/nfs-cache.sh"
-          require_nfs_cache UV_CACHE_DIR
 
       - name: Recompute linked pull request mutation policy
         env:
