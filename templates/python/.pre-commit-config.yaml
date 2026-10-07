@@ -1,0 +1,51 @@
+minimum_pre_commit_version: "4.0.0"
+fail_fast: true
+
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: check-merge-conflict
+      - id: check-toml
+      - id: check-yaml
+      - id: check-added-large-files
+        args: ["--maxkb=1024"]
+
+  - repo: local
+    hooks:
+      - id: python-compile
+        name: Python syntax
+        entry: uv run python -m py_compile
+        language: system
+        types: [python]
+        stages: [pre-commit]
+
+      - id: ruff-check
+        name: Ruff lint (check-only)
+        entry: uv run ruff check --force-exclude
+        language: system
+        types: [python]
+        stages: [pre-commit]
+
+      - id: ruff-format
+        name: Ruff format (check-only)
+        entry: uv run ruff format --check --force-exclude
+        language: system
+        types: [python]
+        stages: [pre-commit]
+
+      - id: mypy
+        name: MyPy
+        entry: uv run mypy .
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-commit]
+
+      - id: pytest
+        name: Pytest full suite (pre-push)
+        entry: uv run pytest -q --maxfail=1
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-push]
