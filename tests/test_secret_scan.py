@@ -51,6 +51,7 @@ if command == "create":
     sys.stdout.write("fake-trufflehog-container\\n")
     raise SystemExit(0)
 if command == "cp":
+    sys.stdin.buffer.read()
     raise SystemExit(0)
 if command == "start":
     sys.stdout.write(os.environ["FAKE_JSON"])
