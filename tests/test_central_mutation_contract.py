@@ -189,6 +189,18 @@ def test_config_changes_are_rejected_before_git_or_execution(tmp_path, monkeypat
     run.assert_not_called()
 
 
+def test_github_mutation_workspaces_are_runner_local_scratch():
+    workflow = (ROOT / ".github" / "workflows" / "mutation-policy.yml").read_text(
+        encoding="utf-8"
+    )
+    assert 'ISOLATED_ROOT="${RUNNER_TEMP:-/tmp}/mutation-scratch"' in workflow
+    assert 'mktemp -d "$ISOLATED_ROOT/go-build.XXXXXX"' in workflow
+    assert 'mktemp -d "$ISOLATED_ROOT/go-mod.XXXXXX"' in workflow
+    assert 'mktemp -d "$GOCACHE/mutation.XXXXXX"' not in workflow
+    assert 'mktemp -d "$GOMODCACHE/mutation.XXXXXX"' not in workflow
+    assert 'chmod -R u+w "$ISOLATED_ROOT"' in workflow
+    assert "trap cleanup_mutation_scratch EXIT" in workflow
+
 def test_python_runner_requests_all_mutmut_statuses():
     script = (ROOT / ".ci" / "mutation.sh").read_text(encoding="utf-8")
     assert 'mutmut results --all true > "$RAW_RESULTS"' in script
