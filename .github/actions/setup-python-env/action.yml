@@ -66,13 +66,10 @@ runs:
       working-directory: ${{ inputs.working-directory }}
       run: |
         set -euo pipefail
-        if [ "${{ inputs.install-dev }}" != "true" ]; then
-          uv sync
-          exit 0
-        fi
-
-        DEV_MODES="$(
-          uv run --no-project --python "${{ inputs.python-version }}" python - <<'PY'
+        DEV_MODES=""
+        if [ "${{ inputs.install-dev }}" = "true" ]; then
+          DEV_MODES="$(
+            uv run --no-project --python "${{ inputs.python-version }}" python - <<'PY'
         import pathlib
         import tomllib
 
@@ -84,7 +81,8 @@ runs:
             modes.append("group")
         print(" ".join(modes))
         PY
-        )"
+          )"
+        fi
 
         SYNC_ARGS=()
         case " ${DEV_MODES} " in
