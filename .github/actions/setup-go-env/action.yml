@@ -20,7 +20,7 @@ outputs:
     description: "Go version installed"
     value: ${{ steps.setup.outputs.go-version }}
   cache-hit:
-    description: "Compatibility output; NFS caches are reused directly, without archive restore"
+    description: "Compatibility output; dependency reuse is provided by GOPROXY/Athens"
     value: "false"
 
 runs:
@@ -32,13 +32,6 @@ runs:
       with:
         go-version: ${{ inputs.go-version }}
         cache: false
-
-    - name: Validate runner NFS caches
-      shell: bash
-      run: |
-        source "$GITHUB_ACTION_PATH/../../../.ci/nfs-cache.sh"
-        require_nfs_cache GOCACHE
-        require_nfs_cache GOMODCACHE
 
     - name: Download dependencies
       shell: bash
