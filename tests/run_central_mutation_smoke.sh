@@ -39,6 +39,21 @@ def test_add():
     assert add(-1, 2) == 2
 PY
 uv lock --python 3.12
+# Simulate a lock generated through an internal Kubernetes proxy that is not
+# reachable from this runner. Versions and hashes stay unchanged; only the
+# registry transport is rewritten.
+python - <<'PY'
+from pathlib import Path
+
+path = Path("uv.lock")
+content = path.read_text(encoding="utf-8")
+public = 'registry = "https://pypi.org/simple"'
+internal = 'registry = "http://dead-proxpi.invalid.svc.cluster.local:5000/index/"'
+if public not in content:
+    raise SystemExit("fixture lock has no public registry to rewrite")
+path.write_text(content.replace(public, internal), encoding="utf-8")
+PY
+grep -Fq 'dead-proxpi.invalid.svc.cluster.local' uv.lock
 git add pyproject.toml uv.lock src tests
 git commit -qm base
 BASE="$(git rev-parse HEAD)"
