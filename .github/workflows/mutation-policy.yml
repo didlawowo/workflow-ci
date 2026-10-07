@@ -431,20 +431,20 @@ jobs:
             MUTATION_PATH="$MUTATION_VENV/bin:$MUTATION_PATH"
           fi
           ISOLATED_HOME="${RUNNER_TEMP:-/tmp}/mutation-home"
-          source "$GITHUB_WORKSPACE/.workflow-ci/.ci/nfs-cache.sh"
-          require_nfs_cache UV_CACHE_DIR
-          require_nfs_cache GOCACHE
-          require_nfs_cache GOMODCACHE
-          ISOLATED_UV_CACHE="" ISOLATED_GO_CACHE="" ISOLATED_GO_MODCACHE=""
-          trap 'for directory in "$ISOLATED_UV_CACHE" "$ISOLATED_GO_CACHE" "$ISOLATED_GO_MODCACHE"; do [[ -z "$directory" ]] || rm -rf "$directory"; done' EXIT
-          ISOLATED_UV_CACHE="$(mktemp -d "$UV_CACHE_DIR/mutation.XXXXXX")"
-          ISOLATED_GO_CACHE="$(mktemp -d "$GOCACHE/mutation.XXXXXX")"
-          ISOLATED_GO_MODCACHE="$(mktemp -d "$GOMODCACHE/mutation.XXXXXX")"
-          rm -rf "$ISOLATED_HOME"
-          mkdir -p "$ISOLATED_HOME"
+          ISOLATED_ROOT="${RUNNER_TEMP:-/tmp}/mutation-scratch"
+          rm -rf "$ISOLATED_HOME" "$ISOLATED_ROOT"
+          mkdir -p "$ISOLATED_HOME" "$ISOLATED_ROOT"
+          ISOLATED_UV_CACHE="$(mktemp -d "$ISOLATED_ROOT/uv.XXXXXX")"
+          ISOLATED_GO_CACHE="$(mktemp -d "$ISOLATED_ROOT/go-build.XXXXXX")"
+          ISOLATED_GO_MODCACHE="$(mktemp -d "$ISOLATED_ROOT/go-mod.XXXXXX")"
+          cleanup_mutation_scratch() {
+            chmod -R u+w "$ISOLATED_ROOT" 2>/dev/null || true
+            rm -rf "$ISOLATED_ROOT" "$ISOLATED_HOME"
+          }
+          trap cleanup_mutation_scratch EXIT
 
           # No forge token, persistent HOME or shared dependency cache is
-          # exposed to PR code; only fresh runner-cache namespaces are passed.
+          # exposed to PR code; only fresh runner-local scratch namespaces are passed.
           env -i \
             PATH="$MUTATION_PATH" \
             HOME="$ISOLATED_HOME" \
@@ -459,7 +459,6 @@ jobs:
             MUTATION_HEAD_SHA="$MUTATION_HEAD_SHA" \
             MUTATION_WORKING_DIRECTORY="$MUTATION_WORKING_DIRECTORY" \
             bash "${{ steps.runner.outputs.path }}"
-
       - name: Capture mutmut diagnostics
         if: always() && steps.policy.outputs.required == 'true' && steps.mutation-python.outputs.venv != ''
         shell: bash
