@@ -36,5 +36,7 @@ def test_cache_profile_documentation_declares_proxy_first_policy() -> None:
     assert "Proxpi" in docs
     assert "Verdaccio" in docs
     assert "Athens" in docs
-    assert "*.svc.cluster.local" in docs
+    assert "proxpi.arc-system.svc.cluster.local" in docs
+    assert "verdaccio.arc-system.svc.cluster.local" in docs
+    assert "athens.arc-system.svc.cluster.local" in docs
     assert "system/out-of-cluster runners use LAN DNS" in docs
