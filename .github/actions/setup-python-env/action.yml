@@ -93,4 +93,29 @@ runs:
         case " ${DEV_MODES} " in
           *" group "*) SYNC_ARGS+=(--group dev) ;;
         esac
-        uv sync "${SYNC_ARGS[@]}"
+        if uv sync "${SYNC_ARGS[@]}"; then
+          exit 0
+        fi
+
+        CURRENT_INDEX="${UV_DEFAULT_INDEX:-${PIP_INDEX_URL:-}}"
+        case "$CURRENT_INDEX" in
+          *proxpi*)
+            echo "::warning::Python package proxy failed during uv sync ($CURRENT_INDEX); retrying once with public PyPI." >&2
+            export PIP_INDEX_URL="https://pypi.org/simple"
+            export UV_DEFAULT_INDEX="https://pypi.org/simple"
+            export PIP_TRUSTED_HOST=""
+            export UV_INSECURE_HOST=""
+            if [[ -n "${GITHUB_ENV:-}" ]]; then
+              {
+                echo "PIP_INDEX_URL=https://pypi.org/simple"
+                echo "UV_DEFAULT_INDEX=https://pypi.org/simple"
+                echo "PIP_TRUSTED_HOST="
+                echo "UV_INSECURE_HOST="
+              } >> "$GITHUB_ENV"
+            fi
+            uv sync "${SYNC_ARGS[@]}"
+            ;;
+          *)
+            exit 1
+            ;;
+        esac
