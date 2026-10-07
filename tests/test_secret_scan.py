@@ -43,10 +43,22 @@ def scan(tmp_path, repo, event_name, event, *, code=0, payload="", sha=None):
         f"#!{sys.executable}\n"
         + """import json, os, sys
 from pathlib import Path
-Path(os.environ['DOCKER_CALL']).write_text(json.dumps(sys.argv[1:]))
-sys.stdout.write(os.environ['FAKE_JSON'])
-sys.stderr.write('not-a-real-secret-marker')
-sys.exit(int(os.environ['FAKE_EXIT']))
+
+args = sys.argv[1:]
+command = args[0] if args else ""
+if command == "create":
+    Path(os.environ["DOCKER_CALL"]).write_text(json.dumps(args))
+    sys.stdout.write("fake-trufflehog-container\\n")
+    raise SystemExit(0)
+if command == "cp":
+    raise SystemExit(0)
+if command == "start":
+    sys.stdout.write(os.environ["FAKE_JSON"])
+    sys.stderr.write("not-a-real-secret-marker")
+    raise SystemExit(int(os.environ["FAKE_EXIT"]))
+if command == "rm":
+    raise SystemExit(0)
+raise SystemExit(2)
 """
     )
     docker.chmod(0o755)
@@ -92,6 +104,8 @@ def test_pr_scans_real_base_and_head_not_merge_or_before(tmp_path, repo, action)
     assert values["mode"] == "range"
     assert args[args.index("--branch") + 1] == head
     assert args[args.index("--since-commit") + 1] == base
+    assert args[0] == "create"
+    assert "-v" not in args
     assert "--fail-on-scan-errors" in args
     assert "--only-verified" in args
 
