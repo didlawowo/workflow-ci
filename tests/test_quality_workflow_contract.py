@@ -637,7 +637,7 @@ def test_release_workflow_never_commits_workflow_ci_checkout():
     assert "git reset -- .workflow-ci 2>/dev/null || true" in content
 
 
-def test_mutation_jobs_require_runner_nfs_cache():
+def test_mutation_jobs_use_proxy_first_setup_without_nfs_cache_preflight():
     root = Path(__file__).resolve().parents[1]
     content = (root / ".github" / "workflows" / "mutation-policy.yml").read_text()
 
@@ -647,12 +647,12 @@ def test_mutation_jobs_require_runner_nfs_cache():
     mutation_verify = content.split("  mutation-verify:", 1)[1]
 
     for job in (mutation_run, mutation_verify):
-        assert "Configure writable uv cache" in job
-        assert "require_nfs_cache UV_CACHE_DIR" in job
-        assert 'UV_CACHE="${RUNNER_TEMP:-/tmp}/uv-cache"' not in job
+        assert "Configure writable uv cache" not in job
+        assert "require_nfs_cache UV_CACHE_DIR" not in job
         assert "enable-cache: false" in job
 
-    assert "UV_CACHE_DIR: ${{ runner.temp }}/uv-cache" not in content
+    assert "WORKFLOW_CACHE_PROFILE" not in content
+    assert "WORKFLOW_LOCAL_ROOT" not in content
 
 
 def test_consumer_mutation_runner_is_materialized_from_protected_tree_only():
@@ -696,13 +696,13 @@ def test_mutation_diagnostics_accept_machine_readable_stats_without_mutmut_binar
         )
 
 
-def test_python_actions_require_nfs_without_local_fallback():
+def test_python_actions_use_runner_proxy_without_managed_dependency_cache():
     root = Path(__file__).resolve().parents[1]
     for name in ("setup-python-env", "run-python-tests", "quality-report"):
         content = (root / ".github/actions" / name / "action.yml").read_text()
-        assert "require_nfs_cache UV_CACHE_DIR" in content
-        assert "${RUNNER_TEMP:-/tmp}/uv-cache" not in content
-        assert "cache-local-path: ${{ steps.uv-cache.outputs.path }}" in content
+        assert "require_nfs_cache UV_CACHE_DIR" not in content
+        assert "WORKFLOW_CACHE_PROFILE" not in content
+        assert "cache-local-path:" not in content
         assert "enable-cache: false" in content
 
 
