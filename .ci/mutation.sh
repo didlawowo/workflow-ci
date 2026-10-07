@@ -106,12 +106,46 @@ fi
 # must not maintain a private `uv sync`/Mutmut runner merely to install them.
 if command -v uv >/dev/null 2>&1 && [[ -f pyproject.toml ]]; then
   SYNC_FILE="$(mktemp)"
-  trap 'rm -f "$SYNC_FILE"' EXIT
   "$PYTHON" "$SCRIPT_DIR/mutation_contract.py" > "$SYNC_FILE"
   mapfile -d '' -t SYNC_ARGS < "$SYNC_FILE"
-  UV_PROJECT_ENVIRONMENT="$VIRTUAL_ENV" uv "${SYNC_ARGS[@]}"
+
+  # A lock may pin artifact URLs from an internal Kubernetes package proxy.
+  # If that proxy is unreachable from this isolated mutation runner, preserve
+  # the exact locked versions but detach transport from the dead mirror:
+  # export the frozen graph, drop index directives, install from public PyPI,
+  # then install the project itself without re-resolving dependencies.
+  LOCKED_REGISTRY="$("$PYTHON" "$SCRIPT_DIR/mutation_contract.py" locked-internal-registry)"
+  USE_LOCK_EXPORT_FALLBACK=false
+  if [[ -n "$LOCKED_REGISTRY" ]]; then
+    if ! curl -fsS --connect-timeout 2 --max-time 3 "${LOCKED_REGISTRY%/}/pip/" >/dev/null 2>&1; then
+      USE_LOCK_EXPORT_FALLBACK=true
+      echo "::warning::Locked Python registry is unreachable ($LOCKED_REGISTRY); preserving locked versions and downloading them from PyPI."
+    fi
+  fi
+
+  if [[ "$USE_LOCK_EXPORT_FALLBACK" == true ]]; then
+    SELECTION_FILE="$(mktemp)"
+    REQUIREMENTS_FILE="$(mktemp)"
+    CLEAN_REQUIREMENTS_FILE="$(mktemp)"
+    "$PYTHON" "$SCRIPT_DIR/mutation_contract.py" export-selection > "$SELECTION_FILE"
+    mapfile -d '' -t EXPORT_SELECTION < "$SELECTION_FILE"
+
+    uv export --frozen --no-emit-project --no-hashes       "${EXPORT_SELECTION[@]}" --output-file "$REQUIREMENTS_FILE"
+    sed -E '/^--(index-url|extra-index-url|find-links)([ =]|$)/d'       "$REQUIREMENTS_FILE" > "$CLEAN_REQUIREMENTS_FILE"
+    if grep -Fq ".svc.cluster.local" "$CLEAN_REQUIREMENTS_FILE"; then
+      bootstrap_error "frozen dependency export still contains an internal registry URL."
+      exit 1
+    fi
+
+    PIP_INDEX_URL="https://pypi.org/simple"       UV_DEFAULT_INDEX="https://pypi.org/simple"       uv pip install --python "$PYTHON" -r "$CLEAN_REQUIREMENTS_FILE"
+    PIP_INDEX_URL="https://pypi.org/simple"       UV_DEFAULT_INDEX="https://pypi.org/simple"       uv pip install --python "$PYTHON" --no-deps -e .
+
+    rm -f "$SELECTION_FILE" "$REQUIREMENTS_FILE" "$CLEAN_REQUIREMENTS_FILE"
+  else
+    UV_PROJECT_ENVIRONMENT="$VIRTUAL_ENV" uv "${SYNC_ARGS[@]}"
+  fi
+
   rm -f "$SYNC_FILE"
-  trap - EXIT
 elif command -v uv >/dev/null 2>&1 && [[ -f requirements.txt ]]; then
   uv pip install --python "$PYTHON" -r requirements.txt
 fi
