@@ -28,10 +28,11 @@ This is the shortest and authoritative path for Kubernetes runners.
 
 ### System / out-of-cluster runners
 
+- system/out-of-cluster runners use LAN DNS endpoints to the same proxies.
+
 System runners cannot resolve Kubernetes Service DNS. Their service environment
-must instead provide LAN DNS endpoints to the same proxies. On Phoenix these
-endpoints are configured by runner infrastructure and route through the existing
-LAN Gateway routes.
+must instead provide those LAN endpoints. On Phoenix they are configured by
+runner infrastructure and route through the existing LAN Gateway routes.
 
 Projects and reusable actions must inherit those variables. They must not
 reimplement endpoint selection.
