@@ -85,3 +85,32 @@ require_runner_cache() {
 
 # Existing trusted policy callers retain this name and their source provenance.
 require_nfs_cache() { require_runner_cache "$@"; }
+
+python_index_fallback_if_unreachable() {
+  local index="${UV_DEFAULT_INDEX:-${PIP_INDEX_URL:-}}"
+  [[ -n "$index" ]] || return 0
+
+  case "$index" in
+    http://*.svc.cluster.local:*/*|https://*.svc.cluster.local:*/*|http://*.svc.cluster.local/*|https://*.svc.cluster.local/*) ;;
+    *) return 0 ;;
+  esac
+
+  local probe="${index%/}/pip/"
+  if curl -fsS --connect-timeout 2 --max-time 3 "$probe" >/dev/null 2>&1; then
+    return 0
+  fi
+
+  echo "::warning::Python package proxy is unreachable ($index); falling back to https://pypi.org/simple for this job." >&2
+  export PIP_INDEX_URL="https://pypi.org/simple"
+  export UV_DEFAULT_INDEX="https://pypi.org/simple"
+  export PIP_TRUSTED_HOST=""
+  export UV_INSECURE_HOST=""
+  if [[ -n "${GITHUB_ENV:-}" ]]; then
+    {
+      echo "PIP_INDEX_URL=https://pypi.org/simple"
+      echo "UV_DEFAULT_INDEX=https://pypi.org/simple"
+      echo "PIP_TRUSTED_HOST="
+      echo "UV_INSECURE_HOST="
+    } >> "$GITHUB_ENV"
+  fi
+}
