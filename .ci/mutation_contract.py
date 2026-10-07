@@ -12,6 +12,7 @@ import json
 from pathlib import Path
 import subprocess
 import tomllib
+from urllib.parse import urlparse
 
 
 def select_engine(trusted: Path) -> str:
@@ -81,6 +82,33 @@ def project_sync_args(root: Path) -> list[str]:
     args = ["sync"]
     if (root / "uv.lock").exists():
         args.append("--locked")
+    if "dev" in data.get("dependency-groups", {}):
+        args += ["--group", "dev"]
+    if "dev" in data.get("project", {}).get("optional-dependencies", {}):
+        args += ["--extra", "dev"]
+    return args
+
+
+def locked_internal_registry(root: Path) -> str:
+    """Return the first Kubernetes-internal registry pinned in uv.lock, if any."""
+    lock = root / "uv.lock"
+    if not lock.is_file():
+        return ""
+    data = tomllib.loads(lock.read_text())
+    for package in data.get("package", []):
+        registry = str(package.get("source", {}).get("registry") or "")
+        if not registry:
+            continue
+        host = urlparse(registry).hostname or ""
+        if host.endswith(".svc.cluster.local"):
+            return registry.rstrip("/")
+    return ""
+
+
+def project_export_selection(root: Path) -> list[str]:
+    """Selection flags matching project_sync_args, without changing locked versions."""
+    data = tomllib.loads((root / "pyproject.toml").read_text())
+    args: list[str] = []
     if "dev" in data.get("dependency-groups", {}):
         args += ["--group", "dev"]
     if "dev" in data.get("project", {}).get("optional-dependencies", {}):
@@ -185,4 +213,10 @@ if __name__ == "__main__":
     # NUL-delimited arguments; never interpolate project metadata into shell code.
     import sys
 
-    sys.stdout.write("\0".join(project_sync_args(Path.cwd())) + "\0")
+    root = Path.cwd()
+    if len(sys.argv) > 1 and sys.argv[1] == "locked-internal-registry":
+        print(locked_internal_registry(root))
+    elif len(sys.argv) > 1 and sys.argv[1] == "export-selection":
+        sys.stdout.write("\0".join(project_export_selection(root)) + "\0")
+    else:
+        sys.stdout.write("\0".join(project_sync_args(root)) + "\0")
