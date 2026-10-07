@@ -233,10 +233,6 @@ jobs:
           NEW_VERSION: ${{ steps.bump.outputs.version }}
         run: |
           set -euo pipefail
-          source ".workflow-ci/.ci/nfs-cache.sh"
-          require_nfs_cache UV_CACHE_DIR
-          require_nfs_cache GOCACHE
-          require_nfs_cache GOMODCACHE
           echo "Running post-bump command:"
           echo "$POST_BUMP_COMMAND"
           bash -euo pipefail -c "$POST_BUMP_COMMAND"
