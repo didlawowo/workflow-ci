@@ -44,7 +44,7 @@ jobs:
         run: |
           # Compatibility entrypoint for runner-provided storage; NFS remains the default.
           set -euo pipefail
-
+          
           workflow_local_environment() {
             local root="${WORKFLOW_LOCAL_ROOT:-}" job="${WORKFLOW_CACHE_JOB_ROOT:-}"
             [[ "$root" == /* && "$root" != / && -d "$root" && -O "$root" ]] || return 1
@@ -86,7 +86,7 @@ jobs:
               done
             fi
           }
-
+          
           require_runner_cache() {
             local variable="$1" profile="${WORKFLOW_CACHE_PROFILE:-nfs}"
             case "$variable" in UV_CACHE_DIR|GOCACHE|GOMODCACHE|NPM_CONFIG_CACHE) ;; *) return 1 ;; esac
@@ -125,10 +125,40 @@ jobs:
             fi
             export "${variable?}"
           }
-
+          
           # Existing trusted policy callers retain this name and their source provenance.
           require_nfs_cache() { require_runner_cache "$@"; }
+          
+          python_index_fallback_if_unreachable() {
+            local index="${UV_DEFAULT_INDEX:-${PIP_INDEX_URL:-}}"
+            [[ -n "$index" ]] || return 0
+          
+            case "$index" in
+              http://*.svc.cluster.local:*/*|https://*.svc.cluster.local:*/*|http://*.svc.cluster.local/*|https://*.svc.cluster.local/*) ;;
+              *) return 0 ;;
+            esac
+          
+            local probe="${index%/}/pip/"
+            if curl -fsS --connect-timeout 2 --max-time 3 "$probe" >/dev/null 2>&1; then
+              return 0
+            fi
+          
+            echo "::warning::Python package proxy is unreachable ($index); falling back to https://pypi.org/simple for this job." >&2
+            export PIP_INDEX_URL="https://pypi.org/simple"
+            export UV_DEFAULT_INDEX="https://pypi.org/simple"
+            export PIP_TRUSTED_HOST=""
+            export UV_INSECURE_HOST=""
+            if [[ -n "${GITHUB_ENV:-}" ]]; then
+              {
+                echo "PIP_INDEX_URL=https://pypi.org/simple"
+                echo "UV_DEFAULT_INDEX=https://pypi.org/simple"
+                echo "PIP_TRUSTED_HOST="
+                echo "UV_INSECURE_HOST="
+              } >> "$GITHUB_ENV"
+            fi
+          }
           require_nfs_cache UV_CACHE_DIR
+          python_index_fallback_if_unreachable
       - name: Install uv
         run: curl -fsSL https://astral.sh/uv/install.sh | env UV_INSTALL_DIR=/usr/local/bin sh
 
