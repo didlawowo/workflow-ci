@@ -62,7 +62,8 @@ def test_node_actions_honor_nested_projects_and_selected_package_manager():
     tests = read(".github/actions/run-node-tests/action.yml")
     quality = read(".github/actions/node-quality-security/action.yml")
 
-    assert "cache-dependency-path: ${{ steps.lockfile.outputs.path }}" in setup
+    assert "cache-dependency-path:" not in setup
+    assert "Resolve dependency lockfile" not in setup
     assert "working-directory: ${{ inputs.working-directory }}" in setup
 
     assert "working-directory:" in tests
