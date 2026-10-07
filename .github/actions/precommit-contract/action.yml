@@ -1,0 +1,42 @@
+name: "Pre-commit Contract"
+description: "Run the repository's local pre-commit contract in CI"
+
+inputs:
+  hook-stage:
+    description: "pre-commit hook stage to execute"
+    required: false
+    default: "pre-commit"
+  all-files:
+    description: "Run against the full repository"
+    required: false
+    default: "true"
+
+runs:
+  using: "composite"
+  steps:
+    - name: Install uv
+      uses: astral-sh/setup-uv@v10.1.0
+      with:
+        enable-cache: false
+
+    - name: Validate pre-commit configuration exists
+      shell: bash
+      run: |
+        set -euo pipefail
+        test -f .pre-commit-config.yaml || {
+          echo "::error::.pre-commit-config.yaml is missing."
+          exit 1
+        }
+
+    - name: Run pre-commit contract
+      shell: bash
+      env:
+        HOOK_STAGE: ${{ inputs.hook-stage }}
+        ALL_FILES: ${{ inputs.all-files }}
+      run: |
+        set -euo pipefail
+        args=(run --hook-stage "$HOOK_STAGE" --show-diff-on-failure)
+        if [[ "$ALL_FILES" == "true" ]]; then
+          args+=(--all-files)
+        fi
+        uvx --from pre-commit==4.3.0 pre-commit "${args[@]}"
