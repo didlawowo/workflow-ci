@@ -1,5 +1,11 @@
 # Bench: uv cache strategies on ARC runners
 
+> **Historical benchmark only.** This experiment predates the current proxy-first
+> package architecture. Its NFS/GitHub-cache variants are kept for performance
+> archaeology and must not be used as the production dependency-cache design.
+> Production Python package reuse is provided by Proxpi; runner-local storage is
+> reserved for disposable workspace/build/sandbox state.
+
 A/B/C comparison of three uv-cache patterns to settle which is fastest and most predictable on our self-hosted ARC runners (PVC-NFS-backed `UV_CACHE_DIR`).
 
 ## Variants
@@ -34,7 +40,7 @@ Then `gh workflow run uv-cache-bench --repo didlawowo/dc-finance` and inspect th
 - `uv sync --group dev` is timed via `time` builtin; bytes downloaded captured from `du` deltas
 - A summary job aggregates results into `$GITHUB_STEP_SUMMARY`
 
-## What we expect
+## Historical expectations
 
 - A warm = fast (GHA cache hit), A cold = very slow (WAN download + restore)
 - B warm = fast (NFS hit), B cold = slow first time then warm
