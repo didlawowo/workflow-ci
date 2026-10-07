@@ -36,16 +36,12 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          if [[ "$(id -u)" == "0" ]]; then
+          ROOT_UV_CACHE="${RUNNER_TEMP:-/tmp}/forgejo-root-uv-cache"
+          rm -rf "$ROOT_UV_CACHE"
+          mkdir -p "$ROOT_UV_CACHE"
+          env \
+            "PATH=$PATH" \
+            "UV_CACHE_DIR=$ROOT_UV_CACHE" \
+            "PIP_INDEX_URL=${PIP_INDEX_URL:?runner package proxy must be configured}" \
+            "UV_DEFAULT_INDEX=${UV_DEFAULT_INDEX:?runner package proxy must be configured}" \
             uv run --no-project --python 3.12 python tests/run_forgejo_mutation_smoke.py
-          else
-            ROOT_UV_CACHE="${RUNNER_TEMP:-/tmp}/forgejo-root-uv-cache"
-            sudo rm -rf "$ROOT_UV_CACHE"
-            sudo mkdir -p "$ROOT_UV_CACHE"
-            sudo env \
-              "PATH=$PATH" \
-              "UV_CACHE_DIR=$ROOT_UV_CACHE" \
-              "PIP_INDEX_URL=${PIP_INDEX_URL:?runner package proxy must be configured}" \
-              "UV_DEFAULT_INDEX=${UV_DEFAULT_INDEX:?runner package proxy must be configured}" \
-              uv run --no-project --python 3.12 python tests/run_forgejo_mutation_smoke.py
-          fi
