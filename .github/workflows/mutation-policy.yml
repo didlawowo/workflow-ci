@@ -122,22 +122,6 @@ jobs:
           fi
           echo "Trusted mutation policy loaded from $MUTATION_FETCH_SHA without traversing submodules."
 
-      - name: Configure writable uv cache
-        shell: bash
-        env:
-          RUNNER_NAME: ${{ runner.name }}
-        run: |
-          set -euo pipefail
-          if [[ "$RUNNER_NAME" == phoenix-* ]]; then
-            export WORKFLOW_CACHE_PROFILE=local
-            export WORKFLOW_LOCAL_ROOT="$RUNNER_TEMP"
-            echo "WORKFLOW_CACHE_PROFILE=local" >> "$GITHUB_ENV"
-            echo "WORKFLOW_LOCAL_ROOT=$RUNNER_TEMP" >> "$GITHUB_ENV"
-          fi
-          source "$GITHUB_WORKSPACE/.workflow-ci/.ci/nfs-cache.sh"
-          require_nfs_cache UV_CACHE_DIR
-          python_index_fallback_if_unreachable
-
       - name: Install uv for policy and mutation helpers
         uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
         with:
@@ -640,21 +624,6 @@ jobs:
             exit 1
           fi
           echo "Trusted mutation policy loaded from $MUTATION_FETCH_SHA without traversing submodules."
-
-      - name: Configure writable uv cache
-        shell: bash
-        env:
-          RUNNER_NAME: ${{ runner.name }}
-        run: |
-          set -euo pipefail
-          if [[ "$RUNNER_NAME" == phoenix-* ]]; then
-            export WORKFLOW_CACHE_PROFILE=local
-            export WORKFLOW_LOCAL_ROOT="$RUNNER_TEMP"
-            echo "WORKFLOW_CACHE_PROFILE=local" >> "$GITHUB_ENV"
-            echo "WORKFLOW_LOCAL_ROOT=$RUNNER_TEMP" >> "$GITHUB_ENV"
-          fi
-          source "$GITHUB_WORKSPACE/.workflow-ci/.ci/nfs-cache.sh"
-          require_nfs_cache UV_CACHE_DIR
 
       - name: Install uv for verification helpers
         uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
