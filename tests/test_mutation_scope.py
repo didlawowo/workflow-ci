@@ -302,3 +302,154 @@ def test_scope_rejects_unknown_depth(tmp_path: Path):
 
     with pytest.raises(ValueError, match="unsupported mutation depth"):
         mutation_scope.mutation_targets(repo, base, head, depth="extreme")
+
+
+def test_decorated_handler_change_yields_no_unsatisfiable_target(tmp_path: Path):
+    """FastAPI-style handlers: mutmut generates no mutants for decorated
+    functions, so the scope must not emit a glob that can never match —
+    mutmut asserts on such an empty filter match and the mutation gate fails
+    without producing evidence (seen on rag-doc PR #140)."""
+    repo = _init_repo(tmp_path)
+    source = repo / "src" / "api.py"
+    source.write_text(
+        "app = object()\n"
+        "\n"
+        "\n"
+        "@app.post('/ask')\n"
+        "async def ask(request=None, question=None):\n"
+        "    return question + 'x'\n",
+        encoding="utf-8",
+    )
+    base = _commit(repo, "initial")
+    source.write_text(
+        "app = object()\n"
+        "\n"
+        "\n"
+        "@app.post('/ask')\n"
+        "async def ask(request=None, question=None):\n"
+        "    return question + 'y'\n",
+        encoding="utf-8",
+    )
+    head = _commit(repo, "change handler")
+
+    assert mutation_scope.mutation_targets(repo, base, head, depth="medium") == ()
+    # high still emits the module-wide glob, which matches the mutable
+    # functions of the module — the pattern is satisfiable there.
+    assert mutation_scope.mutation_targets(repo, base, head, depth="high") == (
+        "api.*__mutmut_*",
+    )
+
+
+def test_decorated_handler_change_targets_only_mutable_neighbours(tmp_path: Path):
+    repo = _init_repo(tmp_path)
+    source = repo / "src" / "api.py"
+    source.write_text(
+        "app = object()\n"
+        "\n"
+        "\n"
+        "def compute(value):\n"
+        "    return value + 1\n"
+        "\n"
+        "\n"
+        "@app.post('/ask')\n"
+        "async def ask(request=None, question=None):\n"
+        "    return question + 'x'\n",
+        encoding="utf-8",
+    )
+    base = _commit(repo, "initial")
+    source.write_text(
+        "app = object()\n"
+        "\n"
+        "\n"
+        "def compute(value):\n"
+        "    return value + 2\n"
+        "\n"
+        "\n"
+        "@app.post('/ask')\n"
+        "async def ask(request=None, question=None):\n"
+        "    return question + 'y'\n",
+        encoding="utf-8",
+    )
+    head = _commit(repo, "change both")
+
+    assert mutation_scope.mutation_targets(repo, base, head, depth="medium") == (
+        "api.*compute__mutmut_*",
+    )
+
+
+def test_property_and_stacked_decorators_skipped_but_staticmethod_kept(tmp_path: Path):
+    repo = _init_repo(tmp_path)
+    source = repo / "src" / "service.py"
+    source.write_text(
+        "class Service:\n"
+        "    @property\n"
+        "    def config(self):\n"
+        "        return {'a': 1}\n"
+        "\n"
+        "    @staticmethod\n"
+        "    def helper(value):\n"
+        "        return value * 2\n"
+        "\n"
+        "    @staticmethod\n"
+        "    @classmethod\n"
+        "    def stacked(value):\n"
+        "        return value * 3\n",
+        encoding="utf-8",
+    )
+    base = _commit(repo, "initial")
+    source.write_text(
+        "class Service:\n"
+        "    @property\n"
+        "    def config(self):\n"
+        "        return {'a': 2}\n"
+        "\n"
+        "    @staticmethod\n"
+        "    def helper(value):\n"
+        "        return value * 4\n"
+        "\n"
+        "    @staticmethod\n"
+        "    @classmethod\n"
+        "    def stacked(value):\n"
+        "        return value * 6\n",
+        encoding="utf-8",
+    )
+    head = _commit(repo, "change all three")
+
+    assert mutation_scope.mutation_targets(repo, base, head, depth="medium") == (
+        "service.*Service*helper__mutmut_*",
+    )
+
+
+def test_change_inside_decorated_function_body_is_not_a_target(tmp_path: Path):
+    """A nested def inside a decorated function: mutmut ignores the whole
+    subtree, so no target may reference the nested function either."""
+    repo = _init_repo(tmp_path)
+    source = repo / "src" / "api.py"
+    source.write_text(
+        "app = object()\n"
+        "\n"
+        "\n"
+        "@app.post('/ask')\n"
+        "async def ask(request=None, question=None):\n"
+        "    async def inner():\n"
+        "        return 1\n"
+        "\n"
+        "    return inner\n",
+        encoding="utf-8",
+    )
+    base = _commit(repo, "initial")
+    source.write_text(
+        "app = object()\n"
+        "\n"
+        "\n"
+        "@app.post('/ask')\n"
+        "async def ask(request=None, question=None):\n"
+        "    async def inner():\n"
+        "        return 2\n"
+        "\n"
+        "    return inner\n",
+        encoding="utf-8",
+    )
+    head = _commit(repo, "change nested")
+
+    assert mutation_scope.mutation_targets(repo, base, head, depth="medium") == ()

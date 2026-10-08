@@ -116,6 +116,37 @@ def _module_name(relative: str) -> str:
     return ".".join(parts)
 
 
+# Mirror mutmut's trampoline rules (mutmut/mutation/file_mutation.py): mutmut
+# never generates mutants for a function carrying any decorator except a single
+# bare @staticmethod/@classmethod, and never for a small set of dunder names.
+_MUTMUT_NEVER_MUTATE_FUNCTION_NAMES = frozenset(
+    {"__getattribute__", "__setattr__", "__new__"}
+)
+_MUTMUT_TRAMPOLINE_SAFE_DECORATORS = frozenset({"staticmethod", "classmethod"})
+
+
+def _mutmut_generates_mutants(node: ast.FunctionDef | ast.AsyncFunctionDef) -> bool:
+    """Whether mutmut actually produces mutants for this function.
+
+    A target glob for a function mutmut skips can never match a generated
+    mutant: the mutation run asserts "Filtered for specific mutants, but
+    nothing matches" and the gate fails without producing any evidence, even
+    though the PR is genuinely untestable at that scope.
+    """
+    if node.name in _MUTMUT_NEVER_MUTATE_FUNCTION_NAMES:
+        return False
+    decorators = node.decorator_list
+    if not decorators:
+        return True
+    if len(decorators) == 1:
+        single = decorators[0]
+        return (
+            isinstance(single, ast.Name)
+            and single.id in _MUTMUT_TRAMPOLINE_SAFE_DECORATORS
+        )
+    return False
+
+
 class _ChangedFunctionVisitor(ast.NodeVisitor):
     def __init__(self, changed_lines: set[int]) -> None:
         self.changed_lines = changed_lines
@@ -137,6 +168,10 @@ class _ChangedFunctionVisitor(ast.NodeVisitor):
         self,
         node: ast.FunctionDef | ast.AsyncFunctionDef,
     ) -> None:
+        if not _mutmut_generates_mutants(node):
+            # mutmut ignores the whole subtree of a skipped function: nothing
+            # inside it can produce a mutant, so neither emit nor recurse.
+            return
         starts = [node.lineno]
         starts.extend(
             decorator.lineno
