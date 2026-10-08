@@ -13,19 +13,28 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 @pytest.mark.parametrize(
-    "quality_result,mutation_result,required,report_file,report_present,success",
+    "quality_result,mutation_result,required,report_file,report_present,independent,success",
     [
-        ("success", "success", "false", "", "false", True),
-        ("success", "success", "true", "scoped-mutation.json", "true", True),
-        ("failure", "success", "false", "", "false", False),
-        ("success", "failure", "false", "", "false", False),
-        ("success", "success", "true", "", "true", False),
-        ("success", "success", "true", "scoped-mutation.json", "false", False),
-        ("success", "success", "", "", "false", False),
+        ("success", "success", "false", "", "false", "true", True),
+        ("success", "success", "true", "scoped-mutation.json", "true", "true", True),
+        ("failure", "success", "false", "", "false", "true", False),
+        ("success", "failure", "false", "", "false", "true", False),
+        ("success", "success", "true", "", "true", "true", False),
+        ("success", "success", "true", "scoped-mutation.json", "false", "true", False),
+        ("success", "success", "", "", "false", "true", False),
+        # Independent verification disabled: the quality job must have skipped.
+        ("skipped", "success", "false", "", "false", "false", True),
+        ("success", "success", "false", "", "false", "false", False),
     ],
 )
 def test_trusted_gate_is_independent_from_publication(
-    quality_result, mutation_result, required, report_file, report_present, success
+    quality_result,
+    mutation_result,
+    required,
+    report_file,
+    report_present,
+    independent,
+    success,
 ):
     data = yaml.safe_load((ROOT / ".github/workflows/quality-evidence.yml").read_text())
     steps = data["jobs"]["trusted-gate"]["steps"]
@@ -37,6 +46,7 @@ def test_trusted_gate_is_independent_from_publication(
         env={
             **os.environ,
             "QUALITY_RESULT": quality_result,
+            "INDEPENDENT_ENABLED": independent,
             "MUTATION_RESULT": mutation_result,
             "MUTATION_REQUIRED": required,
             "MUTATION_REPORT_FILE": report_file,
