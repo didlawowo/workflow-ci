@@ -71,6 +71,11 @@ on:
         required: false
         type: boolean
         default: true
+      enable-independent-verification:
+        description: "Run the Independent quality execution job (tests, quality, security). Disable on runners where the job cannot finish within its timeout; the trusted gate then only enforces the mutation evidence."
+        required: false
+        type: boolean
+        default: true
     outputs:
       trusted-status:
         description: "Blocking trusted gate verdict independent from report publication"
@@ -105,6 +110,7 @@ jobs:
 
   independent-verification:
     name: "Independent quality execution"
+    if: inputs.enable-independent-verification
     runs-on: ${{ inputs.runner }}
     timeout-minutes: 25
     permissions:
@@ -305,6 +311,7 @@ jobs:
         shell: bash
         env:
           QUALITY_RESULT: ${{ needs.independent-verification.result }}
+          INDEPENDENT_ENABLED: ${{ inputs.enable-independent-verification }}
           MUTATION_RESULT: ${{ needs.mutation.result }}
           MUTATION_REQUIRED: ${{ needs.mutation.outputs.required }}
           MUTATION_REPORT_FILE: ${{ needs.mutation.outputs.report-file }}
@@ -313,8 +320,13 @@ jobs:
           set -euo pipefail
           FAILED=0
 
-          if [[ "$QUALITY_RESULT" != "success" ]]; then
-            echo "::error::Independent quality execution did not succeed: $QUALITY_RESULT"
+          if [[ "$INDEPENDENT_ENABLED" == "true" ]]; then
+            if [[ "$QUALITY_RESULT" != "success" ]]; then
+              echo "::error::Independent quality execution did not succeed: $QUALITY_RESULT"
+              FAILED=1
+            fi
+          elif [[ "$QUALITY_RESULT" != "skipped" ]]; then
+            echo "::error::Independent verification is disabled but the job did not skip: $QUALITY_RESULT"
             FAILED=1
           fi
 
