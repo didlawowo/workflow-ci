@@ -37,10 +37,17 @@ def _has_findings(report: object) -> bool:
     return False
 
 
+def _is_report(report: object) -> bool:
+    """Require recognizable result fields, not an error or arbitrary JSON."""
+    if not isinstance(report, dict):
+        return False
+    fields = {"vulnerabilities": list, "affected_packages": dict, "remediations": dict}
+    present = [key for key in fields if key in report]
+    return bool(present) and all(isinstance(report[key], fields[key]) for key in present)
+
+
 def classify(exit_code: int, report_path: Path) -> str:
-    if exit_code == 0:
-        return "passed"
-    if exit_code != SAFETY_VULNERABILITIES_FOUND:
+    if exit_code not in (0, SAFETY_VULNERABILITIES_FOUND):
         return "error"
 
     try:
@@ -48,6 +55,11 @@ def classify(exit_code: int, report_path: Path) -> str:
     except (OSError, UnicodeError, json.JSONDecodeError):
         return "error"
 
+    if not _is_report(report):
+        return "error"
+    if exit_code == 0:
+        # Safety applies the consumer's policy, including explicitly ignored findings.
+        return "passed"
     return "findings" if _has_findings(report) else "error"
 
 

@@ -143,11 +143,15 @@ runs:
         fi
 
         SAFETY_STDERR="${RUNNER_TEMP:-/tmp}/safety-stderr.log"
-        rm -f safety-report.json "$SAFETY_STDERR"
+        SAFETY_STDOUT="${RUNNER_TEMP:-/tmp}/safety-stdout.log"
+        rm -f safety-report.json "$SAFETY_STDERR" "$SAFETY_STDOUT"
 
+        # stdout also contains deprecation banners, even with --output json.
+        # Let Safety write the machine-readable report separately.
         set +e
         uvx --from safety==3.8.1 safety check -r "$SAFETY_INPUT" --output json \
-          > safety-report.json 2> "$SAFETY_STDERR"
+          --save-json safety-report.json \
+          > "$SAFETY_STDOUT" 2> "$SAFETY_STDERR"
         SAFETY_RC=$?
         set -e
 
@@ -159,7 +163,7 @@ runs:
 
         if [[ "$SAFETY_STATUS" == "error" ]]; then
           # Tool/network/runtime failure: blocking, but not a fake CVE finding.
-          cat "$SAFETY_STDERR" >&2 || true
+          cat "$SAFETY_STDOUT" "$SAFETY_STDERR" >&2 || true
         fi
       continue-on-error: true
 
