@@ -45,7 +45,12 @@ def checkout(tmp_path, sha, **overrides):
     }
     env.update(overrides)
     return subprocess.run(
-        ["bash", str(SCRIPT)], env=env, capture_output=True, text=True, timeout=20
+        ["bash", str(SCRIPT)],
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=20,
+        check=False,
     )
 
 
@@ -79,6 +84,37 @@ def test_bad_ref_and_failed_fetch_do_not_destroy_workspace(tmp_path):
         result = checkout(tmp_path, ref)
         assert result.returncode != 0
         assert (workspace / "keep").read_text() == "safe"
+
+
+def test_nested_policy_checkouts_preserve_trusted_code_and_never_execute_candidate(
+    tmp_path,
+):
+    repo, _, base = source(tmp_path)
+    sentinel = tmp_path / "candidate-executed"
+    (repo / "candidate.sh").write_text(f"touch '{sentinel}'\n")
+    git(repo, "add", "candidate.sh")
+    git(repo, "commit", "-qm", "untrusted candidate")
+    head = git(repo, "rev-parse", "HEAD")
+    workspace = tmp_path / "workspace"
+    trusted = workspace / ".workflow-ci-policy"
+    trusted.mkdir(parents=True)
+    (trusted / "keep").write_text("trusted helper")
+
+    for directory, sha in ((".policy-base", base), (".policy-candidate", head)):
+        destination = workspace / directory
+        result = checkout(tmp_path, sha, GITHUB_WORKSPACE=str(destination))
+        assert result.returncode == 0, result.stderr
+        assert git(destination, "rev-parse", "HEAD") == sha
+        assert ".workflow-ci" in git(destination, "ls-files", "--stage")
+        assert not (destination / ".gitmodules").exists()
+        config = (destination / ".git/config").read_text()
+        assert "secret-test-token" not in config
+        assert "extraheader" not in config
+
+    assert (trusted / "keep").read_text() == "trusted helper"
+    assert git(workspace / ".policy-base", "rev-parse", "HEAD") == base
+    assert not sentinel.exists()
+    assert not list((tmp_path / "runner-temp").iterdir())
 
 
 @pytest.mark.parametrize(

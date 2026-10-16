@@ -36,29 +36,37 @@ jobs:
           fetch-depth: 1
           persist-credentials: false
 
+      - name: Verify trusted workflow identity before using its helper
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git -C .workflow-ci-policy rev-parse HEAD)" = "$(git -C .workflow-ci-policy rev-parse '${{ job.workflow_sha }}^{commit}')"
+
       - name: Checkout protected base
-        uses: actions/checkout@v7
-        with:
-          repository: ${{ github.repository }}
-          ref: ${{ github.event.pull_request.base.sha }}
-          path: .policy-base
-          fetch-depth: 1
-          persist-credentials: false
+        shell: bash
+        env:
+          CHECKOUT_REPOSITORY: ${{ github.repository }}
+          CHECKOUT_REF: ${{ github.event.pull_request.base.sha }}
+          CHECKOUT_TOKEN: ${{ github.token }}
+        run: |
+          # Execute only the checkout helper from the verified trusted workflow.
+          env GITHUB_WORKSPACE="$GITHUB_WORKSPACE/.policy-base" \
+            bash "$GITHUB_WORKSPACE/.workflow-ci-policy/.github/actions/checkout-source/checkout.sh"
 
       - name: Checkout untrusted candidate without executing it
-        uses: actions/checkout@v7
-        with:
-          repository: ${{ github.event.pull_request.head.repo.full_name }}
-          ref: ${{ github.event.pull_request.head.sha }}
-          path: .policy-candidate
-          fetch-depth: 1
-          persist-credentials: false
+        shell: bash
+        env:
+          CHECKOUT_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name }}
+          CHECKOUT_REF: ${{ github.event.pull_request.head.sha }}
+          CHECKOUT_TOKEN: ${{ github.token }}
+        run: |
+          env GITHUB_WORKSPACE="$GITHUB_WORKSPACE/.policy-candidate" \
+            bash "$GITHUB_WORKSPACE/.workflow-ci-policy/.github/actions/checkout-source/checkout.sh"
 
       - name: Verify checkout identities
         shell: bash
         run: |
           set -euo pipefail
-          test "$(git -C .workflow-ci-policy rev-parse HEAD)" = "$(git -C .workflow-ci-policy rev-parse '${{ job.workflow_sha }}^{commit}')"
           test "$(git -C .policy-base rev-parse HEAD)" = "${{ github.event.pull_request.base.sha }}"
           test "$(git -C .policy-candidate rev-parse HEAD)" = "${{ github.event.pull_request.head.sha }}"
 
