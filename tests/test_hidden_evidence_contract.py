@@ -20,7 +20,7 @@ def test_hidden_registry_binds_evaluator_to_exact_consumer_repository() -> None:
     assert calibration["entrypoint"] == (
         "hidden-evaluators/ioniq-control/calibration/evaluator.py"
     )
-    assert "src/radar/calibration.py" in calibration["paths"]
+    assert "src/ioniq/pipeline/calibration/**" in calibration["paths"]
     known = set(registry["evaluators"]) | set(registry["planned"])
     assert {
         "ioniq-control/calibration",
@@ -33,7 +33,7 @@ def test_hidden_registry_binds_evaluator_to_exact_consumer_repository() -> None:
 def test_hidden_scope_is_central_and_path_sensitive(tmp_path: Path) -> None:
     changed = tmp_path / "changed.txt"
     changed.write_text(
-        "docs/calibration-ui.md\nsrc/radar/calibration.py\nREADME.md\n",
+        "docs/calibration-ui.md\nsrc/ioniq/pipeline/calibration/projection.py\nREADME.md\n",
         encoding="utf-8",
     )
     completed = subprocess.run(
@@ -54,12 +54,12 @@ def test_hidden_scope_is_central_and_path_sensitive(tmp_path: Path) -> None:
         text=True,
     )
     result = json.loads(completed.stdout)
-    assert result == {"required": True, "matched": ["src/radar/calibration.py"]}
+    assert result == {"required": True, "matched": ["src/ioniq/pipeline/calibration/projection.py"]}
 
 
 def test_hidden_scope_rejects_evaluator_substitution(tmp_path: Path) -> None:
     changed = tmp_path / "changed.txt"
-    changed.write_text("src/radar/calibration.py\n", encoding="utf-8")
+    changed.write_text("src/ioniq/pipeline/calibration/projection.py\n", encoding="utf-8")
     completed = subprocess.run(
         [
             sys.executable,
@@ -134,31 +134,23 @@ def test_hidden_workflow_is_read_only_and_reporting_is_best_effort() -> None:
     assert 'if [[ "$STATUS" != "pass" ]]' in enforce
 
 
-def test_ioniq_hidden_oracle_uses_independent_reference_projection() -> None:
+def test_ioniq_hidden_oracle_uses_independent_v2_projection_and_rejections() -> None:
     source = (
         ROOT / "hidden-evaluators" / "ioniq-control" / "calibration" / "evaluator.py"
     ).read_text(encoding="utf-8")
     assert "def _reference_project" in source
-    assert "def _reference_errors" in source
-    assert "calibration.project(" not in source
-    assert "calibration.metrics(" not in source
-    assert "calibration.fit_extrinsics(train, intrinsics)" in source
-    assert "_reference_errors(holdout, intrinsics, fitted)" in source
-    assert (
-        'TRUSTED_AUTO_METHOD = "automatic_unambiguous_radar_yolo_bootstrap"' in source
-    )
-    assert 'TRUSTED_AUTO_VALIDATION_MODE = "operational_independent_routes"' in source
-    assert '"min_frames_with_targets": 40' in source
-    assert '"min_frame_match_rate": 0.80' in source
-    assert '"min_matches": 60' in source
-    assert '"min_inside_box_rate": 0.75' in source
-    assert '"max_center_error_median_px": 40.0' in source
-    assert "def _assert_trusted_policy_contract" in source
-    report_builder = source.split("def _valid_auto_report", 1)[1].split(
-        "def _policy_fail_closed", 1
-    )[0]
-    assert "readiness." not in report_builder
-    assert "TRUSTED_AUTO_RUNTIME_POLICY" in report_builder
+    assert "def _projection_generalization" in source
+    assert "def _target_selection_fail_closed" in source
+    assert "def _vision_selection_fail_closed" in source
+    assert "projection.project(point, intrinsics, pose)" in source
+    assert "selection.target_decision(ambiguous)" in source
+    assert "selection.detection_decision([candidate, candidate]" in source
+    assert "selection.select_pseudo_label(" in source
+    assert "random.Random(seed)" in source
+    assert "src/ioniq/pipeline/calibration/projection.py" in source
+    assert "auto_geometric_finalize" not in source
+    assert "src.dataset" not in source
+    assert "src.radar" not in source
 
 
 def test_hidden_public_report_uses_opaque_seed_id_and_separate_replay_capsule() -> None:
