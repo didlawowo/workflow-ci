@@ -399,15 +399,21 @@ jobs:
           if grep -Eiq 'mutmut[[:space:]]+run' "$SCRIPT"; then
             VENV="${RUNNER_TEMP:-/tmp}/mutation-venv"
             PYTHON_VERSION="${MUTATION_PYTHON_VERSION:-3.12}"
-            # The isolated mutation venv must use the same Python minor as the
-            # consumer. The previous 3.12 default recreated a Python 3.14-only
-            # consumer venv during uv sync, invalidating the mutmut executable.
-            # A PR may select a version, but only from this explicitly supported
-            # set. No shell content from the file is evaluated.
+            # A consumer may pin its Python minor version. Validate input from
+            # the PR before selecting an interpreter for isolated mutation.
             PROJECT_VERSION_FILE="$GITHUB_WORKSPACE/pr/${{ inputs.working-directory }}/.python-version"
             if [[ -f "$PROJECT_VERSION_FILE" ]]; then
               IFS= read -r REQUESTED_VERSION < "$PROJECT_VERSION_FILE" || true
-              REQUESTED_VERSION="${REQUESTED_VERSION%
+              case "$REQUESTED_VERSION" in
+                3.12|3.13|3.14) PYTHON_VERSION="$REQUESTED_VERSION" ;;
+                *)
+                  echo "::error::Unsupported consumer .python-version for mutation: $REQUESTED_VERSION"
+                  exit 1
+                  ;;
+              esac
+            fi
+            echo "Using Python $PYTHON_VERSION for isolated mutation execution."
+            rm -rf "$VENV"
             if ! uv python install "$PYTHON_VERSION"; then
               echo "::error::Mutation bootstrap failure: uv could not provision Python $PYTHON_VERSION."
               exit 1
