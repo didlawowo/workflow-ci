@@ -270,7 +270,7 @@ func TestWorkflowCIHiddenRetryIsExactlyOnce(t *testing.T) {{
             timeout=10,
             check=False,
         )
-        environment_detail = (go_env.stdout + "\\n" + go_env.stderr).strip()
+        environment_detail = (go_env.stdout + "\n" + go_env.stderr).strip()
         started = time.monotonic()
         try:
             completed = subprocess.run(
