@@ -256,13 +256,19 @@ def test_keryx_runtime_evaluator_is_registered_with_runtime_paths() -> None:
     assert "web/src/hooks/**" in spec["paths"]
 
 
-def test_keryx_runtime_evaluator_executes_ephemeral_go_tests() -> None:
+def test_keryx_runtime_evaluator_executes_external_overlay_tests() -> None:
     source = (
         ROOT / "hidden-evaluators" / "keryx" / "conversation-runtime" / "evaluator.py"
     ).read_text(encoding="utf-8")
-    assert "workflow_ci_hidden_test.go" in source
+    assert "workflow_ci_hidden_test.go" not in source
+    assert "zz_trusted_contract_test.go" in source
+    assert "tempfile.TemporaryDirectory" in source
+    assert 'json.dumps({"Replace": {str(virtual_path): str(actual_path)}})' in source
+    assert '"-overlay",' in source
+    assert "virtual_path.exists()" in source
     assert '"go",' in source and '"test",' in source
-    assert "path.unlink(missing_ok=True)" in source
+    assert "path.unlink(missing_ok=True)" not in source
+    assert "candidate / \"pkg\" / \"handlers\" / \"zz_trusted_contract_test.go\"" in source
     assert "TestWorkflowCIHiddenTurnFeedReplay" in source
     assert "TestWorkflowCIHiddenApprovalChoicesFailClosed" in source
     assert "TestWorkflowCIHiddenReasoningClamp" in source
