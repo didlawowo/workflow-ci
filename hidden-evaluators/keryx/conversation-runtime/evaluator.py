@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import json
 import random
 import subprocess
+import tempfile
 import time
 from pathlib import Path
 
@@ -240,26 +242,43 @@ func TestWorkflowCIHiddenRetryIsExactlyOnce(t *testing.T) {{
 }}
 '''
 
-    path = candidate / "pkg" / "handlers" / "workflow_ci_hidden_test.go"
-    if not path.parent.is_dir():
+    # Overlay Go : l'oracle vit HORS du checkout candidat. Aucun fichier
+    # physique n'est écrit dans pkg/handlers ni dans son index Git.
+    # Go compile la source trusted comme fichier virtuel du package, ce qui
+    # garde les tests des invariants non exportés sans dépendre des helpers
+    # *_test.go appartenant au candidat.
+    virtual_path = candidate / "pkg" / "handlers" / "zz_trusted_contract_test.go"
+    if not virtual_path.parent.is_dir():
         raise RuntimeError("candidate does not expose pkg/handlers")
-    path.write_text(source, encoding="utf-8")
-    go_env = subprocess.run(
-        ["go", "env", "GOVERSION", "GOCACHE", "GOMODCACHE"],
-        cwd=candidate,
-        capture_output=True,
-        text=True,
-        timeout=10,
-        check=False,
-    )
-    environment_detail = (go_env.stdout + "\n" + go_env.stderr).strip()
-    started = time.monotonic()
-    try:
+    if virtual_path.exists():
+        raise RuntimeError("candidate shadows the trusted hidden-test overlay")
+
+    with tempfile.TemporaryDirectory(prefix="keryx-hidden-oracle-") as external:
+        trusted_root = Path(external)
+        actual_path = trusted_root / "central_oracle_test.go"
+        actual_path.write_text(source, encoding="utf-8")
+        overlay_path = trusted_root / "overlay.json"
+        overlay_path.write_text(
+            json.dumps({"Replace": {str(virtual_path): str(actual_path)}}),
+            encoding="utf-8",
+        )
+        go_env = subprocess.run(
+            ["go", "env", "GOVERSION", "GOCACHE", "GOMODCACHE"],
+            cwd=candidate,
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+        environment_detail = (go_env.stdout + "\n" + go_env.stderr).strip()
+        started = time.monotonic()
         try:
             completed = subprocess.run(
                 [
                     "go",
                     "test",
+                    "-overlay",
+                    str(overlay_path),
                     "./pkg/handlers",
                     "-run",
                     "^TestWorkflowCIHidden",
@@ -279,8 +298,6 @@ func TestWorkflowCIHiddenRetryIsExactlyOnce(t *testing.T) {{
                 f"after {elapsed:.1f}s; go_env={environment_detail!r}; "
                 f"stdout_tail={stdout[-1500:]!r}; stderr_tail={stderr[-1500:]!r}"
             ) from exc
-    finally:
-        path.unlink(missing_ok=True)
 
     elapsed = time.monotonic() - started
     if completed.returncode != 0:
