@@ -3,6 +3,7 @@
 import importlib
 import json
 import os
+import shutil
 import subprocess
 from pathlib import Path
 import sys
@@ -416,3 +417,83 @@ def test_mutmut_diagnostics_reconstruction_accepts_full_collection_total_in_scop
     assert "service.x_target__mutmut_1: killed" in result
     assert "service.x_target__mutmut_2: killed" in result
     assert "unrelated" not in result
+
+
+def test_standalone_pytest_ini_is_staged_so_mutmut_hits_instrumented_sources(
+    tmp_path,
+):
+    repo = tmp_path / "consumer"
+    (repo / ".ci").mkdir(parents=True)
+    for name in ("mutation.sh", "mutation_scope.py", "mutation_contract.py"):
+        shutil.copy2(ROOT / ".ci" / name, repo / ".ci" / name)
+    subprocess.run(["git", "init", "-q", repo], check=True)
+    subprocess.run(
+        ["git", "-C", repo, "config", "user.email", "ci@example.test"], check=True
+    )
+    subprocess.run(
+        ["git", "-C", repo, "config", "user.name", "Mutation self-test"], check=True
+    )
+    (repo / "src").mkdir()
+    (repo / "tests").mkdir()
+    source = repo / "src" / "service.py"
+    source.write_text(
+        "def is_retryable(status):\n    return status == 429\n", encoding="utf-8"
+    )
+    (repo / "tests" / "test_service.py").write_text(
+        "from service import is_retryable\n"
+        "\n"
+        "def test_retryable_on_rate_limit():\n"
+        "    assert is_retryable(429) is True\n"
+        "\n"
+        "def test_not_retryable_on_server_error():\n"
+        "    assert is_retryable(500) is False\n",
+        encoding="utf-8",
+    )
+    (repo / "pytest.ini").write_text(
+        "[pytest]\ntestpaths = tests\npythonpath = src\n", encoding="utf-8"
+    )
+    (repo / "pyproject.toml").write_text(
+        '[project]\nname = "consumer"\nversion = "0.1.0"\n'
+        'requires-python = ">=3.11"\n\n'
+        '[tool.mutmut]\nsource_paths = ["src/"]\n',
+        encoding="utf-8",
+    )
+    subprocess.run(["git", "-C", repo, "add", "."], check=True)
+    subprocess.run(["git", "-C", repo, "commit", "-qm", "base"], check=True)
+    base = subprocess.check_output(
+        ["git", "-C", repo, "rev-parse", "HEAD"], text=True
+    ).strip()
+    source.write_text(
+        "def is_retryable(status):\n    return status in (429, 503)\n",
+        encoding="utf-8",
+    )
+    subprocess.run(["git", "-C", repo, "add", "."], check=True)
+    subprocess.run(["git", "-C", repo, "commit", "-qm", "head"], check=True)
+    head = subprocess.check_output(
+        ["git", "-C", repo, "rev-parse", "HEAD"], text=True
+    ).strip()
+
+    env = os.environ.copy()
+    env.pop("VIRTUAL_ENV", None)
+    env["RUNNER_TEMP"] = str(tmp_path / "runner-temp")
+    env["MUTATION_BASE_SHA"] = base
+    env["MUTATION_HEAD_SHA"] = head
+
+    completed = subprocess.run(
+        ["bash", ".ci/mutation.sh"],
+        cwd=repo,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=300,
+    )
+
+    output = completed.stdout + completed.stderr
+    assert completed.returncode == 0, output
+    assert "could not find any test case" not in output
+    assert (repo / "mutants" / "pytest.ini").is_file()
+    stats = json.loads((repo / "mutants" / "mutmut-cicd-stats.json").read_text())
+    assert stats["killed"] >= 1
+    assert stats["total"] >= stats["killed"]
+    results = (repo / ".quality" / "mutmut-results.txt").read_text()
+    assert "service.x_is_retryable__mutmut_" in results

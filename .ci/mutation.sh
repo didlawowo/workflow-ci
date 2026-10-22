@@ -129,6 +129,20 @@ else
 fi
 
 rm -rf mutants
+# Mutmut 3.x stages tests/, setup.cfg, pyproject.toml and lockfiles through its
+# default also_copy list, but standalone pytest ini files are missing. The
+# harness runs pytest with cwd=mutants and --rootdir=., so an unstaged
+# pytest.ini silently loads the consumer checkout's own configuration and
+# resolves testpaths/pythonpath against the uninstrumented sources: the
+# baseline then passes while no test is attributed to any mutant. Pre-seed the
+# disposable staging directory with every recognized pytest config candidate
+# and the root conftest.py; mutmut's own copy steps keep existing files.
+mkdir -p mutants
+for pytest_config in pytest.ini .pytest.ini tox.ini setup.cfg pyproject.toml conftest.py; do
+  if [[ -f "$pytest_config" ]]; then
+    cp "$pytest_config" "mutants/$pytest_config"
+  fi
+done
 if [[ "${#MUTATION_TARGETS[@]}" -gt 0 ]]; then
   mutmut run "${MUTATION_TARGETS[@]}"
 else
