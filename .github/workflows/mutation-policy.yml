@@ -160,6 +160,7 @@ jobs:
           POLICY_REPOSITORY: ${{ github.repository }}
           POLICY_TOKEN: ${{ github.token }}
           POLICY_EVENT_PATH: ${{ github.event_path }}
+          MUTATION_EXECUTION_MODE: ${{ vars.MUTATION_EXECUTION_MODE || 'automatic' }}
         run: uv run --no-project --python 3.12 python .workflow-ci/.github/scripts/mutation_policy.py classify
 
       - name: Fetch pull request code without submodule traversal
@@ -691,6 +692,7 @@ jobs:
           POLICY_REPOSITORY: ${{ github.repository }}
           POLICY_TOKEN: ${{ github.token }}
           POLICY_EVENT_PATH: ${{ github.event_path }}
+          MUTATION_EXECUTION_MODE: ${{ vars.MUTATION_EXECUTION_MODE || 'automatic' }}
         run: uv run --no-project --python 3.12 python .workflow-ci/.github/scripts/mutation_policy.py classify
 
       - name: Require successful mutation execution
@@ -858,4 +860,4 @@ jobs:
       - name: Confirm mutation testing is not required
         if: steps.policy.outputs.required != 'true'
         run: >-
-          echo "Mutation testing is not required: no high-risk label or supported production source change."
+          echo "Mutation testing is not required by the protected repository policy."
