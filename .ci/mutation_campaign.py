@@ -162,6 +162,17 @@ def aggregate(
                 raise ValueError(
                     "Campaign equivalents require complete individual proofs"
                 )
+            for key in survivors:
+                proof = review["mutants"][key]
+                expected_mutant = plan["mutants"][key]
+                if (
+                    not isinstance(proof, dict)
+                    or proof.get("source") != expected_mutant["source"]
+                    or proof.get("source_sha256")
+                    != plan["sources"][expected_mutant["source"]]
+                    or proof.get("mutant_sha256") != expected_mutant["mutant_sha256"]
+                ):
+                    raise ValueError("Equivalence proof differs from planned mutant")
             reviewed.update(review["mutants"])
     if set(statuses) != set(plan["mutants"]):
         raise ValueError("Incomplete campaign inventory")

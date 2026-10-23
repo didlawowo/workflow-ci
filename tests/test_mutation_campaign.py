@@ -260,3 +260,32 @@ def test_protected_planner_workers_and_aggregation_run_end_to_end(complete, tmp_
     )
     assert verdict["stats"]["killed"] == 30
     assert verdict["campaign"]["complete"] is True
+
+
+def test_equivalence_proof_must_describe_the_exact_planned_mutant(complete):
+    plan, fragments, repo, trusted, base, head = complete
+    key = next(iter(fragments[0]["mutants"]))
+    name = key.rsplit(".", 1)[1]
+    mutant = f"def {name}(value):\n    return value + 3\n"
+    evidence = importlib.import_module("mutation_evidence")
+    entry = {
+        "source": "src/core.py",
+        "source_sha256": plan["sources"]["src/core.py"],
+        "mutant_sha256": evidence.digest_function(mutant, name),
+        "reason": "Reviewed alternative B",
+    }
+    (trusted / ".ci").mkdir()
+    (trusted / ".ci/mutation-equivalents.json").write_text(json.dumps({key: entry}))
+    fragments[0]["mutants"][key]["status"] = "survived"
+    fragments[0]["stats"]["killed"] -= 1
+    fragments[0]["stats"]["survived"] += 1
+    fragments[0]["review"] = {
+        "base_sha": base,
+        "head_sha": head,
+        "reviewed_equivalents": [key],
+        "mutants": {key: {**entry, "mutant_source": mutant}},
+    }
+    # The plan/fragment describe mutant A; the ledger and supplied AST approve B.
+    assert entry["mutant_sha256"] != plan["mutants"][key]["mutant_sha256"]
+    with pytest.raises(ValueError, match="planned mutant"):
+        aggregate(complete)
