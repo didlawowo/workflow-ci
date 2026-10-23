@@ -220,3 +220,19 @@ pre-commit install --hook-type pre-commit --hook-type pre-push --install-hooks
 CI can verify that the local contract still passes with the shared composite action
 `.github/actions/precommit-contract`. Consumer workflow templates must reference
 an immutable published tag, never `main`.
+
+
+### Repository-specific mutation requests
+
+`MUTATION_EXECUTION_MODE` is an Actions repository variable, read by both
+central execution and independent verification. Its default, `automatic`,
+preserves complexity-driven enforcement. `on-demand` requires the explicit
+`mutation:requested` label on the pull request itself; issue complexity and
+labels in a PR body do not request a campaign. An explicit request remains
+blocking until its real mutation evidence passes. Invalid mode values fail
+closed. Independent tests, coverage, security and policy integrity are unchanged.
+
+For the Ioniq-only policy approved by its owner: `gh variable set MUTATION_EXECUTION_MODE --repo didlawowo/ioniq-control --body on-demand`.
+Other repositories retain their existing policy unless their own trusted
+configuration is deliberately changed. Adopt a published workflow-ci tag
+containing this support before changing a consumer's mode.

@@ -60,6 +60,7 @@ jobs:
           POLICY_REPOSITORY: ${{ github.repository }}
           POLICY_TOKEN: ${{ github.token }}
           POLICY_EVENT_PATH: ${{ github.event_path }}
+          MUTATION_EXECUTION_MODE: ${{ vars.MUTATION_EXECUTION_MODE || 'automatic' }}
         run: uv run --no-project --python 3.12 python .workflow-ci/.github/scripts/mutation_policy.py classify
       - name: Generate expected mutant inventory from protected planner
         if: steps.policy.outputs.required == 'true'

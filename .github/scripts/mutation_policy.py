@@ -7,8 +7,8 @@ import argparse
 import json
 import os
 import re
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
@@ -200,10 +200,7 @@ def _is_python_production_path(path: str) -> bool:
         return False
 
     name = Path(normalized).name.lower()
-    if name.startswith("test_") or name.endswith("_test.py"):
-        return False
-
-    return True
+    return not (name.startswith("test_") or name.endswith("_test.py"))
 
 
 def _is_go_production_path(path: str) -> bool:
@@ -354,6 +351,11 @@ def _write_output(name: str, value: str) -> None:
 
 def notify(event: dict) -> int:
     """Post one idempotent mutation-policy comment when a high-risk label is added."""
+    if mutation_execution_mode() == "on-demand":
+        print(
+            "Mutation testing is on demand; request it with the PR label mutation:requested"
+        )
+        return 0
     label = event.get("label") or {}
     label_name = label.get("name")
     if label_name not in MUTATION_REQUIRED_LABELS:
@@ -379,6 +381,20 @@ def notify(event: dict) -> int:
     return 0
 
 
+def mutation_execution_mode() -> str:
+    """Only repository-owned configuration can change automatic enforcement."""
+    mode = os.environ.get("MUTATION_EXECUTION_MODE", "automatic")
+    if mode not in {"automatic", "on-demand"}:
+        raise ValueError("invalid_mutation_execution_mode")
+    return mode
+
+
+def mutation_requested(event: dict) -> bool:
+    return "mutation:requested" in label_names(
+        (event.get("pull_request") or {}).get("labels")
+    )
+
+
 def classify(event: dict) -> int:
     """Expose whether mutation is required and the requested execution depth.
 
@@ -390,8 +406,12 @@ def classify(event: dict) -> int:
     - large or unverifiable production changes auto-promote to high.
     """
 
-    if _dependabot_dependency_only(event):
+    on_demand = mutation_execution_mode() == "on-demand"
+    requested = on_demand and mutation_requested(event)
+    if on_demand and not requested:
         reasons: tuple[str, ...] = ()
+    elif _dependabot_dependency_only(event):
+        reasons = ()
         print("Mutation testing skipped for dependency-only Dependabot PR")
     else:
         explicit = mutation_reasons(
@@ -418,6 +438,9 @@ def classify(event: dict) -> int:
             else:
                 reasons = ()
 
+    if requested:
+        reasons = ("mutation:requested", *reasons)
+
     required = bool(reasons)
     if not required:
         depth = "none"
@@ -436,7 +459,9 @@ def classify(event: dict) -> int:
         print(f"Mutation testing required ({depth}): {', '.join(reasons)}")
     else:
         print(
-            "Mutation testing not required: low complexity or no supported production code change"
+            "Mutation testing not required: no explicit mutation:requested label"
+            if on_demand
+            else "Mutation testing not required: low complexity or no supported production code change"
         )
     return 0
 
@@ -517,8 +542,11 @@ def refresh(event: dict) -> int:
         raise RuntimeError("Issue event does not contain an issue number")
     issue_number = int(issue_number)
 
+    on_demand = mutation_execution_mode() == "on-demand"
     refreshed = 0
     for pull_request in _open_pull_requests():
+        if on_demand and not mutation_requested({"pull_request": pull_request}):
+            continue
         pr_number = pull_request.get("number")
         head = pull_request.get("head") or {}
         head_sha = head.get("sha")
