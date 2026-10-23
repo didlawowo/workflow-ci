@@ -43,7 +43,9 @@ def _is_report(report: object) -> bool:
         return False
     fields = {"vulnerabilities": list, "affected_packages": dict, "remediations": dict}
     present = [key for key in fields if key in report]
-    return bool(present) and all(isinstance(report[key], fields[key]) for key in present)
+    return bool(present) and all(
+        isinstance(report[key], fields[key]) for key in present
+    )
 
 
 def classify(exit_code: int, report_path: Path) -> str:

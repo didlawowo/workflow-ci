@@ -251,6 +251,9 @@ def test_changed_lines_compares_exact_base_and_head_trees():
             "/repo",
             "diff",
             "--unified=0",
+            "--no-ext-diff",
+            "--no-textconv",
+            "--relative",
             "--no-color",
             "base-sha...head-sha",
             "--",
@@ -453,3 +456,27 @@ def test_change_inside_decorated_function_body_is_not_a_target(tmp_path: Path):
     head = _commit(repo, "change nested")
 
     assert mutation_scope.mutation_targets(repo, base, head, depth="medium") == ()
+
+
+def test_verification_preserves_exact_module_class_and_method_identity():
+    target = "service.*Rules*check__mutmut_*"
+    assert mutation_scope.matches_function("service.xǁRulesǁcheck__mutmut_1", target)
+    assert not mutation_scope.matches_function(
+        "service.xǁRulesExtraǁcheck__mutmut_1", target
+    )
+    assert not mutation_scope.matches_function(
+        "service.sub.xǁRulesǁcheck__mutmut_1", target
+    )
+    assert not mutation_scope.matches_function("service.x_check__mutmut_1", target)
+    assert not mutation_scope.matches_function(
+        "service.xǁRulesǁothercheck__mutmut_1", target
+    )
+    assert mutation_scope.matches_function(
+        "service.x_x_function__mutmut_1", "service.*x_function__mutmut_*"
+    )
+    assert mutation_scope.matches_function(
+        "service.x_func__mutmut_1", "service.*__mutmut_*"
+    )
+    assert not mutation_scope.matches_function(
+        "service.sub.x_func__mutmut_1", "service.*__mutmut_*"
+    )

@@ -36,23 +36,39 @@ jobs:
           fetch-depth: 1
           persist-credentials: false
 
+      - name: Verify trusted implementation before using its checkout helper
+        shell: bash
+        env:
+          WORKFLOW_SHA: ${{ job.workflow_sha }}
+        run: |
+          set -euo pipefail
+          test "$(git -C .workflow-ci-policy rev-parse HEAD)" = "$WORKFLOW_SHA"
+
       - name: Checkout protected base
-        uses: actions/checkout@v7
-        with:
-          repository: ${{ github.repository }}
-          ref: ${{ github.event.pull_request.base.sha }}
-          path: .policy-base
-          fetch-depth: 1
-          persist-credentials: false
+        shell: bash
+        env:
+          CHECKOUT_REPOSITORY: ${{ github.repository }}
+          CHECKOUT_REF: ${{ github.event.pull_request.base.sha }}
+          CHECKOUT_TOKEN: ${{ github.token }}
+          CHECKOUT_BASE_REF: ""
+          CHECKOUT_HEAD_REF: ""
+        run: |
+          set -euo pipefail
+          HELPER="$GITHUB_WORKSPACE/.workflow-ci-policy/.github/actions/checkout-source/checkout.sh"
+          GITHUB_WORKSPACE="$GITHUB_WORKSPACE/.policy-base" bash "$HELPER"
 
       - name: Checkout untrusted candidate without executing it
-        uses: actions/checkout@v7
-        with:
-          repository: ${{ github.event.pull_request.head.repo.full_name }}
-          ref: ${{ github.event.pull_request.head.sha }}
-          path: .policy-candidate
-          fetch-depth: 1
-          persist-credentials: false
+        shell: bash
+        env:
+          CHECKOUT_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name }}
+          CHECKOUT_REF: ${{ github.event.pull_request.head.sha }}
+          CHECKOUT_TOKEN: ${{ github.token }}
+          CHECKOUT_BASE_REF: ""
+          CHECKOUT_HEAD_REF: ""
+        run: |
+          set -euo pipefail
+          HELPER="$GITHUB_WORKSPACE/.workflow-ci-policy/.github/actions/checkout-source/checkout.sh"
+          GITHUB_WORKSPACE="$GITHUB_WORKSPACE/.policy-candidate" bash "$HELPER"
 
       - name: Verify checkout identities
         shell: bash

@@ -98,10 +98,9 @@ def test_mutation_policy_does_not_inject_large_base64_outputs_into_environment()
     env = materialize.get("env", {})
     assert "EVIDENCE_B64" not in env
     assert "RESULTS_B64" not in env
-    assert "${{ needs.mutation-run.outputs.evidence-b64 }}" in materialize["run"]
-    assert "${{ needs.mutation-run.outputs.results-gzip-b64 }}" in materialize["run"]
-    assert "B64_EVIDENCE" in materialize["run"]
-    assert "B64_RESULTS" in materialize["run"]
+    assert "${{ toJSON(needs.mutation-run.outputs) }}" in materialize["run"]
+    assert "mutation_capture.py decode" in materialize["run"]
+    assert "JSON_MUTATION_OUTPUTS" in materialize["run"]
 
 
 @pytest.mark.parametrize(
@@ -171,8 +170,12 @@ def test_scoped_mutation_validator_imports_configparser(workflow):
     text = workflow.read_text()
     marker = "Validate mutation evidence for changed Python functions"
     scoped = text.split(marker, 1)[1]
-    validator = scoped.split("PY", 1)[1]
-    assert "import configparser" in validator
+    if workflow.name == "mutation-policy.yml" and workflow.parent.name == "workflows":
+        assert ".ci/mutation_evidence.py" in scoped
+        assert '--trusted "$GITHUB_WORKSPACE/.policy"' in scoped
+    else:
+        validator = scoped.split("PY", 1)[1]
+        assert "import configparser" in validator
 
 
 @pytest.mark.parametrize(

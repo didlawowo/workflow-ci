@@ -291,8 +291,16 @@ func TestWorkflowCIHiddenRetryIsExactlyOnce(t *testing.T) {{
             )
         except subprocess.TimeoutExpired as exc:
             elapsed = time.monotonic() - started
-            stdout = exc.stdout.decode(errors="replace") if isinstance(exc.stdout, bytes) else (exc.stdout or "")
-            stderr = exc.stderr.decode(errors="replace") if isinstance(exc.stderr, bytes) else (exc.stderr or "")
+            stdout = (
+                exc.stdout.decode(errors="replace")
+                if isinstance(exc.stdout, bytes)
+                else (exc.stdout or "")
+            )
+            stderr = (
+                exc.stderr.decode(errors="replace")
+                if isinstance(exc.stderr, bytes)
+                else (exc.stderr or "")
+            )
             raise RuntimeError(
                 "Keryx hidden Go evaluator timed out "
                 f"after {elapsed:.1f}s; go_env={environment_detail!r}; "

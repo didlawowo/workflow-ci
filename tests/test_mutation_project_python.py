@@ -9,7 +9,9 @@ from pathlib import Path
 POLICY = Path(__file__).resolve().parents[1] / ".github/workflows/mutation-policy.yml"
 
 
-def _select_python(tmp_path: Path, version: str | None) -> subprocess.CompletedProcess[str]:
+def _select_python(
+    tmp_path: Path, version: str | None
+) -> subprocess.CompletedProcess[str]:
     project = tmp_path / "pr"
     project.mkdir()
     if version is not None:
@@ -25,6 +27,7 @@ def _select_python(tmp_path: Path, version: str | None) -> subprocess.CompletedP
     env = os.environ.copy()
     env.pop("MUTATION_PYTHON_VERSION", None)
     env["GITHUB_WORKSPACE"] = str(tmp_path)
+    env["PROJECT_DIRECTORY"] = "."
     return subprocess.run(
         ["bash", "-euo", "pipefail", "-c", script],
         env=env,

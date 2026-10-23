@@ -16,6 +16,11 @@ on:
         required: false
         type: string
         default: ""
+      mutation-shards:
+        description: "Number of protected mutation campaign workers (1 to 16)"
+        required: false
+        type: number
+        default: 1
       working-directory:
         required: false
         type: string
@@ -99,6 +104,7 @@ jobs:
     name: "Mutation quality gate"
     with:
       scope-key: ${{ format('{0}-{1}', inputs.repo-type, inputs.working-directory) }}
+      mutation-shards: ${{ inputs.mutation-shards }}
       trusted-runner: ${{ inputs.runner }}
       working-directory: ${{ inputs.working-directory }}
     permissions:

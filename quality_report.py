@@ -257,7 +257,7 @@ def parse_mutation(path: str | None) -> dict[str, Any]:
             "score": None,
         }
 
-    data = json.loads(Path(path).read_text(encoding="utf-8"))
+    data = json.loads(Path(path).read_bytes().decode())
     if not isinstance(data, dict):
         raise ValueError("mutation report must be a JSON object")
 
@@ -305,9 +305,25 @@ def parse_mutation(path: str | None) -> dict[str, Any]:
     if score is not None and score <= 1.0:
         score *= 100.0
 
+    reviewed = data.get("reviewed_equivalents")
+    validation = data.get("validation")
+    reviewed_count = 0
+    if (
+        isinstance(reviewed, list)
+        and all(isinstance(key, str) for key in reviewed)
+        and len(set(reviewed)) == len(reviewed)
+        and isinstance(validation, dict)
+        and validation.get("status") == "pass"
+        and validation.get("unresolved") == 0
+        and validation.get("unreviewed_survivors") == 0
+        and len(reviewed) == (survived or 0)
+    ):
+        reviewed_count = len(reviewed)
+
     return {
         "available": True,
         "file": path,
+        "reviewed_equivalents": reviewed_count,
         "total": total,
         "killed": killed,
         "survived": survived,
@@ -610,6 +626,10 @@ def aggregate_gate(report: dict[str, Any]) -> dict[str, Any]:
             bad = sum(
                 int(mutation.get(key) or 0)
                 for key in ("survived", "timeouts", "suspicious", "not_covered")
+            )
+            bad -= min(
+                int(mutation.get("survived") or 0),
+                int(mutation.get("reviewed_equivalents") or 0),
             )
             if bad:
                 failures.append("mutation")

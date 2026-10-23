@@ -15,6 +15,9 @@ PROTECTED_PATHS = (
     ".github/workflows/mutation-policy.yml",
     ".ci/mutation.sh",
     ".ci/check_mutation_report.py",
+    ".ci/mutation-equivalents.json",
+    ".ci/mutation-plan.sh",
+    ".ci/mutation-shard.sh",
     "sonar-project.properties",
 )
 

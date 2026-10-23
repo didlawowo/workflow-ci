@@ -1,0 +1,209 @@
+name: Complete mutation campaign
+
+on:
+  workflow_call:
+    inputs:
+      runner:
+        required: true
+        type: string
+      working-directory:
+        required: false
+        type: string
+        default: "."
+      shards:
+        description: Number of bounded workers, from 1 to 16
+        required: true
+        type: number
+    outputs:
+      required:
+        value: ${{ jobs.plan.outputs.required }}
+        description: Whether the policy required the campaign
+      depth:
+        value: ${{ jobs.plan.outputs.depth }}
+        description: Independently classified mutation depth
+      report-file:
+        value: ${{ jobs.verify.outputs.report-file }}
+        description: Complete trusted campaign report filename
+      report-b64:
+        value: ${{ jobs.verify.outputs.report-b64 }}
+        description: Complete trusted campaign report
+
+permissions:
+  contents: read
+  issues: read
+  pull-requests: read
+  actions: read
+
+jobs:
+  plan:
+    if: github.event_name == 'pull_request'
+    runs-on: ${{ vars.UNTRUSTED_RUNNER || inputs.runner }}
+    timeout-minutes: 45
+    outputs:
+      required: ${{ steps.policy.outputs.required }}
+      depth: ${{ steps.policy.outputs.depth }}
+      matrix: ${{ steps.plan.outputs.matrix }}
+    steps:
+      - uses: $/.github/actions/mutation-campaign-checkout
+        with:
+          workflow-repository: ${{ job.workflow_repository }}
+          workflow-sha: ${{ job.workflow_sha }}
+      - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+        with:
+          enable-cache: false
+          prune-cache: false
+      - name: Classify protected policy
+        id: policy
+        env:
+          POLICY_PROVIDER: github
+          POLICY_API_URL: ${{ github.api_url }}
+          POLICY_REPOSITORY: ${{ github.repository }}
+          POLICY_TOKEN: ${{ github.token }}
+          POLICY_EVENT_PATH: ${{ github.event_path }}
+        run: uv run --no-project --python 3.12 python .workflow-ci/.github/scripts/mutation_policy.py classify
+      - name: Generate expected mutant inventory from protected planner
+        if: steps.policy.outputs.required == 'true'
+        env:
+          MUTATION_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          MUTATION_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          MUTATION_DEPTH: ${{ steps.policy.outputs.depth }}
+          DIRECTORY: ${{ inputs.working-directory }}
+          SHARDS: ${{ inputs.shards }}
+        run: |
+          set -euo pipefail
+          uv run --no-project --python 3.12 python .workflow-ci/.ci/mutation_campaign_run.py plan \
+            --root "$GITHUB_WORKSPACE" --directory "$DIRECTORY" \
+            --plan "$RUNNER_TEMP/plan.json" --output "$RUNNER_TEMP/plan.json" --shards "$SHARDS"
+      - name: Validate content-bound plan
+        id: plan
+        if: steps.policy.outputs.required == 'true'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          DIRECTORY: ${{ inputs.working-directory }}
+          SHARDS: ${{ inputs.shards }}
+        run: |
+          set -euo pipefail
+          uv run --no-project --python 3.12 python .workflow-ci/.ci/mutation_campaign.py plan \
+            --plan "$RUNNER_TEMP/plan.json" --repo pr --base "$BASE_SHA" --head "$HEAD_SHA" \
+            --directory "$DIRECTORY" --shards "$SHARDS" --output "$RUNNER_TEMP/validated-plan.json"
+      - name: Publish required execution plan
+        if: steps.policy.outputs.required == 'true'
+        uses: actions/upload-artifact@v6
+        with:
+          name: mutation-plan-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/validated-plan.json
+          retention-days: 7
+          if-no-files-found: error
+
+  shard:
+    if: needs.plan.outputs.required == 'true'
+    needs: plan
+    runs-on: ${{ vars.UNTRUSTED_RUNNER || inputs.runner }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    steps:
+      - uses: $/.github/actions/mutation-campaign-checkout
+        with:
+          workflow-repository: ${{ job.workflow_repository }}
+          workflow-sha: ${{ job.workflow_sha }}
+      - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+        with:
+          enable-cache: false
+          prune-cache: false
+      - uses: actions/download-artifact@v7
+        with:
+          name: mutation-plan-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/campaign-plan
+      - name: Run exact partition using protected runner
+        env:
+          MUTATION_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          MUTATION_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          MUTATION_DEPTH: ${{ needs.plan.outputs.depth }}
+          DIRECTORY: ${{ inputs.working-directory }}
+          SHARDS: ${{ inputs.shards }}
+          INDEX: ${{ matrix.index }}
+        run: |
+          set -euo pipefail
+          uv run --no-project --python 3.12 python .workflow-ci/.ci/mutation_campaign_run.py shard \
+            --root "$GITHUB_WORKSPACE" --directory "$DIRECTORY" \
+            --plan "$RUNNER_TEMP/campaign-plan/validated-plan.json" \
+            --output "$RUNNER_TEMP/fragment.json" --shards "$SHARDS" --index "$INDEX"
+      - name: Publish required partition evidence
+        uses: actions/upload-artifact@v6
+        with:
+          name: mutation-fragment-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.index }}
+          path: ${{ runner.temp }}/fragment.json
+          retention-days: 7
+          if-no-files-found: error
+
+  verify:
+    if: always()
+    needs: [plan, shard]
+    runs-on: ${{ inputs.runner }}
+    timeout-minutes: 10
+    outputs:
+      report-file: ${{ steps.output.outputs.report-file }}
+      report-b64: ${{ steps.output.outputs.report-b64 }}
+    steps:
+      - name: Require successful policy and complete execution
+        env:
+          PLAN: ${{ needs.plan.result }}
+          REQUIRED: ${{ needs.plan.outputs.required }}
+          SHARDS: ${{ needs.shard.result }}
+        run: |
+          set -euo pipefail
+          test "$PLAN" = success
+          case "$REQUIRED" in
+            true) test "$SHARDS" = success ;;
+            false) test "$SHARDS" = skipped ;;
+            *) exit 1 ;;
+          esac
+      - uses: $/.github/actions/mutation-campaign-checkout
+        if: needs.plan.outputs.required == 'true'
+        with:
+          workflow-repository: ${{ job.workflow_repository }}
+          workflow-sha: ${{ job.workflow_sha }}
+      - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+        if: needs.plan.outputs.required == 'true'
+        with:
+          enable-cache: false
+          prune-cache: false
+      - uses: actions/download-artifact@v7
+        if: needs.plan.outputs.required == 'true'
+        with:
+          name: mutation-plan-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/campaign-plan
+      - uses: actions/download-artifact@v7
+        if: needs.plan.outputs.required == 'true'
+        with:
+          pattern: mutation-fragment-${{ github.run_id }}-${{ github.run_attempt }}-*
+          path: ${{ runner.temp }}/campaign-fragments
+      - name: Verify complete campaign independently
+        if: needs.plan.outputs.required == 'true'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          DIRECTORY: ${{ inputs.working-directory }}
+          SHARDS: ${{ inputs.shards }}
+          DEPTH: ${{ needs.plan.outputs.depth }}
+        run: |
+          set -euo pipefail
+          uv run --no-project --python 3.12 python .workflow-ci/.ci/mutation_campaign.py aggregate \
+            --plan "$RUNNER_TEMP/campaign-plan/validated-plan.json" \
+            --fragments "$RUNNER_TEMP/campaign-fragments" --repo pr --trusted .policy \
+            --base "$BASE_SHA" --head "$HEAD_SHA" --directory "$DIRECTORY" \
+            --shards "$SHARDS" --depth "$DEPTH" --output "$RUNNER_TEMP/scoped-mutation.json"
+      - name: Expose complete trusted campaign verdict
+        id: output
+        if: needs.plan.outputs.required == 'true'
+        run: |
+          set -euo pipefail
+          REPORT="$RUNNER_TEMP/scoped-mutation.json"
+          test -s "$REPORT"
+          test "$(wc -c < "$REPORT")" -lt 500000
+          echo 'report-file=scoped-mutation.json' >> "$GITHUB_OUTPUT"
+          echo "report-b64=$(base64 -w0 "$REPORT")" >> "$GITHUB_OUTPUT"

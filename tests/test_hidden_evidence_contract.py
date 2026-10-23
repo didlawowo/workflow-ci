@@ -54,12 +54,17 @@ def test_hidden_scope_is_central_and_path_sensitive(tmp_path: Path) -> None:
         text=True,
     )
     result = json.loads(completed.stdout)
-    assert result == {"required": True, "matched": ["src/ioniq/pipeline/calibration/projection.py"]}
+    assert result == {
+        "required": True,
+        "matched": ["src/ioniq/pipeline/calibration/projection.py"],
+    }
 
 
 def test_hidden_scope_rejects_evaluator_substitution(tmp_path: Path) -> None:
     changed = tmp_path / "changed.txt"
-    changed.write_text("src/ioniq/pipeline/calibration/projection.py\n", encoding="utf-8")
+    changed.write_text(
+        "src/ioniq/pipeline/calibration/projection.py\n", encoding="utf-8"
+    )
     completed = subprocess.run(
         [
             sys.executable,
@@ -215,7 +220,9 @@ def test_solar_routing_evaluator_bypasses_unrelated_models_package_init(
         / "energy-routing"
         / "evaluator.py"
     )
-    spec = importlib.util.spec_from_file_location("solar_hidden_evaluator", evaluator_path)
+    spec = importlib.util.spec_from_file_location(
+        "solar_hidden_evaluator", evaluator_path
+    )
     assert spec and spec.loader
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
@@ -268,7 +275,7 @@ def test_keryx_runtime_evaluator_executes_external_overlay_tests() -> None:
     assert "virtual_path.exists()" in source
     assert '"go",' in source and '"test",' in source
     assert "path.unlink(missing_ok=True)" not in source
-    assert "candidate / \"pkg\" / \"handlers\" / \"zz_trusted_contract_test.go\"" in source
+    assert 'candidate / "pkg" / "handlers" / "zz_trusted_contract_test.go"' in source
     assert "TestWorkflowCIHiddenTurnFeedReplay" in source
     assert "TestWorkflowCIHiddenApprovalChoicesFailClosed" in source
     assert "TestWorkflowCIHiddenReasoningClamp" in source

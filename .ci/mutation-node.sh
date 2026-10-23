@@ -16,8 +16,16 @@ case "$DEPTH" in
   *) echo "::error::Unsupported MUTATION_DEPTH=$DEPTH"; exit 1 ;;
 esac
 
-ROOT="$PWD"
-PROJECT="$ROOT/$WORKDIR"
+ROOT="$(pwd -P)"
+if [[ "$WORKDIR" == /* ]]; then
+  echo "::error::Node mutation working-directory must be relative."
+  exit 1
+fi
+PROJECT="$(cd "$ROOT/$WORKDIR" && pwd -P)"
+case "$PROJECT" in
+  "$ROOT"|"$ROOT"/*) ;;
+  *) echo "::error::Node mutation working-directory escapes the checkout."; exit 1 ;;
+esac
 [[ -f "$PROJECT/package.json" ]] || {
   echo "::error::No package.json under mutation working directory: $WORKDIR"
   exit 1
@@ -85,21 +93,46 @@ printf 'Node mutation targets (%s):\n' "$DEPTH"
 printf '  - %s\n' "${mutate_entries[@]}"
 
 if [[ -z "$TEST_COMMAND" ]]; then
-  if command -v bun >/dev/null 2>&1; then
+  if [[ -f "$PROJECT/bun.lock" || -f "$PROJECT/bun.lockb" ]]; then
     TEST_COMMAND="bun run test"
   elif command -v npm >/dev/null 2>&1; then
-    TEST_COMMAND="npm test -- --runInBand"
+    if [[ -f "$PROJECT/pnpm-lock.yaml" ]]; then
+      TEST_COMMAND="pnpm test"
+    elif [[ -f "$PROJECT/yarn.lock" ]]; then
+      TEST_COMMAND="yarn test"
+    else
+      TEST_COMMAND="npm test"
+    fi
   else
     echo "::error::No default Node test command available."
     exit 1
   fi
 fi
 
-TOOLS="${RUNNER_TEMP:-/tmp}/workflow-ci-stryker-tools"
-REPORT="${RUNNER_TEMP:-/tmp}/workflow-ci-stryker-report.json"
-CONFIG="${RUNNER_TEMP:-/tmp}/workflow-ci-stryker.config.json"
-rm -rf "$TOOLS"
+SCRATCH="$(mktemp -d "${RUNNER_TEMP:-/tmp}/workflow-ci-stryker.XXXXXX")"
+trap 'rm -rf "$SCRATCH"' EXIT
+TOOLS="$SCRATCH/tools"
+REPORT="$SCRATCH/report.json"
+CONFIG="$SCRATCH/config.json"
 mkdir -p "$TOOLS"
+
+# Install the consumer in the same sanitized environment as the mutation run.
+# Lockfiles and registry selection stay unchanged.
+(
+  cd "$PROJECT"
+  if [[ -f bun.lock || -f bun.lockb ]]; then
+    bun install --frozen-lockfile
+  elif [[ -f pnpm-lock.yaml ]]; then
+    pnpm install --frozen-lockfile
+  elif [[ -f yarn.lock ]]; then
+    yarn install --frozen-lockfile
+  elif [[ -f package-lock.json || -f npm-shrinkwrap.json ]]; then
+    npm ci --no-audit --no-fund
+  else
+    echo "::error::Node mutation requires a dependency lockfile."
+    exit 1
+  fi
+)
 
 cat > "$TOOLS/package.json" <<'JSON'
 {

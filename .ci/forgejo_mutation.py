@@ -20,6 +20,8 @@ import subprocess
 import sys
 import tempfile
 
+from mutation_environment import proxy_environment
+
 from mutation_contract import (
     protect_config,
     select_engine,
@@ -219,6 +221,11 @@ def sandbox_command(root: Path, engine: str, base: str, head: str) -> list[str]:
         f"UV_CACHE_DIR={root / 'home' / 'uv-cache'}",
         f"GOCACHE={root / 'home' / 'go-build'}",
         f"GOMODCACHE={root / 'home' / 'go-mod'}",
+        *[
+            f"{key}={value}"
+            for key, value in proxy_environment(dict(os.environ)).items()
+        ],
+        "TZ=Europe/Paris",
         "UV_LINK_MODE=copy",
         "CI=true",
         f"MUTATION_BASE_SHA={base}",
