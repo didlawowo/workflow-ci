@@ -129,8 +129,10 @@ def _storage_plan(
 
 
 def _assert_plan_limits(plan) -> None:
-    assert 0 <= plan.hyper_power_w <= (
-        MAX_CHARGE_W if plan.should_charge else MAX_DISCHARGE_W
+    assert (
+        0
+        <= plan.hyper_power_w
+        <= (MAX_CHARGE_W if plan.should_charge else MAX_DISCHARGE_W)
     )
     assert 0 <= plan.solarflow_power_w <= SOLARFLOW_MAX_W
     assert plan.total_power_w <= plan.requested_power_w
@@ -162,9 +164,7 @@ async def _routing_invariants(optimizer, coordinator, rng: random.Random) -> Non
         assert result.power == surplus
         plan = _storage_plan(coordinator, result)
         _assert_plan_limits(plan)
-        assert plan.total_power_w == min(
-            surplus, MAX_CHARGE_W + SOLARFLOW_MAX_W
-        )
+        assert plan.total_power_w == min(surplus, MAX_CHARGE_W + SOLARFLOW_MAX_W)
 
     for _ in range(40):
         production = rng.randint(0, 180)
@@ -187,9 +187,7 @@ async def _routing_invariants(optimizer, coordinator, rng: random.Random) -> Non
         assert result.power == deficit
         plan = _storage_plan(coordinator, result)
         _assert_plan_limits(plan)
-        assert plan.total_power_w == min(
-            deficit, MAX_DISCHARGE_W + SOLARFLOW_MAX_W
-        )
+        assert plan.total_power_w == min(deficit, MAX_DISCHARGE_W + SOLARFLOW_MAX_W)
 
 
 async def _boundary_and_fail_safe(optimizer, coordinator, rng: random.Random) -> None:
@@ -410,9 +408,7 @@ async def _temporal_invariants(optimizer, coordinator, rng: random.Random) -> No
     assert result.power == consumption
     plan = _storage_plan(coordinator, result)
     _assert_plan_limits(plan)
-    assert plan.total_power_w == min(
-        consumption, MAX_DISCHARGE_W + SOLARFLOW_MAX_W
-    )
+    assert plan.total_power_w == min(consumption, MAX_DISCHARGE_W + SOLARFLOW_MAX_W)
 
 
 async def _exception_is_standby(optimizer) -> None:

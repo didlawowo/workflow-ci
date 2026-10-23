@@ -121,3 +121,73 @@ def test_checkout_retains_other_branch_commits_for_trusted_event_diffs(tmp_path)
     workspace = tmp_path / "workspace"
     assert git(workspace, "rev-parse", f"{event_base}^{{commit}}") == event_base
     assert git(workspace, "rev-parse", f"{head}^{{commit}}") == head
+
+
+def test_policy_integrity_checkouts_preserve_trusted_tree_with_orphans_on_both_sides(
+    tmp_path,
+):
+    import yaml
+
+    repo, _, base = source(tmp_path)
+    (repo / "app.py").write_text("value = 3\n")
+    git(repo, "add", "app.py")
+    git(repo, "commit", "-qm", "candidate also retains orphan")
+    head = git(repo, "rev-parse", "HEAD")
+    workspace = tmp_path / "workspace"
+    trusted = workspace / ".workflow-ci-policy"
+    helper = trusted / ".github/actions/checkout-source/checkout.sh"
+    helper.parent.mkdir(parents=True)
+    helper.write_bytes(SCRIPT.read_bytes())
+    (trusted / "keep").write_text("protected implementation")
+    workflow = yaml.safe_load(
+        (SCRIPT.parents[2] / "workflows/policy-integrity.yml").read_text()
+    )
+    steps = workflow["jobs"]["policy-integrity"]["steps"]
+    verification = next(
+        i
+        for i, step in enumerate(steps)
+        if step.get("name")
+        == "Verify trusted implementation before using its checkout helper"
+    )
+    assert verification < next(
+        i
+        for i, step in enumerate(steps)
+        if step.get("name") == "Checkout protected base"
+    )
+    for name, sha, target in [
+        ("Checkout protected base", base, ".policy-base"),
+        (
+            "Checkout untrusted candidate without executing it",
+            head,
+            ".policy-candidate",
+        ),
+    ]:
+        step = next(step for step in steps if step.get("name") == name)
+        env = {
+            **os.environ,
+            "GITHUB_WORKSPACE": str(workspace),
+            "RUNNER_TEMP": str(tmp_path / "runner-temp"),
+            "GITHUB_SERVER_URL": (tmp_path / "server").as_uri(),
+            "CHECKOUT_REPOSITORY": "owner/repo",
+            "CHECKOUT_REF": sha,
+            "CHECKOUT_TOKEN": "sentinel-credential",
+            "CHECKOUT_BASE_REF": "",
+            "CHECKOUT_HEAD_REF": "",
+        }
+        completed = subprocess.run(
+            ["bash", "-euo", "pipefail", "-c", step["run"]],
+            cwd=workspace,
+            env=env,
+            capture_output=True,
+            text=True,
+        )
+        assert completed.returncode == 0, completed.stdout + completed.stderr
+        assert git(workspace / target, "rev-parse", "HEAD") == sha
+        assert "160000 " in git(workspace / target, "ls-files", "--stage")
+        assert (
+            "sentinel-credential"
+            not in (workspace / target / ".git/config").read_text()
+        )
+        assert (trusted / "keep").read_text() == "protected implementation"
+    assert (workspace / ".policy-base/app.py").read_text() == "value = 2\n"
+    assert (workspace / ".policy-candidate/app.py").read_text() == "value = 3\n"

@@ -18,22 +18,27 @@ on:
         required: false
         type: string
         default: "."
+      mutation-shards:
+        description: "Use a protected campaign planner and 2 to 16 bounded workers"
+        required: false
+        type: number
+        default: 1
     outputs:
       required:
         description: "Whether mutation testing is mandatory for this PR"
-        value: ${{ jobs.mutation-run.outputs.required }}
+        value: ${{ jobs.campaign.outputs.required || jobs.mutation-run.outputs.required }}
       depth:
         description: "Mutation execution depth: none, medium or high"
-        value: ${{ jobs.mutation-run.outputs.depth }}
+        value: ${{ jobs.campaign.outputs.depth || jobs.mutation-run.outputs.depth }}
       artifact-name:
         description: "Trusted scoped mutation evidence artifact"
         value: ${{ jobs.mutation-verify.outputs.artifact-name }}
       report-file:
         description: "Mutation report filename"
-        value: ${{ jobs.mutation-verify.outputs.report-file }}
+        value: ${{ jobs.campaign.outputs.report-file || jobs.mutation-verify.outputs.report-file }}
       report-b64:
         description: "Base64 trusted scoped mutation report"
-        value: ${{ jobs.mutation-verify.outputs.report-b64 }}
+        value: ${{ jobs.campaign.outputs.report-b64 || jobs.mutation-verify.outputs.report-b64 }}
   pull_request:
     types: [opened, synchronize, reopened, labeled, unlabeled, edited]
 
@@ -41,8 +46,21 @@ concurrency:
   group: mutation-policy-${{ github.repository }}-${{ github.event.pull_request.number || github.run_id }}-${{ inputs.scope-key || 'default' }}
   cancel-in-progress: true
 jobs:
+  campaign:
+    if: github.event_name == 'pull_request' && inputs.mutation-shards > 1
+    uses: $/.github/workflows/mutation-campaign.yml
+    with:
+      runner: ${{ inputs.trusted-runner || vars.RUNNER || format('arc-runner-{0}', github.event.repository.name) }}
+      working-directory: ${{ inputs.working-directory || '.' }}
+      shards: ${{ inputs.mutation-shards }}
+    permissions:
+      contents: read
+      issues: read
+      pull-requests: read
+      actions: read
+
   mutation-run:
-    if: github.event_name == 'pull_request'
+    if: github.event_name == 'pull_request' && inputs.mutation-shards <= 1
     # Use a dedicated execution runner when configured; otherwise inherit
     # the repository runner. Keep PR execution read-only and isolated.
     permissions:
@@ -57,8 +75,14 @@ jobs:
       depth: ${{ steps.policy.outputs.depth }}
       evidence-file: ${{ steps.inline-evidence.outputs.file }}
       evidence-b64: ${{ steps.inline-evidence.outputs.evidence-b64 }}
-      results-gzip-b64: ${{ steps.inline-evidence.outputs.results-gzip-b64 }}
     steps:
+      - name: Validate execution configuration
+        shell: bash
+        env:
+          SHARDS: ${{ inputs.mutation-shards }}
+        run: |
+          set -euo pipefail
+          test "${SHARDS:-1}" = 1
       - name: Fetch central workflow implementation without submodule traversal
         env:
           WORKFLOW_REPOSITORY: ${{ job.workflow_repository }}
@@ -229,22 +253,42 @@ jobs:
           MUTATION_BASE_SHA: ${{ github.event.pull_request.base.sha }}
           MUTATION_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           MUTATION_WORKING_DIRECTORY: ${{ inputs.working-directory }}
+          CONSUMER_REPOSITORY: ${{ github.repository }}
+          CENTRAL_REPOSITORY: ${{ job.workflow_repository }}
         run: |
           set -euo pipefail
+          PR_ROOT="$(cd "$GITHUB_WORKSPACE/pr" && pwd -P)"
+          REQUESTED_DIRECTORY="${MUTATION_WORKING_DIRECTORY:-.}"
+          if [[ "$REQUESTED_DIRECTORY" == /* ]]; then
+            echo "::error::Mutation working-directory must be relative to the repository root."
+            exit 1
+          fi
+          PROJECT_ROOT="$(cd "$PR_ROOT/$REQUESTED_DIRECTORY" && pwd -P)"
+          case "$PROJECT_ROOT" in
+            "$PR_ROOT") PROJECT_DIRECTORY="." ;;
+            "$PR_ROOT"/*) PROJECT_DIRECTORY="${PROJECT_ROOT#"$PR_ROOT"/}" ;;
+            *)
+              echo "::error::Mutation working-directory escapes the pull request checkout."
+              exit 1
+              ;;
+          esac
+
           CUSTOM="$GITHUB_WORKSPACE/.policy/.ci/mutation.sh"
-          if [[ -f "$CUSTOM" ]]; then
+          # Self-tests must exercise the central implementation under review.
+          # External consumers continue to execute only their protected runner.
+          if [[ "${CONSUMER_REPOSITORY:-consumer}" != "${CENTRAL_REPOSITORY:-central}" && -f "$CUSTOM" ]]; then
             if ! grep -Eiq 'mutmut[[:space:]]+run|gremlins[[:space:]]+unleash|stryker([^[:alnum:]]+[^[:space:]]+)*[[:space:]]+run|cargo[[:space:]]+mutants|pitest|infection' "$CUSTOM"; then
               echo "::error::Protected .ci/mutation.sh does not invoke a supported real mutation engine."
               exit 1
             fi
 
             if grep -Eiq 'mutmut-cicd-stats\.json|mutation-no-targets\.json|\.quality/gremlins\.json' "$CUSTOM"; then
-              PR_ROOT="$(realpath -e "$GITHUB_WORKSPACE/pr")"
+              PR_ROOT="$(cd "$GITHUB_WORKSPACE/pr" && pwd -P)"
               TRUSTED_DIR="$GITHUB_WORKSPACE/pr/.workflow-ci-trusted-runner"
 
               rm -rf -- "$TRUSTED_DIR"
               mkdir -m 700 -- "$TRUSTED_DIR"
-              TRUSTED_REAL="$(realpath -e "$TRUSTED_DIR")"
+              TRUSTED_REAL="$(cd "$TRUSTED_DIR" && pwd -P)"
               case "$TRUSTED_REAL" in
                 "$PR_ROOT"/*) ;;
                 *)
@@ -263,33 +307,19 @@ jobs:
                 echo "::error::Trusted mutation runner materialization is not a regular protected file."
                 exit 1
               fi
-              cmp --silent "$CUSTOM" "$MATERIALIZED" || {
+              cmp -s "$CUSTOM" "$MATERIALIZED" || {
                 echo "::error::Trusted mutation runner changed while materializing it into the PR worktree."
                 exit 1
               }
 
               echo "path=$MATERIALIZED" >> "$GITHUB_OUTPUT"
               echo "source=consumer-base" >> "$GITHUB_OUTPUT"
+              echo "working-directory=$PROJECT_DIRECTORY" >> "$GITHUB_OUTPUT"
               exit 0
             fi
             echo "::warning::Protected .ci/mutation.sh runs a mutation engine but publishes no supported trusted evidence; falling back to the central runner."
           fi
 
-          PR_ROOT="$(realpath -e "$GITHUB_WORKSPACE/pr")"
-          REQUESTED_DIRECTORY="${MUTATION_WORKING_DIRECTORY:-.}"
-          if [[ "$REQUESTED_DIRECTORY" == /* ]]; then
-            echo "::error::Mutation working-directory must be relative to the repository root."
-            exit 1
-          fi
-          PROJECT_ROOT="$(realpath -e "$PR_ROOT/$REQUESTED_DIRECTORY")"
-          case "$PROJECT_ROOT" in
-            "$PR_ROOT") PROJECT_DIRECTORY="." ;;
-            "$PR_ROOT"/*) PROJECT_DIRECTORY="${PROJECT_ROOT#"$PR_ROOT"/}" ;;
-            *)
-              echo "::error::Mutation working-directory escapes the pull request checkout."
-              exit 1
-              ;;
-          esac
 
           CHANGED_GO=()
           while IFS= read -r -d '' path; do
@@ -319,7 +349,7 @@ jobs:
               echo "source=workflow-ci-go"
               echo "working-directory=$PROJECT_DIRECTORY"
             } >> "$GITHUB_OUTPUT"
-          elif [[ -f "$GITHUB_WORKSPACE/pr/pyproject.toml" || -f "$GITHUB_WORKSPACE/pr/setup.cfg" ]] || find "$GITHUB_WORKSPACE/pr" -type f -name '*.py' -not -path '*/.venv/*' -print -quit | grep -q .; then
+          elif [[ -f "$PROJECT_ROOT/pyproject.toml" || -f "$PROJECT_ROOT/setup.cfg" ]] || { [[ ! -f "$PROJECT_ROOT/package.json" ]] && find "$PROJECT_ROOT" -type f -name '*.py' -not -path '*/.venv/*' -print -quit | grep -q .; }; then
             if [[ "${#CHANGED_GO[@]}" -gt 0 ]]; then
               echo "::error::The selected mutation working-directory '$PROJECT_DIRECTORY' has no go.mod for changed Go production files."
               exit 1
@@ -327,7 +357,13 @@ jobs:
             {
               echo "path=$GITHUB_WORKSPACE/.workflow-ci/.ci/mutation.sh"
               echo "source=workflow-ci-python"
-              echo "working-directory=."
+              echo "working-directory=$PROJECT_DIRECTORY"
+            } >> "$GITHUB_OUTPUT"
+          elif [[ -f "$PROJECT_ROOT/package.json" ]]; then
+            {
+              echo "path=$GITHUB_WORKSPACE/.workflow-ci/.ci/mutation-node.sh"
+              echo "source=workflow-ci-node"
+              echo "working-directory=$PROJECT_DIRECTORY"
             } >> "$GITHUB_OUTPUT"
           else
             echo "::error::No central mutation runner is available for this repository type."
@@ -338,9 +374,11 @@ jobs:
       - name: Verify mutation configuration is unchanged
         if: steps.policy.outputs.required == 'true'
         shell: bash
+        env:
+          PROJECT_DIRECTORY: ${{ inputs.working-directory || '.' }}
         run: |
           set -euo pipefail
-          uv run --no-project --python 3.12 python - "$GITHUB_WORKSPACE/.policy" "$GITHUB_WORKSPACE/pr" <<'PY'
+          uv run --no-project --python 3.12 python - "$GITHUB_WORKSPACE/.policy/$PROJECT_DIRECTORY" "$GITHUB_WORKSPACE/pr/$PROJECT_DIRECTORY" <<'PY'
           import configparser
           import json
           import sys
@@ -389,10 +427,18 @@ jobs:
           go-version-file: pr/${{ steps.runner.outputs.working-directory }}/go.mod
           cache: false
 
+      - name: Setup Node for central Stryker runner
+        if: steps.policy.outputs.required == 'true' && steps.runner.outputs.source == 'workflow-ci-node'
+        uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+
       - name: Prepare isolated Python mutation environment
         id: mutation-python
         if: steps.policy.outputs.required == 'true'
         shell: bash
+        env:
+          PROJECT_DIRECTORY: ${{ inputs.working-directory || '.' }}
         run: |
           set -euo pipefail
           SCRIPT="${{ steps.runner.outputs.path }}"
@@ -401,7 +447,7 @@ jobs:
             PYTHON_VERSION="${MUTATION_PYTHON_VERSION:-3.12}"
             # Keep the isolated mutmut interpreter aligned with the consumer.
             # Read only a validated Python minor; never execute PR file content.
-            PROJECT_VERSION_FILE="$GITHUB_WORKSPACE/pr/${{ inputs.working-directory }}/.python-version"
+            PROJECT_VERSION_FILE="$GITHUB_WORKSPACE/pr/$PROJECT_DIRECTORY/.python-version"
             if [[ -f "$PROJECT_VERSION_FILE" ]]; then
               IFS= read -r REQUESTED_VERSION < "$PROJECT_VERSION_FILE" || true
               case "$REQUESTED_VERSION" in
@@ -459,7 +505,7 @@ jobs:
 
           # No forge token, persistent HOME or shared dependency cache is
           # exposed to PR code; only fresh runner-local scratch namespaces are passed.
-          env -i \
+          env \
             PATH="$MUTATION_PATH" \
             HOME="$ISOLATED_HOME" \
             UV_CACHE_DIR="$ISOLATED_UV_CACHE" \
@@ -472,11 +518,12 @@ jobs:
             MUTATION_BASE_SHA="$MUTATION_BASE_SHA" \
             MUTATION_HEAD_SHA="$MUTATION_HEAD_SHA" \
             MUTATION_WORKING_DIRECTORY="$MUTATION_WORKING_DIRECTORY" \
+            python3 "$GITHUB_WORKSPACE/.workflow-ci/.ci/mutation_environment.py" -- \
             bash "${{ steps.runner.outputs.path }}"
       - name: Capture mutmut diagnostics
         if: always() && steps.policy.outputs.required == 'true' && steps.mutation-python.outputs.venv != ''
         shell: bash
-        working-directory: pr
+        working-directory: pr/${{ steps.runner.outputs.source == 'workflow-ci-python' && steps.runner.outputs.working-directory || '.' }}
         env:
           MUTATION_VENV: ${{ steps.mutation-python.outputs.venv }}
         run: |
@@ -499,18 +546,21 @@ jobs:
         id: evidence
         if: always() && steps.policy.outputs.required == 'true'
         shell: bash
+        env:
+          SOURCE: ${{ steps.runner.outputs.source }}
+          PROJECT_DIRECTORY: ${{ steps.runner.outputs.working-directory }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           set -euo pipefail
-          if [[ -f pr/mutants/mutmut-cicd-stats.json ]]; then
-            echo "path=pr/mutants/mutmut-cicd-stats.json" >> "$GITHUB_OUTPUT"
-          elif [[ -f pr/.quality/mutation-no-targets.json ]]; then
-            echo "path=pr/.quality/mutation-no-targets.json" >> "$GITHUB_OUTPUT"
-          elif [[ -f pr/.quality/gremlins.json ]]; then
-            echo "path=pr/.quality/gremlins.json" >> "$GITHUB_OUTPUT"
-          else
-            echo "::error::Mandatory mutation run produced no supported mutation evidence."
-            exit 1
+          ROOT="pr"
+          if [[ "$SOURCE" == workflow-ci-python ]]; then
+            ROOT="pr/${PROJECT_DIRECTORY:-.}"
           fi
+          uv run --no-project --python 3.12 python .workflow-ci/.ci/mutation_capture.py \
+            --root "$ROOT" --base "$BASE_SHA" --head "$HEAD_SHA" \
+            --output "${RUNNER_TEMP}/mutation-captured.json"
+          echo "path=${RUNNER_TEMP}/mutation-captured.json" >> "$GITHUB_OUTPUT"
 
       - name: Expose raw mutation evidence
         id: inline-evidence
@@ -519,26 +569,15 @@ jobs:
         run: |
           set -euo pipefail
           EVIDENCE="${{ steps.evidence.outputs.path }}"
-          RESULTS="pr/.quality/mutmut-results.txt"
           test -s "$EVIDENCE"
-          FILE="$(basename "$EVIDENCE")"
-          EVIDENCE_B64="$(base64 -w0 "$EVIDENCE")"
+          FILE="mutation-evidence.json"
+          EVIDENCE_B64="$(gzip -c "$EVIDENCE" | base64 -w0)"
           if [[ "${#EVIDENCE_B64}" -gt 700000 ]]; then
             echo "::error::Mutation evidence is too large for trusted job outputs."
             exit 1
           fi
           echo "file=$FILE" >> "$GITHUB_OUTPUT"
           echo "evidence-b64=$EVIDENCE_B64" >> "$GITHUB_OUTPUT"
-          if [[ -s "$RESULTS" ]]; then
-            RESULTS_GZIP_B64="$(gzip -c "$RESULTS" | base64 -w0)"
-            if [[ "${#RESULTS_GZIP_B64}" -gt 300000 ]]; then
-              echo "::error::Compressed mutation diagnostics are too large for trusted job outputs."
-              exit 1
-            fi
-            echo "results-gzip-b64=$RESULTS_GZIP_B64" >> "$GITHUB_OUTPUT"
-          else
-            echo "results-gzip-b64=" >> "$GITHUB_OUTPUT"
-          fi
 
       - name: Upload untrusted mutation evidence
         if: always() && steps.policy.outputs.required == 'true' && steps.evidence.outputs.path != ''
@@ -561,7 +600,7 @@ jobs:
 
   mutation-verify:
     name: Mutation policy gate
-    if: always() && github.event_name == 'pull_request'
+    if: always() && github.event_name == 'pull_request' && inputs.mutation-shards <= 1
     needs: [mutation-run]
     permissions:
       contents: read
@@ -750,32 +789,19 @@ jobs:
       - name: Materialize mutation evidence from job outputs
         if: steps.policy.outputs.required == 'true'
         shell: bash
-        env:
-          EVIDENCE_FILE: ${{ needs.mutation-run.outputs.evidence-file }}
         run: |
           set -euo pipefail
-          test -n "$EVIDENCE_FILE"
           mkdir -p .mutation-evidence
+          OUTPUTS_FILE="${RUNNER_TEMP:-/tmp}/mutation-outputs-${GITHUB_RUN_ID}.json"
+          trap 'rm -f "$OUTPUTS_FILE"' EXIT
+          # JSON escapes embedded newlines: an untrusted output cannot terminate
+          # this quoted heredoc and become shell code. Large data stays off env.
+          cat > "$OUTPUTS_FILE" <<'JSON_MUTATION_OUTPUTS'
+          ${{ toJSON(needs.mutation-run.outputs) }}
+          JSON_MUTATION_OUTPUTS
+          uv run --no-project --python 3.12 python .workflow-ci/.ci/mutation_capture.py decode \
+            --input "$OUTPUTS_FILE" --output .mutation-evidence/mutation-evidence.json
 
-          EVIDENCE_B64_FILE="${RUNNER_TEMP:-/tmp}/mutation-evidence-${GITHUB_RUN_ID}.b64"
-          RESULTS_B64_FILE="${RUNNER_TEMP:-/tmp}/mutation-results-${GITHUB_RUN_ID}.b64"
-          trap 'rm -f "$EVIDENCE_B64_FILE" "$RESULTS_B64_FILE"' EXIT
-
-          cat > "$EVIDENCE_B64_FILE" <<'B64_EVIDENCE'
-          ${{ needs.mutation-run.outputs.evidence-b64 }}
-          B64_EVIDENCE
-          if ! grep -q '[^[:space:]]' "$EVIDENCE_B64_FILE"; then
-            echo "::error::Mandatory mutation evidence output is empty."
-            exit 1
-          fi
-          base64 -d "$EVIDENCE_B64_FILE" > ".mutation-evidence/$EVIDENCE_FILE"
-
-          cat > "$RESULTS_B64_FILE" <<'B64_RESULTS'
-          ${{ needs.mutation-run.outputs.results-gzip-b64 }}
-          B64_RESULTS
-          if grep -q '[^[:space:]]' "$RESULTS_B64_FILE"; then
-            base64 -d "$RESULTS_B64_FILE" | gzip -dc > .mutation-evidence/mutmut-results.txt
-          fi
       - name: Validate mutation evidence for changed Python functions
         id: validate
         if: steps.policy.outputs.required == 'true'
@@ -783,388 +809,18 @@ jobs:
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PROJECT_DIRECTORY: ${{ inputs.working-directory || '.' }}
+          DEPTH: ${{ steps.policy.outputs.depth }}
         run: |
           set -euo pipefail
-          REPORT="$(find .mutation-evidence -type f -name 'mutmut-cicd-stats.json' -print -quit)"
-          RESULTS="$(find .mutation-evidence -type f -name 'mutmut-results.txt' -print -quit)"
-
-          if [[ -z "$REPORT" ]]; then
-            # Non-mutmut engines still use aggregate engine-native validation.
-            REPORT="$(find .mutation-evidence -type f -name '*.json' -print -quit)"
-          fi
-          if [[ -z "$REPORT" ]]; then
-            echo "::error::No mutation evidence artifact was downloaded."
-            exit 1
-          fi
-
-          uv run --no-project --python 3.12 python - "$REPORT" "$RESULTS" "$GITHUB_WORKSPACE/pr" "$GITHUB_WORKSPACE/.workflow-ci" "$BASE_SHA" "$HEAD_SHA" "$GITHUB_OUTPUT" <<'PY'
-          import ast
-          import configparser
-          import json
-          import re
-          import subprocess
-          import sys
-          from pathlib import Path
-
-          report_path = Path(sys.argv[1])
-          results_path = Path(sys.argv[2]) if sys.argv[2] else None
-          repo = Path(sys.argv[3])
-          policy_root = Path(sys.argv[4])
-          base = sys.argv[5]
-          head = sys.argv[6]
-          output_path = Path(sys.argv[7])
-
-          data = json.loads(report_path.read_text(encoding="utf-8"))
-          if not isinstance(data, dict):
-              raise SystemExit("mutation evidence must be a JSON object")
-
-          def value(*aliases):
-              candidates = [data]
-              for key in ("stats", "summary", "results", "mutations"):
-                  nested = data.get(key)
-                  if isinstance(nested, dict):
-                      candidates.append(nested)
-              for candidate in candidates:
-                  for alias in aliases:
-                      current = candidate.get(alias)
-                      if isinstance(current, (int, float)):
-                          return int(current)
-              return None
-
-          killed = value("killed", "killed_mutants", "mutants_killed")
-          survived = value(
-              "survived", "surviving", "survived_mutants",
-              "mutants_survived", "mutants_lived",
-          )
-          timeouts = value("timeouts", "timeout", "timed_out") or 0
-          suspicious = value("suspicious", "suspicious_mutants") or 0
-          total = value("total", "total_mutants", "mutants", "mutants_total")
-
-          if killed is None or survived is None:
-              raise SystemExit("mutation evidence is missing killed/survived counters")
-          if total is None:
-              total = killed + survived + timeouts + suspicious
-
-          scope_metadata = data.get("scope")
-          no_targets = bool(
-              isinstance(scope_metadata, dict)
-              and scope_metadata.get("no_targets") is True
-          )
-          if no_targets:
-              if (
-                  scope_metadata.get("base_sha") != base
-                  or scope_metadata.get("head_sha") != head
-              ):
-                  raise SystemExit(
-                      "mutation no-target evidence does not match the current base/head SHA"
-                  )
-          elif total <= 0:
-              raise SystemExit("mutation evidence contains no measured mutants")
-
-          # Engines without per-mutant locations keep the conservative aggregate gate.
-          if not results_path or not results_path.is_file():
-              if survived or timeouts or suspicious:
-                  raise SystemExit(
-                      f"mutation gate failed: survived={survived}, "
-                      f"timeouts={timeouts}, suspicious={suspicious}"
-                  )
-              scoped_path = report_path
-              print(f"mutation gate passed: {killed}/{total} mutants killed")
-          else:
-              status_re = re.compile(r"^\s*(\S+):\s+([a-z_]+)\s*$")
-              statuses = {}
-              for raw in results_path.read_text(encoding="utf-8").splitlines():
-                  match = status_re.match(raw)
-                  if match:
-                      statuses[match.group(1)] = match.group(2)
-
-              diff = subprocess.run(
-                  [
-                      "git", "-C", str(repo), "diff", "--unified=0", "--no-color",
-                      f"{base}...{head}", "--", "*.py",
-                  ],
-                  check=True,
-                  capture_output=True,
-                  text=True,
-              ).stdout
-
-              changed_lines = {}
-              current_path = None
-              for raw in diff.splitlines():
-                  if raw.startswith("+++ b/"):
-                      current_path = raw[6:]
-                      changed_lines.setdefault(current_path, set())
-                      continue
-                  if raw.startswith("+++ /dev/null"):
-                      current_path = None
-                      continue
-                  if not raw.startswith("@@") or current_path is None:
-                      continue
-                  match = re.search(r"\+(\d+)(?:,(\d+))?", raw)
-                  if not match:
-                      continue
-                  start = int(match.group(1))
-                  count = int(match.group(2) or "1")
-                  if count:
-                      changed_lines[current_path].update(
-                          range(start, start + count)
-                      )
-                  else:
-                      # Deletion-only hunks have no new-side lines. Mark both
-                      # adjacent surviving lines so deletions inside a function
-                      # stay inside the trusted changed-function scope.
-                      changed_lines[current_path].update(
-                          {max(start - 1, 1), max(start, 1)}
-                      )
-
-              # Reject source-level mutation suppressions in changed code.
-              for raw in diff.splitlines():
-                  if (
-                      raw.startswith("+")
-                      and not raw.startswith("+++")
-                      and "pragma: no mutate" in raw
-                  ):
-                      raise SystemExit(
-                          "mutation gate failed: changed mutation-target code adds "
-                          "a '# pragma: no mutate' suppression"
-                      )
-
-              # source_paths is part of the protected policy. The PR cannot shrink
-              # this scope because the mutation config is compared before execution.
-              source_paths = []
-              trusted_pyproject = policy_root / "pyproject.toml"
-              if trusted_pyproject.is_file():
-                  import tomllib
-                  trusted_config = tomllib.loads(
-                      trusted_pyproject.read_text(encoding="utf-8")
-                  )
-                  configured = (
-                      trusted_config.get("tool", {})
-                      .get("mutmut", {})
-                      .get("source_paths", [])
-                  )
-                  if isinstance(configured, str):
-                      source_paths = [configured]
-                  elif isinstance(configured, list):
-                      source_paths = [str(value) for value in configured]
-
-              trusted_setup_cfg = policy_root / "setup.cfg"
-              if not source_paths and trusted_setup_cfg.is_file():
-                  parser = configparser.ConfigParser()
-                  parser.read(trusted_setup_cfg, encoding="utf-8")
-                  if parser.has_option("mutmut", "source_paths"):
-                      source_paths = [
-                          item.strip()
-                          for item in re.split(
-                              r"[\n,]",
-                              parser.get("mutmut", "source_paths"),
-                          )
-                          if item.strip()
-                      ]
-
-              def in_trusted_source_path(relative):
-                  candidate = Path(relative)
-                  if not source_paths:
-                      parts = candidate.parts
-                      name = candidate.name
-                      if "tests" in parts or name.startswith("test_") or name.endswith("_test.py"):
-                          return False
-                      return True
-                  for raw in source_paths:
-                      configured = Path(raw)
-                      if candidate == configured:
-                          return True
-                      if (
-                          configured.suffix == ""
-                          and candidate.is_relative_to(configured)
-                      ):
-                          return True
-                  return False
-
-              # The classifier is the single source of truth for what counts
-              # as production code: test files are never in mutation scope, so
-              # demanding generated mutants for their changed functions makes
-              # the gate impossible to pass.
-              import importlib.util
-
-              _policy_spec = importlib.util.spec_from_file_location(
-                  "workflow_ci_mutation_policy",
-                  policy_root / ".github" / "scripts" / "mutation_policy.py",
-              )
-              _policy_module = importlib.util.module_from_spec(_policy_spec)
-              _policy_spec.loader.exec_module(_policy_module)
-
-              def is_production_python(relative):
-                  return _policy_module._is_python_production_path(relative)
-
-              _scope_spec = importlib.util.spec_from_file_location(
-                  "workflow_ci_mutation_scope", policy_root / ".ci" / "mutation_scope.py"
-              )
-              _scope_module = importlib.util.module_from_spec(_scope_spec)
-              _scope_spec.loader.exec_module(_scope_module)
-
-              changed_functions = {}
-              for relative, lines in changed_lines.items():
-                  path = repo / relative
-                  if (
-                      not lines
-                      or not path.is_file()
-                      or path.suffix != ".py"
-                      or not in_trusted_source_path(relative)
-                      or not is_production_python(relative)
-                  ):
-                      continue
-                  try:
-                      tree = ast.parse(path.read_text(encoding="utf-8"))
-                  except (SyntaxError, UnicodeDecodeError):
-                      continue
-                  if _scope_module.syntax_unchanged(repo, base, relative, tree):
-                      continue
-                  parts = list(Path(relative).with_suffix("").parts)
-                  if parts and parts[0] == "src":
-                      parts = parts[1:]
-                  module = ".".join(parts)
-                  names = set()
-                  for node in ast.walk(tree):
-                      if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                          continue
-                      end = getattr(node, "end_lineno", node.lineno)
-                      if any(node.lineno <= line <= end for line in lines):
-                          names.add(node.name)
-                  if names:
-                      changed_functions[module] = names
-
-              def mutant_function(mutant_id):
-                  if ".x_" not in mutant_id or "__mutmut_" not in mutant_id:
-                      return None, None
-                  module, rest = mutant_id.split(".x_", 1)
-                  name = rest.split("__mutmut_", 1)[0]
-                  return module, name
-
-              scoped = {}
-              for mutant_id, status in statuses.items():
-                  module, generated_name = mutant_function(mutant_id)
-                  names = changed_functions.get(module or "", set())
-                  if not generated_name or not names:
-                      continue
-                  if any(
-                      generated_name == name or generated_name.endswith("__" + name)
-                      for name in names
-                  ):
-                      scoped[mutant_id] = status
-
-              observed_functions = {}
-              for mutant_id in statuses:
-                  module, generated_name = mutant_function(mutant_id)
-                  if not module or not generated_name:
-                      continue
-                  observed_functions.setdefault(module, set()).add(generated_name)
-
-              if no_targets and changed_functions:
-                  described = ", ".join(
-                      f"{module}={sorted(names)}"
-                      for module, names in sorted(changed_functions.items())
-                  )
-                  raise SystemExit(
-                      "mutation gate failed: no-target evidence contradicts changed "
-                      f"mutation functions: {described}"
-                  )
-              if no_targets:
-                  print(
-                      "::notice::Exact PR delta contains no changed functions in trusted "
-                      "mutation source_paths; engine execution was correctly skipped."
-                  )
-
-              missing_functions = []
-              for module, names in changed_functions.items():
-                  generated = observed_functions.get(module, set())
-                  for name in names:
-                      # main() is orchestration/CLI glue and may be intentionally
-                      # outside unit-level mutation scope. All other changed
-                      # functions in trusted source_paths must produce mutants.
-                      if name == "main":
-                          continue
-                      if not any(
-                          item == name or item.endswith("__" + name)
-                          for item in generated
-                      ):
-                          missing_functions.append(f"{module}.{name}")
-
-              if missing_functions:
-                  raise SystemExit(
-                      "mutation gate failed: changed functions produced no mutation "
-                      "evidence (not exercised or excluded): "
-                      + ", ".join(sorted(missing_functions))
-                  )
-
-              scoped_killed = sum(status == "killed" for status in scoped.values())
-              scoped_survived = sum(status == "survived" for status in scoped.values())
-              scoped_timeout = sum(status in {"timeout", "timed_out"} for status in scoped.values())
-              scoped_suspicious = sum(status == "suspicious" for status in scoped.values())
-              scoped_other = [
-                  mutant_id
-                  for mutant_id, status in scoped.items()
-                  if status not in {"killed", "survived", "timeout", "timed_out", "suspicious"}
-              ]
-
-              if scoped:
-                  print(
-                      "changed-function mutation scope: "
-                      + ", ".join(
-                          f"{module}={sorted(names)}"
-                          for module, names in sorted(changed_functions.items())
-                      )
-                  )
-                  if scoped_survived or scoped_timeout or scoped_suspicious or scoped_other:
-                      survivors = [
-                          mutant_id
-                          for mutant_id, status in scoped.items()
-                          if status != "killed"
-                      ]
-                      preview = "\n".join(f"  - {item}" for item in survivors[:40])
-                      raise SystemExit(
-                          "mutation gate failed for changed functions: "
-                          f"killed={scoped_killed}, survived={scoped_survived}, "
-                          f"timeouts={scoped_timeout}, suspicious={scoped_suspicious}, "
-                          f"other={len(scoped_other)}\n{preview}"
-                      )
-                  print(
-                      f"mutation gate passed for changed functions: "
-                      f"{scoped_killed}/{len(scoped)} mutants killed"
-                  )
-              else:
-                  print(
-                      "::notice::No covered mutation targets were found in changed "
-                      "Python functions; aggregate legacy survivors do not block this PR."
-                  )
-
-              scoped_payload = {
-                  "stats": {
-                      "killed": scoped_killed,
-                      "survived": scoped_survived,
-                      "timeouts": scoped_timeout,
-                      "suspicious": scoped_suspicious,
-                      "total": len(scoped),
-                  },
-                  "scope": {
-                      "base_sha": base,
-                      "head_sha": head,
-                      "no_targets": no_targets,
-                      "changed_functions": {
-                          module: sorted(names)
-                          for module, names in sorted(changed_functions.items())
-                      },
-                  },
-              }
-              scoped_path = Path(".mutation-evidence/scoped-mutation.json")
-              scoped_path.write_text(
-                  json.dumps(scoped_payload, indent=2, sort_keys=True) + "\n",
-                  encoding="utf-8",
-              )
-
-          with output_path.open("a", encoding="utf-8") as handle:
-              handle.write(f"path={scoped_path}\n")
-          PY
+          POLICY_ROOT="${WORKFLOW_CI_ROOT:-$GITHUB_WORKSPACE/.workflow-ci}"
+          REPORT="$(find .mutation-evidence -type f -name '*.json' -print -quit)"
+          test -n "$REPORT"
+          uv run --no-project --python 3.12 python "$POLICY_ROOT/.ci/mutation_evidence.py" \
+            --repo "$GITHUB_WORKSPACE/pr" --trusted "$GITHUB_WORKSPACE/.policy" \
+            --base "$BASE_SHA" --head "$HEAD_SHA" \
+            --directory "${PROJECT_DIRECTORY:-.}" --depth "${DEPTH:-medium}" \
+            --evidence "$REPORT" --output .mutation-evidence/scoped-mutation.json
 
       - name: Upload scoped mutation evidence
         if: always() && steps.policy.outputs.required == 'true' && steps.validate.outcome == 'success'

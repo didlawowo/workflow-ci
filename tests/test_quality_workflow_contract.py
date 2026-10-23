@@ -173,12 +173,10 @@ def test_central_go_mutation_runner_is_pinned_and_strict():
 
 def test_mutation_policy_requires_machine_readable_evidence_and_zero_survivors():
     root = Path(__file__).resolve().parents[1]
-    content = (root / ".github" / "workflows" / "mutation-policy.yml").read_text()
-
-    assert "Mandatory mutation run produced no supported mutation evidence" in content
-    assert "mutation evidence is missing killed/survived counters" in content
-    assert "mutation evidence contains no measured mutants" in content
-    assert "if survived or timeouts or suspicious:" in content
+    content = (root / ".github/workflows/mutation-policy.yml").read_text()
+    assert ".ci/mutation_capture.py" in content
+    assert ".ci/mutation_evidence.py" in content
+    assert '--trusted "$GITHUB_WORKSPACE/.policy"' in content
 
 
 def test_trusted_quality_enforces_ruff_and_sonarqube_quality_gate():
@@ -251,25 +249,17 @@ def test_language_templates_make_quality_failures_blocking():
 
 def test_mutation_verify_is_read_only_and_scoped_to_changed_functions():
     root = Path(__file__).resolve().parents[1]
-    content = (root / ".github" / "workflows" / "mutation-policy.yml").read_text()
-
+    content = (root / ".github/workflows/mutation-policy.yml").read_text()
     verify = content.split("  mutation-verify:", 1)[1]
     assert "issues: write" not in verify
     assert "pull-requests: write" not in verify
+    assert "inputs.trusted-runner || vars.RUNNER" in verify
+    assert ".ci/mutation_evidence.py" in verify
     assert (
-        "inputs.trusted-runner || vars.RUNNER || format('arc-runner-{0}', github.event.repository.name)"
-        in verify
+        '--repo "$GITHUB_WORKSPACE/pr" --trusted "$GITHUB_WORKSPACE/.policy"' in verify
     )
-    assert 'git", "-C", str(repo), "diff", "--unified=0"' in verify
-    assert "mutation gate failed for changed functions" in verify
     assert "scoped-mutation-evidence-" in verify
     assert "quality-report@main" not in verify
-    assert (
-        '"$GITHUB_WORKSPACE/pr" "$GITHUB_WORKSPACE/.workflow-ci" "$BASE_SHA"' in verify
-    )
-    assert (
-        '"$GITHUB_WORKSPACE/pr" "$GITHUB_WORKSPACE/.policy" "$BASE_SHA"' not in verify
-    )
 
 
 def test_python_security_action_propagates_requested_check_failures():
@@ -310,13 +300,11 @@ def test_mutation_policy_locks_engine_configuration_to_protected_base():
 
 def test_mutation_policy_rejects_changed_functions_without_mutants():
     root = Path(__file__).resolve().parents[1]
-    content = (root / ".github" / "workflows" / "mutation-policy.yml").read_text()
-
-    assert "source_paths is part of the protected policy" in content
-    assert "in_trusted_source_path" in content
-    assert "changed functions produced no mutation " in content
-    assert "evidence (not exercised or excluded)" in content
-    assert "pragma: no mutate" in content
+    content = (root / ".github/workflows/mutation-policy.yml").read_text()
+    assert ".ci/mutation_evidence.py" in content
+    verifier = (root / ".ci/mutation_evidence.py").read_text()
+    assert "source_root=trusted_project" in verifier
+    assert "protect_config(trusted_project, candidate_project, base, head)" in verifier
 
 
 def test_mutation_policy_uses_uv_without_system_venv_dependency():
@@ -383,21 +371,20 @@ def test_issue_59_mutation_policy_never_uses_system_python():
 
 def test_issue_59_deletion_only_hunks_remain_in_mutation_scope():
     root = Path(__file__).resolve().parents[1]
-    scope = (root / ".ci" / "mutation_scope.py").read_text()
-    workflow = (root / ".github" / "workflows" / "mutation-policy.yml").read_text()
-
+    scope = (root / ".ci/mutation_scope.py").read_text()
     assert "A deletion-only hunk has no lines on the head side" in scope
     assert "max(start - 1, 1)" in scope
-    assert 'raw.startswith("+++ /dev/null")' in workflow
-    assert "Deletion-only hunks have no new-side lines" in workflow
+    verifier = (root / ".ci/mutation_evidence.py").read_text()
+    assert "matches_function, mutation_targets" in verifier
 
 
 def test_issue_59_mutation_policy_uses_exact_tree_range_and_isolated_home():
     root = Path(__file__).resolve().parents[1]
     content = (root / ".github" / "workflows" / "mutation-policy.yml").read_text()
 
-    assert 'f"{base}...{head}"' in content
-    assert 'f"{base}..{head}"' not in content.replace('f"{base}...{head}"', "")
+    scope = (root / ".ci/mutation_scope.py").read_text()
+    assert 'f"{base}...{head}"' in scope
+    assert 'f"{base}..{head}"' not in scope.replace('f"{base}...{head}"', "")
     assert 'HOME="$ISOLATED_HOME"' in content
     assert 'UV_CACHE_DIR="$ISOLATED_UV_CACHE"' in content
     assert 'HOME="$HOME"' not in content
@@ -662,11 +649,11 @@ def test_consumer_mutation_runner_is_materialized_from_protected_tree_only():
     assert 'TRUSTED_DIR="$GITHUB_WORKSPACE/pr/.workflow-ci-trusted-runner"' in content
     assert 'rm -rf -- "$TRUSTED_DIR"' in content
     assert 'mkdir -m 700 -- "$TRUSTED_DIR"' in content
-    assert 'TRUSTED_REAL="$(realpath -e "$TRUSTED_DIR")"' in content
+    assert 'TRUSTED_REAL="$(cd "$TRUSTED_DIR" && pwd -P)"' in content
     assert '"$PR_ROOT"/*' in content
     assert 'cp -a "$GITHUB_WORKSPACE/.policy/.ci/." "$TRUSTED_DIR/"' in content
     assert 'MATERIALIZED="$TRUSTED_DIR/mutation.sh"' in content
-    assert 'cmp --silent "$CUSTOM" "$MATERIALIZED"' in content
+    assert 'cmp -s "$CUSTOM" "$MATERIALIZED"' in content
     assert 'MATERIALIZED="$GITHUB_WORKSPACE/pr/.ci/mutation.sh"' not in content
     assert (
         "publishes no supported trusted evidence; falling back to the central runner"

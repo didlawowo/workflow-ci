@@ -67,6 +67,9 @@ def _changed_lines(repo: Path, base: str, head: str) -> dict[str, set[int]]:
             str(repo),
             "diff",
             "--unified=0",
+            "--no-ext-diff",
+            "--no-textconv",
+            "--relative",
             "--no-color",
             f"{base}...{head}",
             "--",
@@ -192,8 +195,11 @@ class _ChangedFunctionVisitor(ast.NodeVisitor):
 
 def syntax_unchanged(repo: Path, base: str, relative: str, tree: ast.AST) -> bool:
     """Ignore formatting-only edits; unavailable base source remains in scope."""
+    prefix = subprocess.check_output(
+        ["git", "-C", str(repo), "rev-parse", "--show-prefix"], text=True
+    ).strip()
     previous = subprocess.run(
-        ["git", "show", f"{base}:{relative}"],
+        ["git", "show", f"{base}:{prefix}{relative}"],
         cwd=repo,
         capture_output=True,
         text=True,
@@ -207,7 +213,12 @@ def syntax_unchanged(repo: Path, base: str, relative: str, tree: ast.AST) -> boo
 
 
 def mutation_targets(
-    repo: Path, base: str, head: str, *, depth: str = "medium"
+    repo: Path,
+    base: str,
+    head: str,
+    *,
+    depth: str = "medium",
+    source_root: Path | None = None,
 ) -> tuple[str, ...]:
     """Return mutmut target globs for the exact trusted PR scope.
 
@@ -218,7 +229,7 @@ def mutation_targets(
     if depth not in {"medium", "high"}:
         raise ValueError(f"unsupported mutation depth: {depth}")
 
-    source_paths = mutation_source_paths(repo)
+    source_paths = mutation_source_paths(source_root or repo)
     changed = _changed_lines(repo, base, head)
     targets: set[str] = set()
 
@@ -252,6 +263,27 @@ def mutation_targets(
             targets.add(f"{module}.*{'*'.join(qualified)}__mutmut_*")
 
     return tuple(sorted(targets))
+
+
+def matches_function(mutant_id: str, target: str) -> bool:
+    """Match native IDs by module and qualified identity, not loose wildcards.
+
+    Engine globs tolerate Mutmut's Unicode trampoline separators, but an
+    independent verifier must not accept RulesExtra.check for Rules.check.
+    """
+    module, separator, generated = mutant_id.rpartition(".")
+    target_module, target_separator, pattern = target.partition(".*")
+    if not separator or not target_separator or module != target_module:
+        return False
+    match = re.fullmatch(r"(x_.+|xǁ.+)__mutmut_[0-9]+", generated)
+    if not match or not pattern.endswith("__mutmut_*"):
+        return False
+    name = match[1]
+    qualified = tuple(name[2:].split("ǁ")) if name.startswith("xǁ") else (name[2:],)
+    expected = tuple(pattern.removesuffix("__mutmut_*").split("*"))
+    if expected == ("",):
+        return True
+    return qualified == expected
 
 
 def parse_args() -> argparse.Namespace:

@@ -99,7 +99,7 @@ def test_mutation_pr_code_receives_only_isolated_dependency_cache_paths():
     content = (ROOT / ".github/workflows/mutation-policy.yml").read_text()
     step = content.split("- name: Run trusted mutation runner against PR code", 1)[1]
     step = step.split("- name: Capture mutmut diagnostics", 1)[0]
-    assert "env -i" in step
+    assert ".ci/mutation_environment.py" in step
     assert 'UV_CACHE_DIR="$ISOLATED_UV_CACHE"' in step
     assert 'GOCACHE="$ISOLATED_GO_CACHE"' in step
     assert 'GOMODCACHE="$ISOLATED_GO_MODCACHE"' in step

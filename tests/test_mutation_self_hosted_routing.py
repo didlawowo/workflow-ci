@@ -60,6 +60,6 @@ def test_runner_change_keeps_untrusted_execution_read_only():
         "issues": "read",
         "pull-requests": "read",
     }
-    assert "env -i" in content
+    assert ".ci/mutation_environment.py" in content
     assert "pull_request_target:" not in content
     assert "ubuntu-latest" not in content

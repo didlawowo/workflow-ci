@@ -15,7 +15,9 @@ def test_python_inherits_runner_package_proxy_without_nfs_cache_gate():
     steps = workflow("python-postgres")["jobs"]["tests"]["steps"]
     names = [step.get("name") for step in steps]
     assert "Validate runner NFS cache" not in names
-    install_uv = next(i for i, step in enumerate(steps) if step.get("name") == "Install uv")
+    install_uv = next(
+        i for i, step in enumerate(steps) if step.get("name") == "Install uv"
+    )
     install_deps = next(
         i for i, step in enumerate(steps) if step.get("name") == "Install dependencies"
     )

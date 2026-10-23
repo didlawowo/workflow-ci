@@ -8,7 +8,9 @@ ROOT = Path(__file__).resolve().parents[1]
 CLASSIFIER = ROOT / ".github" / "scripts" / "classify_safety_result.py"
 
 
-def classify(tmp_path: Path, exit_code: int, payload: object | None, raw: str | None = None) -> str:
+def classify(
+    tmp_path: Path, exit_code: int, payload: object | None, raw: str | None = None
+) -> str:
     report = tmp_path / "safety-report.json"
     if raw is not None:
         report.write_text(raw, encoding="utf-8")
@@ -69,11 +71,30 @@ def test_safety_vulnerability_exit_without_actual_findings_is_error(tmp_path: Pa
 
 
 @pytest.mark.parametrize("exit_code", [0, 64])
-@pytest.mark.parametrize("raw", ["not-json", "", '{"vulnerabilities": []', '\nDEPRECATED\n{"vulnerabilities": []}\n'])
+@pytest.mark.parametrize(
+    "raw",
+    [
+        "not-json",
+        "",
+        '{"vulnerabilities": []',
+        '\nDEPRECATED\n{"vulnerabilities": []}\n',
+    ],
+)
 def test_safety_invalid_output_is_error(tmp_path: Path, exit_code: int, raw: str):
     assert classify(tmp_path, exit_code, None, raw=raw) == "error"
 
 
-@pytest.mark.parametrize("payload", [[], {}, {"error": "failed"}, {"vulnerabilities": None}, {"vulnerabilities": "not-a-list"}])
-def test_safety_clean_exit_with_unrecognized_report_is_error(tmp_path: Path, payload: object):
+@pytest.mark.parametrize(
+    "payload",
+    [
+        [],
+        {},
+        {"error": "failed"},
+        {"vulnerabilities": None},
+        {"vulnerabilities": "not-a-list"},
+    ],
+)
+def test_safety_clean_exit_with_unrecognized_report_is_error(
+    tmp_path: Path, payload: object
+):
     assert classify(tmp_path, 0, payload) == "error"

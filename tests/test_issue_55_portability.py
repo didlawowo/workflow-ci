@@ -140,7 +140,7 @@ def test_github_go_mutation_honors_nested_project_without_shrinking_scope():
         'description: "Project directory containing the language manifest"' in workflow
     )
     assert "MUTATION_WORKING_DIRECTORY: ${{ inputs.working-directory }}" in workflow
-    assert 'realpath -e "$PR_ROOT/$REQUESTED_DIRECTORY"' in workflow
+    assert 'cd "$PR_ROOT/$REQUESTED_DIRECTORY" && pwd -P' in workflow
     assert "Mutation working-directory escapes the pull request checkout" in workflow
     assert (
         "Changed Go production file '$path' is outside mutation working-directory"

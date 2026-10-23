@@ -52,3 +52,19 @@ jobs:
           else
             echo "::notice::Skipping root-to-65532 Forgejo boundary smoke: runner has no root/passwordless sudo."
           fi
+
+  node-central-runner:
+    runs-on: ${{ vars.RUNNER || format('arc-runner-{0}', github.event.repository.name) }}
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Real nested Node mutation and central verification
+        run: python tests/run_node_mutation_smoke.py

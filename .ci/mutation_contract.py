@@ -27,16 +27,15 @@ def mutation_config(root: Path) -> dict:
     result = {}
     pyproject = root / "pyproject.toml"
     if pyproject.is_file():
-        result["pyproject"] = (
-            tomllib.loads(pyproject.read_text()).get("tool", {}).get("mutmut", {})
-        )
+        configured = tomllib.loads(pyproject.read_text()).get("tool", {}).get("mutmut")
+        if configured is not None:
+            result["pyproject"] = configured
     setup = root / "setup.cfg"
     if setup.is_file():
         parser = configparser.ConfigParser()
         parser.read(setup)
-        result["setup"] = (
-            dict(parser.items("mutmut")) if parser.has_section("mutmut") else {}
-        )
+        if parser.has_section("mutmut"):
+            result["setup"] = dict(parser.items("mutmut"))
     for name in (".gremlins.yaml", ".gremlins.yml"):
         if (root / name).is_file():
             result[name] = (root / name).read_text()
@@ -88,12 +87,21 @@ def project_sync_args(root: Path) -> list[str]:
     return args
 
 
+def unique_object(pairs):
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError(f"Duplicate JSON key in mutation evidence: {key}")
+        result[key] = value
+    return result
+
+
 def read_json(path: Path, root: Path) -> dict:
     if not path.resolve().is_relative_to(root.resolve()):
         raise ValueError("Mutation evidence escapes the sandbox")
     if path.is_symlink() or not path.is_file() or path.stat().st_size > 20_000_000:
         raise ValueError(f"Missing, symlinked or oversized mutation evidence: {path}")
-    data = json.loads(path.read_text())
+    data = json.loads(path.read_text(), object_pairs_hook=unique_object)
     if not isinstance(data, dict):
         raise ValueError("Mutation evidence must be an object")
     return data
@@ -126,12 +134,12 @@ def validate_python_evidence(
             if key in statuses:
                 raise ValueError(f"Duplicate mutation evidence: {key}")
             statuses[key] = code
+    from mutation_scope import matches_function
+
     selected = {}
     for target in targets:
         matches = {
-            key: code
-            for key, code in statuses.items()
-            if fnmatch.fnmatchcase(key, target)
+            key: code for key, code in statuses.items() if matches_function(key, target)
         }
         if not matches:
             raise ValueError(
@@ -181,8 +189,45 @@ def validate_go_evidence(repo: Path, has_targets: bool, base: str, head: str) ->
     return data
 
 
+def export_python_diagnostics(
+    repo: Path, patterns: tuple[str, ...], destination: Path
+) -> None:
+    """Read native Mutmut metadata instead of guessing killed rows from source text."""
+    result = {}
+    for path in (repo / "mutants").rglob("*.meta"):
+        entries = read_json(path, repo).get("exit_code_by_key")
+        if not isinstance(entries, dict):
+            raise ValueError("Malformed per-mutant metadata")
+        for key, code in entries.items():
+            if patterns and not any(
+                fnmatch.fnmatchcase(key, pattern) for pattern in patterns
+            ):
+                continue
+            if key in result:
+                raise ValueError(f"Duplicate mutant metadata: {key}")
+            if type(code) is not int:
+                status = "skipped" if code is None else "suspicious"
+            else:
+                status = {
+                    0: "survived",
+                    1: "killed",
+                    -24: "timeouts",
+                    5: "no_tests",
+                    33: "no_tests",
+                    -11: "segfault",
+                }.get(code, "suspicious")
+            result[key] = status
+    if not result:
+        raise ValueError("No native per-mutant metadata for the selected functions")
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    destination.write_text("".join(f"{key}: {result[key]}\n" for key in sorted(result)))
+
+
 if __name__ == "__main__":
-    # NUL-delimited arguments; never interpolate project metadata into shell code.
     import sys
 
-    sys.stdout.write("\0".join(project_sync_args(Path.cwd())) + "\0")
+    if sys.argv[1:2] == ["diagnostics"]:
+        export_python_diagnostics(Path.cwd(), tuple(sys.argv[3:]), Path(sys.argv[2]))
+    else:
+        # NUL-delimited arguments; never interpolate metadata into shell code.
+        sys.stdout.write("\0".join(project_sync_args(Path.cwd())) + "\0")

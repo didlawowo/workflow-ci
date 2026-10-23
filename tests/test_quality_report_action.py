@@ -126,7 +126,10 @@ def test_quality_report_uses_uv_without_managed_dependency_cache():
     action = yaml.safe_load(action_path.read_text())
     steps = action["runs"]["steps"]
 
-    assert all(step.get("name") != "Resolve writable uv cache for quality reporter" for step in steps)
+    assert all(
+        step.get("name") != "Resolve writable uv cache for quality reporter"
+        for step in steps
+    )
     text = action_path.read_text()
     assert "require_nfs_cache UV_CACHE_DIR" not in text
     assert "cache-local-path:" not in text

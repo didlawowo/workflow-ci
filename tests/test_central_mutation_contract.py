@@ -202,9 +202,11 @@ def test_github_mutation_workspaces_are_runner_local_scratch():
     assert 'chmod -R u+w "$ISOLATED_ROOT"' in workflow
     assert "trap cleanup_mutation_scratch EXIT" in workflow
 
-def test_python_runner_requests_all_mutmut_statuses():
-    script = (ROOT / ".ci" / "mutation.sh").read_text(encoding="utf-8")
-    assert 'mutmut results --all true > "$RAW_RESULTS"' in script
+
+def test_python_runner_publishes_native_metadata_instead_of_inferring_killed_rows():
+    script = (ROOT / ".ci/mutation.sh").read_text()
+    assert '"$SCRIPT_DIR/mutation_contract.py" diagnostics' in script
+    assert "assignment_re" not in script
 
 
 @pytest.mark.parametrize("project_directory", [".", "src-é"])
@@ -292,135 +294,51 @@ JSON
         assert not (module / ".quality").exists()
 
 
-def test_mutmut_diagnostics_reconstruction_uses_exact_requested_scope(tmp_path):
-    script = (ROOT / ".ci" / "mutation.sh").read_text(encoding="utf-8")
-    marker = (
-        '"$PYTHON" - "$RAW_RESULTS" mutants/mutmut-cicd-stats.json '
-        ".quality/mutmut-results.txt \"${MUTATION_TARGETS[@]}\" <<'PY'"
-    )
-    embedded = script.split(marker, 1)[1].split("\nPY\n", 1)[0].lstrip("\n")
-
-    mutants = tmp_path / "mutants"
-    source_dir = mutants / "src"
-    source_dir.mkdir(parents=True)
-    (source_dir / "service.py").write_text(
-        "\n".join(
-            [
-                "mutants_service['x_target__mutmut_1'] = None",
-                "mutants_service['x_target__mutmut_2'] = None",
-                "mutants_service['x_unrelated__mutmut_1'] = None",
-                "mutants_service['x_unrelated__mutmut_2'] = None",
-            ]
-        )
-        + "\n",
-        encoding="utf-8",
-    )
-    raw = tmp_path / "raw.txt"
-    raw.write_text(
-        "service.x_target__mutmut_1: killed\nservice.x_target__mutmut_2: survived\n",
-        encoding="utf-8",
-    )
-    stats = mutants / "mutmut-cicd-stats.json"
-    stats.write_text(
-        json.dumps(
-            {
-                "total": 2,
-                "killed": 1,
-                "survived": 1,
-                "timeouts": 0,
-                "suspicious": 0,
+def test_native_diagnostics_use_exact_scope_and_real_newlines(tmp_path):
+    write(
+        tmp_path,
+        "mutants/src/service.py.meta",
+        {
+            "exit_code_by_key": {
+                "service.x_target__mutmut_1": 1,
+                "service.x_target__mutmut_2": 0,
+                "service.x_unrelated__mutmut_1": None,
             }
-        ),
-        encoding="utf-8",
+        },
     )
     output = tmp_path / "results.txt"
-
-    subprocess.run(
-        [
-            sys.executable,
-            "-",
-            str(raw),
-            str(stats),
-            str(output),
-            "service.*target__mutmut_*",
-        ],
-        input=embedded,
-        text=True,
-        cwd=tmp_path,
-        check=True,
-    )
-
-    result = output.read_text(encoding="utf-8")
-    assert "service.x_target__mutmut_1: killed" in result
-    assert "service.x_target__mutmut_2: survived" in result
-    assert "unrelated" not in result
+    contract.export_python_diagnostics(tmp_path, ("service.*target__mutmut_*",), output)
+    assert output.read_text().splitlines() == [
+        "service.x_target__mutmut_1: killed",
+        "service.x_target__mutmut_2: survived",
+    ]
 
 
-def test_mutmut_diagnostics_reconstruction_accepts_full_collection_total_in_scoped_runs(
-    tmp_path,
-):
-    script = (ROOT / ".ci" / "mutation.sh").read_text(encoding="utf-8")
-    marker = (
-        '"$PYTHON" - "$RAW_RESULTS" mutants/mutmut-cicd-stats.json '
-        ".quality/mutmut-results.txt \"${MUTATION_TARGETS[@]}\" <<'PY'"
-    )
-    embedded = script.split(marker, 1)[1].split("\nPY\n", 1)[0].lstrip("\n")
-
-    mutants = tmp_path / "mutants"
-    source_dir = mutants / "src"
-    source_dir.mkdir(parents=True)
-    (source_dir / "service.py").write_text(
-        "\n".join(
-            [
-                "mutants_service['x_target__mutmut_1'] = None",
-                "mutants_service['x_target__mutmut_2'] = None",
-                "mutants_service['x_unrelated__mutmut_1'] = None",
-                "mutants_service['x_unrelated__mutmut_2'] = None",
-            ]
-        )
-        + "\n",
-        encoding="utf-8",
-    )
-    raw = tmp_path / "raw.txt"
-    raw.write_text("", encoding="utf-8")
-    stats = mutants / "mutmut-cicd-stats.json"
-    stats.write_text(
-        json.dumps(
-            {
-                "total": 4,
-                "killed": 2,
-                "survived": 0,
-                "timeouts": 0,
-                "suspicious": 0,
+def test_native_diagnostics_preserve_unresolved_statuses(tmp_path):
+    write(
+        tmp_path,
+        "mutants/src/service.py.meta",
+        {
+            "exit_code_by_key": {
+                "service.x_method__mutmut_1": None,
+                "service.x_method__mutmut_2": 5,
+                "service.x_method__mutmut_3": -24,
             }
-        ),
-        encoding="utf-8",
+        },
     )
     output = tmp_path / "results.txt"
-
-    subprocess.run(
-        [
-            sys.executable,
-            "-",
-            str(raw),
-            str(stats),
-            str(output),
-            "service.*target__mutmut_*",
-        ],
-        input=embedded,
-        text=True,
-        cwd=tmp_path,
-        check=True,
-    )
-
-    result = output.read_text(encoding="utf-8")
-    assert "service.x_target__mutmut_1: killed" in result
-    assert "service.x_target__mutmut_2: killed" in result
-    assert "unrelated" not in result
+    contract.export_python_diagnostics(tmp_path, (), output)
+    assert output.read_text().splitlines() == [
+        "service.x_method__mutmut_1: skipped",
+        "service.x_method__mutmut_2: no_tests",
+        "service.x_method__mutmut_3: timeouts",
+    ]
 
 
+@pytest.mark.parametrize("directory", [".", "tools/app"])
 def test_standalone_pytest_ini_is_staged_so_mutmut_hits_instrumented_sources(
     tmp_path,
+    directory,
 ):
     repo = tmp_path / "consumer"
     (repo / ".ci").mkdir(parents=True)
@@ -433,13 +351,15 @@ def test_standalone_pytest_ini_is_staged_so_mutmut_hits_instrumented_sources(
     subprocess.run(
         ["git", "-C", repo, "config", "user.name", "Mutation self-test"], check=True
     )
-    (repo / "src").mkdir()
-    (repo / "tests").mkdir()
-    source = repo / "src" / "service.py"
+    project = repo / directory
+    project.mkdir(parents=True, exist_ok=True)
+    (project / "src").mkdir()
+    (project / "tests").mkdir()
+    source = project / "src" / "service.py"
     source.write_text(
         "def is_retryable(status):\n    return status == 429\n", encoding="utf-8"
     )
-    (repo / "tests" / "test_service.py").write_text(
+    (project / "tests" / "test_service.py").write_text(
         "from service import is_retryable\n"
         "\n"
         "def test_retryable_on_rate_limit():\n"
@@ -449,10 +369,10 @@ def test_standalone_pytest_ini_is_staged_so_mutmut_hits_instrumented_sources(
         "    assert is_retryable(500) is False\n",
         encoding="utf-8",
     )
-    (repo / "pytest.ini").write_text(
+    (project / "pytest.ini").write_text(
         "[pytest]\ntestpaths = tests\npythonpath = src\n", encoding="utf-8"
     )
-    (repo / "pyproject.toml").write_text(
+    (project / "pyproject.toml").write_text(
         '[project]\nname = "consumer"\nversion = "0.1.0"\n'
         'requires-python = ">=3.11"\n\n'
         '[tool.mutmut]\nsource_paths = ["src/"]\n',
@@ -478,6 +398,7 @@ def test_standalone_pytest_ini_is_staged_so_mutmut_hits_instrumented_sources(
     env["RUNNER_TEMP"] = str(tmp_path / "runner-temp")
     env["MUTATION_BASE_SHA"] = base
     env["MUTATION_HEAD_SHA"] = head
+    env["MUTATION_WORKING_DIRECTORY"] = directory
 
     completed = subprocess.run(
         ["bash", ".ci/mutation.sh"],
@@ -491,9 +412,9 @@ def test_standalone_pytest_ini_is_staged_so_mutmut_hits_instrumented_sources(
     output = completed.stdout + completed.stderr
     assert completed.returncode == 0, output
     assert "could not find any test case" not in output
-    assert (repo / "mutants" / "pytest.ini").is_file()
-    stats = json.loads((repo / "mutants" / "mutmut-cicd-stats.json").read_text())
+    assert (project / "mutants" / "pytest.ini").is_file()
+    stats = json.loads((project / "mutants" / "mutmut-cicd-stats.json").read_text())
     assert stats["killed"] >= 1
     assert stats["total"] >= stats["killed"]
-    results = (repo / ".quality" / "mutmut-results.txt").read_text()
+    results = (project / ".quality" / "mutmut-results.txt").read_text()
     assert "service.x_is_retryable__mutmut_" in results

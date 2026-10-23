@@ -3,6 +3,10 @@ name: Quality reporter self-test
 on:
   pull_request:
     paths:
+      - ".ci/**"
+      - ".github/workflows/mutation-campaign.yml"
+      - ".github/workflows/policy-integrity.yml"
+      - ".github/actions/mutation-campaign-checkout/**"
       - ".forgejo/workflows/**"
       - ".github/actions/docker-build-push/**"
       - ".github/workflows/quality-report-selftest.yml"
