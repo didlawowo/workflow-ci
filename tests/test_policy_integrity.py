@@ -289,3 +289,85 @@ def test_quality_duplicate_version_input_fails_closed(tmp_path: Path) -> None:
         wrapper("v1.19.0", "      workflow-ci-ref: v1.19.0\n"),
     )
     assert policy_integrity.evaluate(base, candidate)["status"] == "fail"
+
+
+def test_initial_trust_check_peels_tags_and_rejects_wrong_commit(
+    tmp_path: Path,
+) -> None:
+    import os
+    import subprocess
+
+    import yaml
+
+    workflow = yaml.safe_load(
+        (MODULE_PATH.parents[1] / "workflows" / "policy-integrity.yml").read_text()
+    )
+    step = next(
+        s
+        for s in workflow["jobs"]["policy-integrity"]["steps"]
+        if s["name"] == "Verify trusted implementation before using its checkout helper"
+    )
+    repo = tmp_path / ".workflow-ci-policy"
+    repo.mkdir()
+
+    def git(*args: str) -> str:
+        return subprocess.check_output(
+            ["git", "-C", str(repo), *args], text=True
+        ).strip()
+
+    git("init")
+    git(
+        "-c",
+        "user.name=Test",
+        "-c",
+        "user.email=test@example.invalid",
+        "commit",
+        "--allow-empty",
+        "-m",
+        "first",
+    )
+    first = git("rev-parse", "HEAD")
+    git(
+        "-c",
+        "user.name=Test",
+        "-c",
+        "user.email=test@example.invalid",
+        "tag",
+        "-a",
+        "v1.0.0",
+        "-m",
+        "release",
+    )
+    tag_object = git("rev-parse", "v1.0.0")
+    assert tag_object != first
+    for ref in (first, tag_object):
+        assert (
+            subprocess.run(
+                ["bash", "-c", step["run"]],
+                cwd=tmp_path,
+                env={**os.environ, "WORKFLOW_SHA": ref},
+                capture_output=True,
+                check=False,
+            ).returncode
+            == 0
+        )
+    git(
+        "-c",
+        "user.name=Test",
+        "-c",
+        "user.email=test@example.invalid",
+        "commit",
+        "--allow-empty",
+        "-m",
+        "second",
+    )
+    assert (
+        subprocess.run(
+            ["bash", "-c", step["run"]],
+            cwd=tmp_path,
+            env={**os.environ, "WORKFLOW_SHA": tag_object},
+            capture_output=True,
+            check=False,
+        ).returncode
+        != 0
+    )

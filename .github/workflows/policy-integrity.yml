@@ -42,7 +42,7 @@ jobs:
           WORKFLOW_SHA: ${{ job.workflow_sha }}
         run: |
           set -euo pipefail
-          test "$(git -C .workflow-ci-policy rev-parse HEAD)" = "$WORKFLOW_SHA"
+          test "$(git -C .workflow-ci-policy rev-parse HEAD)" = "$(git -C .workflow-ci-policy rev-parse "${WORKFLOW_SHA}^{commit}")"
 
       - name: Checkout protected base
         shell: bash
