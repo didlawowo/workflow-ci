@@ -10,6 +10,7 @@ import os
 from pathlib import Path
 import sys
 
+from mutation_scope import matches_function, mutation_targets
 from mutation_contract import read_json
 from mutation_evidence import (
     COUNTERS,
@@ -200,8 +201,42 @@ def aggregate(
         base,
         head,
     )
+    # All campaign proofs have already been checked above. The ordinary PR
+    # verifier expects exactly the survivors in changed functions, so give it
+    # only that subset without changing campaign-wide diagnostics or counts.
+    targets = (
+        mutation_targets(
+            project(repo, directory),
+            base,
+            head,
+            depth="medium",
+            source_root=project(trusted, directory),
+        )
+        if reviewed
+        else ()
+    )
+    scoped_review = {
+        key: proof
+        for key, proof in reviewed.items()
+        if any(matches_function(key, target) for target in targets)
+    }
+    scoped_payload = {
+        **payload,
+        "review": {
+            **payload["review"],
+            "reviewed_equivalents": sorted(scoped_review),
+            "mutants": scoped_review,
+        },
+    }
     result = validate(
-        payload, payload["diagnostics"], repo, trusted, base, head, directory, depth
+        scoped_payload,
+        payload["diagnostics"],
+        repo,
+        trusted,
+        base,
+        head,
+        directory,
+        depth,
     )
     result["stats"] = {
         key: stats[key]

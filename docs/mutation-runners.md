@@ -145,7 +145,10 @@ individual `review` object described above, limited to that worker's survivors.
 Aggregation requires every worker and every planned mutant exactly once, with
 matching content hashes, identities, counters and partition ownership. It rejects
 failed, partial or duplicate campaigns; all unresolved states block. Equivalents
-are checked separately and keep their raw survived count. The final report includes
+are checked separately across the entire campaign, including unchanged functions,
+and keep their raw survived count. The PR scope receives only its corresponding
+proofs after campaign-wide verification; outside-scope proofs cannot mask an
+unreviewed survivor or invalidate an otherwise complete audited campaign. The final report includes
 `campaign.complete`, `expected_mutants`, the plan digest, and `raw_stats`.
 
 Campaign artifacts are required execution transport, unlike best-effort diagnostic

@@ -31,11 +31,15 @@ def complete(tmp_path):
     (repo / "pyproject.toml").write_text(config)
     (trusted / "pyproject.toml").write_text(config)
     source = repo / "src/core.py"
-    source.write_text("def run(value):\n    return value + 1\n")
+    source.write_text(
+        "def untouched(value):\n    return value + 1\n\ndef run(value):\n    return value + 1\n"
+    )
     git(repo, "add", ".")
     git(repo, "commit", "-qm", "base")
     base = git(repo, "rev-parse", "HEAD")
-    source.write_text("def run(value):\n    return value + 2\n")
+    source.write_text(
+        "def untouched(value):\n    return value + 1\n\ndef run(value):\n    return value + 2\n"
+    )
     git(repo, "add", ".")
     git(repo, "commit", "-qm", "head")
     head = git(repo, "rev-parse", "HEAD")
@@ -109,6 +113,8 @@ def test_complete_partition_passes_without_reclassifying_counts(complete):
         "bad_counts",
         "no_tests",
         "survived",
+        "timeouts",
+        "suspicious",
     ],
 )
 def test_partial_or_altered_campaign_never_passes(complete, change):
@@ -139,7 +145,7 @@ def test_partial_or_altered_campaign_never_passes(complete, change):
         first["exit_code"] = 0.0
     elif change == "bad_counts":
         first["stats"]["killed"] += 1
-    elif change in {"no_tests", "survived"}:
+    elif change in {"no_tests", "survived", "timeouts", "suspicious"}:
         first["mutants"][key]["status"] = change
         first["stats"]["killed"] -= 1
         first["stats"][change] = 1
@@ -289,3 +295,68 @@ def test_equivalence_proof_must_describe_the_exact_planned_mutant(complete):
     assert entry["mutant_sha256"] != plan["mutants"][key]["mutant_sha256"]
     with pytest.raises(ValueError, match="planned mutant"):
         aggregate(complete)
+
+
+@pytest.mark.parametrize(
+    "fault", [None, "outside_source", "outside_mutant", "unreviewed"]
+)
+def test_complete_campaign_accepts_audited_survivors_inside_and_outside_pr_scope(
+    complete, fault
+):
+    plan, fragments, repo, trusted, base, head = complete
+    evidence = importlib.import_module("mutation_evidence")
+    ledger = {}
+    keys = ("core.x_run__mutmut_0", "core.x_untouched__mutmut_1")
+    for key in keys:
+        name = key.rsplit(".", 1)[1]
+        mutant = f"def {name}(value):\n    return value + 3\n"
+        digest = evidence.digest_function(mutant, name)
+        entry = {
+            "source": "src/core.py",
+            "source_sha256": plan["sources"]["src/core.py"],
+            "mutant_sha256": digest,
+            "reason": "Individually audited in protected policy",
+        }
+        ledger[key] = entry
+        plan["mutants"][key] = {"source": "src/core.py", "mutant_sha256": digest}
+        fragment = fragments[campaign.partition(key, 3)]
+        previous = fragment["mutants"].get(key)
+        if previous:
+            fragment["stats"][previous["status"]] -= 1
+        else:
+            fragment["stats"]["total"] += 1
+        fragment["stats"]["survived"] += 1
+        fragment["mutants"][key] = {"status": "survived", "mutant_sha256": digest}
+        review = fragment.setdefault(
+            "review",
+            {
+                "base_sha": base,
+                "head_sha": head,
+                "reviewed_equivalents": [],
+                "mutants": {},
+            },
+        )
+        review["reviewed_equivalents"].append(key)
+        review["mutants"][key] = {**entry, "mutant_source": mutant}
+    (trusted / ".ci").mkdir()
+    (trusted / ".ci/mutation-equivalents.json").write_text(json.dumps(ledger))
+    for fragment in fragments:
+        fragment["plan_sha256"] = campaign.plan_digest(plan)
+    outside = keys[1]
+    proof = fragments[campaign.partition(outside, 3)]["review"]["mutants"][outside]
+    if fault == "outside_source":
+        proof["source_sha256"] = "0" * 64
+    elif fault == "outside_mutant":
+        proof["mutant_source"] = proof["mutant_source"].replace("+ 3", "+ 4")
+    elif fault == "unreviewed":
+        (trusted / ".ci/mutation-equivalents.json").write_text("{}")
+    if fault:
+        with pytest.raises(ValueError):
+            aggregate(complete)
+        return
+    result = aggregate(complete)
+    assert result["campaign"]["complete"] is True
+    assert result["campaign"]["expected_mutants"] == 31
+    assert result["reviewed_equivalents"] == sorted(keys)
+    assert result["stats"]["survived"] == 2
+    assert result["raw_stats"]["survived"] == 2
