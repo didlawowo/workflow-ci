@@ -22,6 +22,11 @@ PROTECTED_PATHS = (
 )
 
 WRAPPER = ".github/workflows/trusted-quality-evidence.yml"
+SEMVER_WRAPPERS = {
+    WRAPPER: "quality-evidence.yml",
+    ".github/workflows/trusted-policy-integrity.yml": "policy-integrity.yml",
+    ".github/workflows/mutation-policy.yml": "mutation-issue-policy.yml",
+}
 HIDDEN_WORKFLOW_GLOB = ".github/workflows/hidden-*-evidence.yml"
 REGISTRY = Path(__file__).resolve().parents[2] / "hidden-evaluators" / "registry.json"
 
@@ -33,8 +38,9 @@ HIDDEN_EVALUATOR_RE = re.compile(r"(?m)^\s*evaluator:\s*([^\s#]+)\s*$")
 HIDDEN_RUNNER_RE = re.compile(r"(?m)^\s*runner:\s*([^\s#]+)\s*$")
 
 ACTION_REF_RE = re.compile(
-    r"(didlawowo/workflow-ci/[^@\s\"']+@)"
-    r"(v\d+\.\d+\.\d+)"
+    r"(?m)^(\s*uses:\s*didlawowo/workflow-ci/\.github/workflows/quality-evidence\.yml@)"
+    r"(v\d+\.\d+\.\d+)(?=[ \t]*$)",
+    re.MULTILINE,
 )
 INPUT_REF_RE = re.compile(
     r"(?m)^(\s*workflow-ci-ref:\s*[\"']?)"
@@ -71,14 +77,19 @@ def _semver(value: str) -> tuple[int, int, int]:
 
 def safe_wrapper_upgrade(base_text: str, candidate_text: str) -> tuple[bool, str]:
     """Allow only a consistent forward semver ref bump and no other wrapper edits."""
+    if (
+        len(INPUT_REF_RE.findall(base_text)) > 1
+        or len(INPUT_REF_RE.findall(candidate_text)) > 1
+    ):
+        return False, "trusted wrapper must contain at most one workflow-ci-ref input"
     base_refs = _versions(base_text)
     candidate_refs = _versions(candidate_text)
     if not base_refs or not candidate_refs:
         return False, "trusted wrapper must contain workflow-ci semantic refs"
-    if len(set(base_refs)) != 1 or len(set(candidate_refs)) != 1:
+    if len(set(candidate_refs)) != 1:
         return False, "trusted wrapper must use one consistent workflow-ci version"
 
-    old = base_refs[0]
+    old = max(base_refs, key=_semver)
     new = candidate_refs[0]
     if _semver(new) <= _semver(old):
         return False, f"workflow-ci migration must move forward ({old} -> {new})"
@@ -202,8 +213,38 @@ def evaluate(base: Path, candidate: Path, repository: str = "") -> dict[str, Any
             continue
         changed.append(relative)
 
-        if relative == WRAPPER and before is not None and after is not None:
-            ok, reason = safe_wrapper_upgrade(before, after)
+        if relative in SEMVER_WRAPPERS and before is not None and after is not None:
+            expected = SEMVER_WRAPPERS[relative]
+            # Match complete, unquoted reusable workflow references only. A branch,
+            # prerelease suffix or substituted workflow must never be normalized.
+            ref_pattern = re.compile(
+                r"(?m)^(\s*uses:\s*didlawowo/workflow-ci/\.github/workflows/"
+                + re.escape(expected)
+                + r"@)(v\d+\.\d+\.\d+)([ \t]*)$"
+            )
+            before_matches = list(ref_pattern.finditer(before))
+            after_matches = list(ref_pattern.finditer(after))
+            if len(before_matches) != 1 or len(after_matches) != 1:
+                ok, reason = (
+                    False,
+                    "protected wrapper must call its expected semantic workflow",
+                )
+            elif relative == WRAPPER:
+                ok, reason = safe_wrapper_upgrade(before, after)
+            elif ref_pattern.sub(r"\1__VERSION__\3", before) == ref_pattern.sub(
+                r"\1__VERSION__\3", after
+            ):
+                old = before_matches[0].group(2)
+                new = after_matches[0].group(2)
+                ok = _semver(new) > _semver(old)
+                reason = f"workflow-ci migration must move forward ({old} -> {new})"
+                if ok:
+                    reason = f"allowed workflow-ci migration {old} -> {new}"
+            else:
+                ok, reason = (
+                    False,
+                    "protected wrapper changed beyond workflow-ci semantic refs",
+                )
             if ok:
                 allowed.append({"path": relative, "reason": reason})
                 continue

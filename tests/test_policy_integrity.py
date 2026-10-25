@@ -227,3 +227,65 @@ def test_hidden_semver_only_forward_upgrade_is_allowed(tmp_path: Path) -> None:
 
     assert result["status"] == "pass"
     assert "allowed hidden workflow-ci migration" in result["allowed"][0]["reason"]
+
+
+def test_mixed_base_quality_versions_can_converge_forward(tmp_path: Path) -> None:
+    base, candidate = tmp_path / "base", tmp_path / "candidate"
+    write(
+        base,
+        policy_integrity.WRAPPER,
+        wrapper("v1.18.5").replace(
+            "workflow-ci-ref: v1.18.5", "workflow-ci-ref: v1.18.4"
+        ),
+    )
+    write(candidate, policy_integrity.WRAPPER, wrapper("v1.19.0"))
+    assert policy_integrity.evaluate(base, candidate)["status"] == "pass"
+
+
+def test_protected_wrappers_allow_only_forward_ref_changes(tmp_path: Path) -> None:
+    for path, workflow in policy_integrity.SEMVER_WRAPPERS.items():
+        base, candidate = tmp_path / "base", tmp_path / "candidate"
+        old = f"jobs:\n  guard:\n    uses: didlawowo/workflow-ci/.github/workflows/{workflow}@v1.18.8\n    with:\n      runner: arc-runner-keryx\n"
+        new = old.replace("v1.18.8", "v1.19.0")
+        for root in (base, candidate):
+            write(root, path, old)
+        write(candidate, path, new)
+        assert policy_integrity.evaluate(base, candidate)["status"] == "pass"
+        for invalid in (
+            new.replace("arc-runner-keryx", "ubuntu-latest"),
+            new + "    if: false\n",
+            new.replace("v1.19.0", "v1.17.0"),
+            new.replace("v1.19.0", "v1.19.0-unsafe"),
+            new.replace(workflow, "other.yml"),
+            new + "permissions: write-all\n",
+        ):
+            write(candidate, path, invalid)
+            assert policy_integrity.evaluate(base, candidate)["status"] == "fail"
+        write(candidate, path, old)
+
+
+def test_quality_upgrade_cannot_change_other_action_refs(tmp_path: Path) -> None:
+    base, candidate = tmp_path / "base", tmp_path / "candidate"
+    extra = "      - uses: didlawowo/workflow-ci/.github/actions/other@v1.18.5\n"
+    write(base, policy_integrity.WRAPPER, wrapper("v1.18.5", extra))
+    write(
+        candidate,
+        policy_integrity.WRAPPER,
+        wrapper("v1.19.0", extra.replace("v1.18.5", "v1.19.0")),
+    )
+    assert policy_integrity.evaluate(base, candidate)["status"] == "fail"
+
+
+def test_quality_duplicate_version_input_fails_closed(tmp_path: Path) -> None:
+    base, candidate = tmp_path / "base", tmp_path / "candidate"
+    write(
+        base,
+        policy_integrity.WRAPPER,
+        wrapper("v1.18.5", "      workflow-ci-ref: v1.18.5\n"),
+    )
+    write(
+        candidate,
+        policy_integrity.WRAPPER,
+        wrapper("v1.19.0", "      workflow-ci-ref: v1.19.0\n"),
+    )
+    assert policy_integrity.evaluate(base, candidate)["status"] == "fail"
