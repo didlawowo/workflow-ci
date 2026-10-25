@@ -194,7 +194,12 @@ After every new workflow-ci release, update the version used by
 `WORKFLOW_CI_VERSION` in `src/quality_policy.py`, align static workflow/action
 references in `.github/workflows/` and `forgejo-content/`, and adjust the associated tests.
 Use an actually published tag, run the github-manager checks, open its update
-PR and verify its CI. Publishing workflow-ci alone does not update managed
+PR and verify its CI. This follow-up is mandatory and automatic for the agent:
+wait for the release containing the latest merged changes, then create or update
+the github-manager adoption PR without another user request. Monitor an ongoing
+release in the background and never substitute a branch or an unpublished version
+for its tag. Keep the follow-up open until the adoption PR CI is green.
+Publishing workflow-ci alone does not update managed
 consumer workflows. Any production rollout still requires explicit authorization.
 
 

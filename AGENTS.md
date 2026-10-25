@@ -65,8 +65,11 @@ de l'utilisateur après la publication. Enchaîner sur la mise à jour de
 `github-manager`, les tests, le commit, le push, l'ouverture ou la mise à jour
 de sa PR et la vérification de sa CI. Ne pas annoncer le suivi de release
 terminé tant que cette PR n'est pas à jour et sa CI verte. Si le tag n'est pas
-encore publié, conserver cette étape comme restant à faire ; ne jamais
-anticiper une version ni utiliser une branche à la place du tag. La fusion
+encore publié, attendre la release contenant les derniers changements mergés,
+en suivant le run en arrière-plan, puis ouvrir la PR `github-manager` sans
+nouvelle demande. Si une PR d’adoption est déjà ouverte, la mettre à jour
+plutôt que d’en créer une seconde. Ne jamais anticiper une version ni utiliser
+une branche à la place du tag. La fusion
 de cette PR et la synchronisation des consommateurs nécessitent leur mandat
 propre ; cette règle ne les autorise pas implicitement.
 
