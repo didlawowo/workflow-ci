@@ -12,3 +12,9 @@ MQTT, Home Assistant, Zendure, Enphase or Tempo network access is required.
 
 The evaluator is registered in `hidden-evaluators/registry.json` and is intended to
 be consumed only through the reusable trusted hidden-evidence workflow.
+
+The independently specified charge cutoff is **99%** for summer/winter solar
+and grid charging, including red days; SolarFlow's discharge reserve is **15%**.
+The near-boundary check isolates each storage pool at 98/99/100% and SolarFlow
+at 14/15/16%, preserving positive allocations below the charge cutoff and above
+the reserve. Expected cutoffs never come from candidate configuration.

@@ -16,9 +16,9 @@ SOLARFLOW_MAX_W = 2400
 MIN_POWER_W = 50
 BATTERY_MIN_LEVEL = 10
 SOLARFLOW_MIN_LEVEL = 15
-SUMMER_SOLAR_STOP_SOC = 100
-SOLARFLOW_CHARGE_STOP_SOC = 100
-GRID_CHARGE_STOP_SOC = 100
+SUMMER_SOLAR_STOP_SOC = 99
+SOLARFLOW_CHARGE_STOP_SOC = 99
+GRID_CHARGE_STOP_SOC = 99
 
 
 class _Logger:
@@ -411,6 +411,72 @@ async def _temporal_invariants(optimizer, coordinator, rng: random.Random) -> No
     assert plan.total_power_w == min(consumption, MAX_DISCHARGE_W + SOLARFLOW_MAX_W)
 
 
+async def _soc_boundary_invariants(optimizer, coordinator) -> None:
+    # Independent contract: all seasons/tariffs stop charging at 99%, while
+    # 98% still accepts power. Isolate each device to prevent pool masking.
+    for month, color in ((7, "bleu"), (1, "bleu"), (1, "rouge")):
+        for is_peak in (True, False):
+            when = real_datetime.datetime(
+                2026,
+                month,
+                15,
+                14 if is_peak else 4,
+                tzinfo=ZoneInfo("Europe/Paris"),
+            )
+            result = await _decision(
+                optimizer,
+                when,
+                is_peak=is_peak,
+                today_color=color,
+                battery_level=98,
+                production=1200 if is_peak else 0,
+                consumption=200,
+                production_limit=50,
+                ev_is_charging=False,
+                tomorrow_color=color,
+                yesterday_color=color,
+            )
+            _assert_safe(result)
+            assert result.should_charge is True and result.power > 0
+            assert result.charge_stop_soc == 99
+            for soc in (98, 99, 100):
+                for hyper_soc, solarflow_soc in ((soc, 100), (100, soc)):
+                    plan = _storage_plan(
+                        coordinator,
+                        result,
+                        hyper_soc=hyper_soc,
+                        solarflow_soc=solarflow_soc,
+                    )
+                    _assert_plan_limits(plan)
+                    if soc < 99:
+                        assert plan.total_power_w > 0
+                    else:
+                        assert plan.total_power_w == 0
+                    if hyper_soc == 100:
+                        assert plan.hyper_power_w == 0
+                    if solarflow_soc == 100:
+                        assert plan.solarflow_power_w == 0
+
+    result = await _decision(
+        optimizer,
+        real_datetime.datetime(2026, 1, 15, 18, tzinfo=ZoneInfo("Europe/Paris")),
+        is_peak=True,
+        today_color="rouge",
+        battery_level=50,
+        production=0,
+        consumption=500,
+        production_limit=50,
+        ev_is_charging=False,
+    )
+    _assert_safe(result)
+    assert result.should_charge is False and result.power == 500
+    for soc in (14, 15, 16):
+        plan = _storage_plan(coordinator, result, hyper_soc=10, solarflow_soc=soc)
+        _assert_plan_limits(plan)
+        assert plan.hyper_power_w == 0
+        assert plan.solarflow_power_w == (500 if soc > 15 else 0)
+
+
 async def _exception_is_standby(optimizer) -> None:
     class ExplodingDateTime(real_datetime.datetime):
         @classmethod
@@ -460,6 +526,10 @@ def evaluate(candidate: Path, seed: int) -> list[dict[str, str]]:
         _check(
             "tempo-seasonal-boundaries",
             lambda: _temporal_invariants(optimizer, coordinator, rng),
+        ),
+        _check(
+            "soc-near-boundaries",
+            lambda: _soc_boundary_invariants(optimizer, coordinator),
         ),
         _check("exception-fails-safe", lambda: _exception_is_standby(optimizer)),
     ]
