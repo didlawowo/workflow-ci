@@ -234,11 +234,8 @@ def validate(
         raise ValueError("Mutation engine differs from protected project metadata")
     python_project = engine == "mutmut"
     if python_project:
-        # Execution depth can broaden the engine campaign. The ordinary PR
-        # verdict retains its existing changed-function scope; full campaigns
-        # additionally validate EVERY planned mutant in mutation_campaign.py.
         targets = mutation_targets(
-            candidate_project, base, head, depth="medium", source_root=trusted_project
+            candidate_project, base, head, depth=depth, source_root=trusted_project
         )
         has_targets = bool(targets)
     else:
@@ -280,7 +277,17 @@ def validate(
     else:
         effective = raw_counts
     if any(effective[key] for key in COUNTERS if key not in {"killed", "survived"}):
-        raise ValueError("Mutation gate failed: unresolved mutant status")
+        unresolved = [
+            f"{key}: {status}"
+            for key, status in selected.items()
+            if status not in {"killed", "survived"}
+        ]
+        details = ", ".join(unresolved[:20]) or ", ".join(
+            f"{key}={effective[key]}"
+            for key in COUNTERS
+            if key not in {"killed", "survived"} and effective[key]
+        )
+        raise ValueError(f"Mutation gate failed: unresolved mutant status: {details}")
     equivalents = review_equivalents(
         data.get("review"), selected, trusted_project, candidate_project, base, head
     )

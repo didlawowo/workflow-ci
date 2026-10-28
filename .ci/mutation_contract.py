@@ -191,19 +191,16 @@ def validate_go_evidence(repo: Path, has_targets: bool, base: str, head: str) ->
 
 def export_python_diagnostics(
     repo: Path, patterns: tuple[str, ...], destination: Path
-) -> None:
+) -> dict[str, int]:
     """Read native Mutmut metadata instead of guessing killed rows from source text."""
     result = {}
+    all_statuses = {}
     for path in (repo / "mutants").rglob("*.meta"):
         entries = read_json(path, repo).get("exit_code_by_key")
         if not isinstance(entries, dict):
             raise ValueError("Malformed per-mutant metadata")
         for key, code in entries.items():
-            if patterns and not any(
-                fnmatch.fnmatchcase(key, pattern) for pattern in patterns
-            ):
-                continue
-            if key in result:
+            if key in all_statuses:
                 raise ValueError(f"Duplicate mutant metadata: {key}")
             if type(code) is not int:
                 status = "skipped" if code is None else "suspicious"
@@ -216,18 +213,56 @@ def export_python_diagnostics(
                     33: "no_tests",
                     -11: "segfault",
                 }.get(code, "suspicious")
-            result[key] = status
+            all_statuses[key] = status
+            if not patterns or any(
+                fnmatch.fnmatchcase(key, pattern) for pattern in patterns
+            ):
+                result[key] = status
     if not result:
         raise ValueError("No native per-mutant metadata for the selected functions")
     destination.parent.mkdir(parents=True, exist_ok=True)
     destination.write_text("".join(f"{key}: {result[key]}\n" for key in sorted(result)))
+    counts = {
+        key: 0
+        for key in (
+            "killed",
+            "survived",
+            "timeouts",
+            "suspicious",
+            "no_tests",
+            "skipped",
+            "segfault",
+        )
+    }
+    for status in all_statuses.values():
+        counts[status] += 1
+    counts["total"] = len(all_statuses)
+    return counts
 
 
 if __name__ == "__main__":
     import sys
 
     if sys.argv[1:2] == ["diagnostics"]:
-        export_python_diagnostics(Path.cwd(), tuple(sys.argv[3:]), Path(sys.argv[2]))
+        counts = export_python_diagnostics(
+            Path.cwd(), tuple(sys.argv[3:]), Path(sys.argv[2])
+        )
+        report = Path("mutants/mutmut-cicd-stats.json")
+        payload = json.loads(report.read_text())
+        for key in (
+            "killed",
+            "survived",
+            "timeout",
+            "suspicious",
+            "no_tests",
+            "skipped",
+            "segfault",
+            "check_was_interrupted_by_user",
+            "total",
+        ):
+            payload.pop(key, None)
+        payload.update(counts)
+        report.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
     else:
         # NUL-delimited arguments; never interpolate metadata into shell code.
         sys.stdout.write("\0".join(project_sync_args(Path.cwd())) + "\0")
