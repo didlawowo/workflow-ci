@@ -114,6 +114,6 @@ jobs:
         with:
           python-version: "3.12"
       - name: Install test tools
-        run: python -m pip install pytest pyyaml 'mutmut>=3,<4'
+        run: python -m pip install 'pytest<9' pyyaml 'mutmut>=3,<4'
       - name: Mutate image change detection
         run: bash .ci/image-change-mutation.sh

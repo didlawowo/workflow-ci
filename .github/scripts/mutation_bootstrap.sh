@@ -52,6 +52,7 @@ runtime_path="$PATH"
 runtime_pythonpath="${PYTHONPATH:-}"
 runtime_virtualenv=""
 mutmut_spec='mutmut>=3,<4'
+pytest_spec='pytest<9'
 
 if [[ "$mutation_engine" == "mutmut" ]]; then
   python_bin="$(command -v python3 || true)"
@@ -63,7 +64,7 @@ if [[ "$mutation_engine" == "mutmut" ]]; then
     && "$venv_dir/bin/python" -m pip --version >>"$bootstrap_log" 2>&1; then
     status "bootstrap mode=venv"
     if ! PIP_DISABLE_PIP_VERSION_CHECK=1 "$venv_dir/bin/python" -m pip install \
-      --quiet --no-input "$mutmut_spec" >>"$bootstrap_log" 2>&1; then
+      --quiet --no-input "$mutmut_spec" "$pytest_spec" >>"$bootstrap_log" 2>&1; then
       cat "$bootstrap_log" >&2
       fail_engine "mutmut installation failed inside the isolated virtual environment."
     fi
@@ -78,12 +79,12 @@ if [[ "$mutation_engine" == "mutmut" ]]; then
 
     if "$python_bin" -m pip --version >>"$bootstrap_log" 2>&1; then
       if ! PIP_DISABLE_PIP_VERSION_CHECK=1 "$python_bin" -m pip install \
-        --quiet --no-input --target "$target_dir" "$mutmut_spec" >>"$bootstrap_log" 2>&1; then
+        --quiet --no-input --target "$target_dir" "$mutmut_spec" "$pytest_spec" >>"$bootstrap_log" 2>&1; then
         cat "$bootstrap_log" >&2
         fail_engine "mutmut installation failed with pip --target."
       fi
     elif command -v uv >/dev/null 2>&1; then
-      if ! uv pip install --quiet --target "$target_dir" "$mutmut_spec" >>"$bootstrap_log" 2>&1; then
+      if ! uv pip install --quiet --target "$target_dir" "$mutmut_spec" "$pytest_spec" >>"$bootstrap_log" 2>&1; then
         cat "$bootstrap_log" >&2
         fail_engine "mutmut installation failed with uv --target."
       fi

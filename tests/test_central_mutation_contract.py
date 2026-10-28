@@ -335,6 +335,57 @@ def test_native_diagnostics_preserve_unresolved_statuses(tmp_path):
     ]
 
 
+def test_native_counts_include_unselected_and_unexecuted_test_fixtures(tmp_path):
+    write(
+        tmp_path,
+        "mutants/builds/test_fixture.py.meta",
+        {
+            "exit_code_by_key": {
+                "builds.test_fixture.x_target__mutmut_1": 5,
+                "builds.test_fixture.x_target__mutmut_2": 1,
+                "builds.test_fixture.x_other__mutmut_1": None,
+            }
+        },
+    )
+    output = tmp_path / "results.txt"
+    counts = contract.export_python_diagnostics(
+        tmp_path, ("builds.test_fixture.*target__mutmut_*",), output
+    )
+    assert counts["total"] == 3
+    assert counts["no_tests"] == counts["killed"] == counts["skipped"] == 1
+    assert output.read_text().splitlines() == [
+        "builds.test_fixture.x_target__mutmut_1: no_tests",
+        "builds.test_fixture.x_target__mutmut_2: killed",
+    ]
+    report = write(
+        tmp_path,
+        "mutants/mutmut-cicd-stats.json",
+        {
+            "total": 3,
+            "no_tests": 1,
+            "skipped": 0,
+            "killed": 1,
+            "survived": 0,
+            "depth": "high",
+            "scope": {"no_targets": False},
+        },
+    )
+    subprocess.run(
+        [
+            sys.executable,
+            str(ROOT / ".ci/mutation_contract.py"),
+            "diagnostics",
+            str(output),
+            "builds.test_fixture.*target__mutmut_*",
+        ],
+        cwd=tmp_path,
+        check=True,
+    )
+    captured = json.loads(report.read_text())
+    assert (captured["total"], captured["no_tests"], captured["skipped"]) == (3, 1, 1)
+    assert captured["depth"] == "high"
+
+
 @pytest.mark.parametrize("directory", [".", "tools/app"])
 def test_standalone_pytest_ini_is_staged_so_mutmut_hits_instrumented_sources(
     tmp_path,

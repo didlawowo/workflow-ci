@@ -27,14 +27,18 @@ def consumer(tmp_path):
     (repo / "src").mkdir()
     (repo / "pyproject.toml").write_text('[tool.mutmut]\nsource_paths=["src/"]\n')
     source = repo / "src/service.py"
-    source.write_text("def compute(value):\n    return value + 1\n")
+    source.write_text(
+        "def compute(value):\n    return value + 1\n\ndef helper():\n    return 1\n"
+    )
     git(repo, "add", ".")
     git(repo, "commit", "-qm", "base")
     base = git(repo, "rev-parse", "HEAD")
     trusted = tmp_path / ".policy"
     trusted.mkdir()
     (trusted / "pyproject.toml").write_bytes((repo / "pyproject.toml").read_bytes())
-    source.write_text("def compute(value):\n    return value + 2\n")
+    source.write_text(
+        "def compute(value):\n    return value + 2\n\ndef helper():\n    return 1\n"
+    )
     git(repo, "add", ".")
     git(repo, "commit", "-qm", "head")
     return repo, trusted, base, git(repo, "rev-parse", "HEAD")
@@ -114,6 +118,18 @@ def test_changed_consumer_survivor_cannot_hide_behind_workflow_ci_scope(
         "service.x_compute__mutmut_1: survived\n",
     )
     assert result.returncode != 0, result.stdout
+
+
+def test_high_depth_rejects_uncovered_function_in_changed_file(tmp_path, consumer):
+    result = verify(
+        tmp_path,
+        consumer,
+        bound({"killed": 1, "survived": 0, "no_tests": 1, "total": 2}, consumer),
+        "service.x_compute__mutmut_1: killed\nservice.x_helper__mutmut_1: no_tests\n",
+        DEPTH="high",
+    )
+    assert result.returncode != 0
+    assert "service.x_helper__mutmut_1: no_tests" in result.stdout + result.stderr
 
 
 @pytest.mark.parametrize(
