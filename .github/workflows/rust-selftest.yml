@@ -1,0 +1,18 @@
+name: Rust workflow self-test
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/rust.yml"
+      - ".github/workflows/rust-selftest.yml"
+      - "tests/fixtures/consumers/rust/**"
+
+jobs:
+  rust-consumer:
+    permissions:
+      contents: read
+    uses: ./.github/workflows/rust.yml
+    with:
+      runner: arc-runner-workflow-ci
+      working-directory: tests/fixtures/consumers/rust
+      rust-version: "1.98.1"
