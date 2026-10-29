@@ -4,15 +4,10 @@ All notable changes to this project are documented here.
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 and follows the [Conventional Commits](https://www.conventionalcommits.org) spec.
 
-## [1.19.4] - 2026-10-28
+## [1.20.0] - 2026-10-29
 
-### Bug Fixes
+### Features
 
-- *(mutation)* Account for unexecuted mutants (#223)
-
-
-### Documentation
-
-- *(release)* Require automatic github-manager adoption follow-up (#220)
+- *(ci)* Ajouter des contrôles Rust réutilisables (#225)
 
 
