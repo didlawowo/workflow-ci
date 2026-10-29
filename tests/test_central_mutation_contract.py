@@ -43,7 +43,8 @@ def test_project_dependencies_preserve_lock_and_both_dev_schemas(tmp_path, locke
     if locked:
         (tmp_path / "uv.lock").touch()
     args = contract.project_sync_args(tmp_path)
-    assert ("--locked" in args) is locked
+    assert ("--frozen" in args) is locked
+    assert "--locked" not in args
     assert args[-4:] == ["--group", "dev", "--extra", "dev"]
 
 
