@@ -9,6 +9,7 @@ on:
 
 jobs:
   rust-consumer:
+    if: github.event.pull_request.head.repo.full_name == github.repository
     permissions:
       contents: read
     uses: ./.github/workflows/rust.yml
