@@ -118,6 +118,17 @@ fi
 # Consumer dependencies belong in the isolated environment too. A provisioner
 # must not maintain a private `uv sync`/Mutmut runner merely to install them.
 if command -v uv >/dev/null 2>&1 && [[ -f pyproject.toml ]]; then
+  if [[ -f uv.lock ]]; then
+    # Manifest/lock coherence without network and without the runner index:
+    # with Proxpi as default index, `uv lock --check` reports every PyPI lock
+    # as stale (#224). Offline, a stale lock still fails because resolving the
+    # changed requirement needs the network.
+    if ! env -u UV_DEFAULT_INDEX -u UV_INDEX_URL -u UV_EXTRA_INDEX_URL \
+      uv lock --check --offline; then
+      bootstrap_error "uv.lock is not consistent with pyproject.toml; run \`uv lock\` in the consumer."
+      exit 1
+    fi
+  fi
   SYNC_FILE="$(mktemp)"
   trap 'rm -f "$SYNC_FILE"' EXIT
   "$PYTHON" "$SCRIPT_DIR/mutation_contract.py" > "$SYNC_FILE"

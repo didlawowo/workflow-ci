@@ -79,7 +79,10 @@ def project_sync_args(root: Path) -> list[str]:
     data = tomllib.loads((root / "pyproject.toml").read_text())
     args = ["sync"]
     if (root / "uv.lock").exists():
-        args.append("--locked")
+        # --locked compares the lock's registry with the runner's Proxpi index
+        # and always fails behind the mirror (#224). Coherence is checked
+        # offline by mutation.sh; installation keeps the exact locked versions.
+        args.append("--frozen")
     if "dev" in data.get("dependency-groups", {}):
         args += ["--group", "dev"]
     if "dev" in data.get("project", {}).get("optional-dependencies", {}):
