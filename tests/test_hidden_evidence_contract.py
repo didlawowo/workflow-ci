@@ -351,3 +351,72 @@ def test_jetracer_safety_evaluator_is_hardware_free_and_randomized() -> None:
     assert "SessionWriter" in source
     assert "TemporaryDirectory" in source
     assert "/dev/" not in source
+
+
+def _hidden_job() -> dict:
+    import yaml
+
+    workflow = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
+    return workflow["jobs"]["hidden-evidence"]
+
+
+def test_hidden_job_never_restores_an_archive_cache_over_the_runner_volume() -> None:
+    # Régression keryx#718 : setup-go cache:true décompressait 1,1 Go sur le
+    # volume persistant /cache déjà peuplé (48 000 "File exists") jusqu'au
+    # timeout du job. Aucune étape ne doit restaurer ou sauver une archive.
+    for step in _hidden_job()["steps"]:
+        uses = str(step.get("uses", ""))
+        options = step.get("with") or {}
+        assert not uses.startswith("actions/cache"), step["name"]
+        if uses.startswith("actions/setup-go"):
+            # setup-go active son cache par défaut : l'absence de l'option vaut true.
+            assert options.get("cache") is False, step["name"]
+        elif uses.startswith("actions/setup-"):
+            assert options.get("cache", False) in {False, ""}, step["name"]
+
+
+def test_hidden_job_setup_steps_fail_clearly_before_the_job_timeout() -> None:
+    # Une étape d'installation bloquée doit échouer d'elle-même (avec le
+    # résultat collecté) bien avant que le job entier soit annulé en silence.
+    job = _hidden_job()
+    job_budget = job["timeout-minutes"]
+    setup = [s for s in job["steps"] if str(s.get("uses", "")).startswith("actions/setup-")]
+    assert setup, "le job installe au moins la toolchain Go"
+    for step in setup:
+        bound = step.get("timeout-minutes")
+        assert bound is not None, f"{step['name']} peut bloquer sans borne"
+        assert bound < job_budget / 2, step["name"]
+
+
+def _collect(tmp_path, *, required: str, setup_go: str) -> dict:
+    import subprocess
+
+    step = next(s for s in _hidden_job()["steps"] if s.get("id") == "collect")
+    output = tmp_path / "output"
+    output.touch()
+    subprocess.run(
+        ["bash", "-c", step["run"]],
+        check=True,
+        env={
+            "PATH": "/usr/bin:/bin",
+            "RUNNER_TEMP": str(tmp_path),
+            "GITHUB_OUTPUT": str(output),
+            "REQUIRED": required,
+            "SETUP_GO": setup_go,
+        },
+    )
+    return dict(line.split("=", 1) for line in output.read_text().splitlines())
+
+
+def test_hidden_failed_go_setup_is_reported_as_error_not_skipped(tmp_path) -> None:
+    # Le périmètre se résout après setup-go : REQUIRED reste vide si elle échoue.
+    assert _collect(tmp_path, required="", setup_go="failure")["status"] == "error"
+
+
+def test_hidden_collect_keeps_skipped_when_no_go_setup_ran(tmp_path) -> None:
+    assert _collect(tmp_path, required="false", setup_go="skipped")["status"] == "skipped"
+
+
+def test_hidden_required_run_without_report_stays_an_error(tmp_path) -> None:
+    result = _collect(tmp_path, required="true", setup_go="success")
+    assert (result["status"], result["seed-id"]) == ("error", "missing-report")
