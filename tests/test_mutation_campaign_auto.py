@@ -145,9 +145,7 @@ def test_inventory_should_plan_and_shard_against_real_mutmut(tmp_path):
     git(repo, "commit", "-qm", "base")
     base = git(repo, "rev-parse", "HEAD")
     (repo / "src" / "pkg" / "core.py").write_text(
-        "def calc(a, b):\n    return a + b\n"
-        "\n"
-        "def extra(a):\n    return a + 1\n"
+        "def calc(a, b):\n    return a + b + 0\n"
     )
     git(repo, "add", ".")
     git(repo, "commit", "-qm", "head")
@@ -169,6 +167,35 @@ def test_inventory_should_plan_and_shard_against_real_mutmut(tmp_path):
     for key, item in fragment["mutants"].items():
         assert item["mutant_sha256"] == plan_json["mutants"][key]["mutant_sha256"]
         assert item["status"] in inventory.COUNTERS
+    survivors = set(fragment["review"]["reviewed_equivalents"])
+    killed = {key for key, item in fragment["mutants"].items() if item["status"] == "killed"}
+    assert survivors, "weakly tested arithmetic must leave surviving mutants"
+    assert killed, "tested arithmetic mutants must be killed"
+    assert survivors == {
+        key for key, item in fragment["mutants"].items() if item["status"] == "survived"
+    }
+    proofs = fragment["review"]["mutants"]
+    assert set(proofs) == survivors
+    for key, proof in proofs.items():
+        assert proof["source"] == "src/pkg/core.py"
+        assert proof["source_sha256"] == plan_json["sources"]["src/pkg/core.py"]
+        assert proof["mutant_sha256"] == plan_json["mutants"][key]["mutant_sha256"]
+        assert (
+            inventory.digest_function(
+                proof["mutant_source"], inventory.variant_name(key)
+            )
+            == proof["mutant_sha256"]
+        )
+
+
+def test_resolve_shard_count_should_clamp_zero_per_shard(monkeypatch):
+    monkeypatch.setenv("MUTATION_MUTANTS_PER_SHARD", "0")
+    importlib.reload(inventory)
+    assert inventory.MUTANTS_PER_SHARD == 1
+    assert inventory.resolve_shard_count(0, 0) == 1
+    assert inventory.resolve_shard_count(0, 3) == 3
+    monkeypatch.undo()
+    importlib.reload(inventory)
 
 
 def _git_repo(tmp_path):
@@ -204,6 +231,26 @@ def test_plan_should_return_empty_plan_when_auto_and_no_targets(tmp_path):
     assert plan_json["sources"] == {}
     assert plan_json["shard_count"] == 1
     mutation_campaign.validate_plan(plan_json, repo, base, head, ".", 1)
+
+
+@pytest.mark.skipif(not HAVE_MUTMUT, reason="mutmut is not provisioned")
+def test_plan_should_skip_broken_sources_outside_the_scope(tmp_path):
+    repo, base, _ = _git_repo(tmp_path)
+    (repo / "src" / "pkg" / "core.py").write_text(
+        "def calc(a, b):\n    return a + b\n"
+        "\n"
+        "def extra(a):\n    return a + 1\n"
+    )
+    # A syntax error and non-UTF-8 bytes in sources that the PR scope never
+    # targets must be skipped with a warning, not abort the whole campaign.
+    (repo / "src" / "pkg" / "broken.py").write_text("def x(:\n    pass\n")
+    (repo / "src" / "pkg" / "binary.py").write_bytes(b"\xff\xfe\x00garbage")
+    git(repo, "add", ".")
+    git(repo, "commit", "-qm", "head")
+    head = git(repo, "rev-parse", "HEAD")
+    plan_json = inventory.plan(repo, base, head, ".", 0, "medium")
+    assert set(plan_json["sources"]) == {"src/pkg/core.py"}
+    assert plan_json["mutants"]
 
 
 @pytest.mark.skipif(not HAVE_MUTMUT, reason="mutmut is not provisioned")

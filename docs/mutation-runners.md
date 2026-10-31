@@ -101,9 +101,11 @@ instead of a failure, while a fixed worker count keeps the previous error.
 This is a protected-runner protocol, not an automatic port of a consumer's native
 mutation engine. Python repositories get the central entrypoints shipped by this
 repository (`.ci/mutation-plan.sh`, `.ci/mutation-shard.sh`): they enumerate the
-inventory with Mutmut's own operators, so no consumer script is required. A
-consumer may override them by declaring reviewed entrypoints on the protected
-base:
+inventory with Mutmut's own operators, so no consumer script is required. The
+planner skips sources it cannot process outside the PR scope, but Mutmut itself
+rejects undecodable files inside the configured source paths: keep generated or
+binary `.py` fixtures out of `source_paths`. A consumer may override them by
+declaring reviewed entrypoints on the protected base:
 
 - `.ci/mutation-plan.sh <output-json>` generates the **entire expected native
   mutant inventory**, without rewriting candidate sources or adding suppression

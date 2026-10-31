@@ -23,7 +23,9 @@ from mutation_evidence import COUNTERS, digest_function
 from mutation_campaign import partition, plan_digest
 from mutation_scope import mutation_targets
 
-MUTANTS_PER_SHARD = int(os.environ.get("MUTATION_MUTANTS_PER_SHARD", "1200"))
+MUTANTS_PER_SHARD = max(
+    1, int(os.environ.get("MUTATION_MUTANTS_PER_SHARD", "1200"))
+)
 MAX_SHARDS = 16
 VARIANT_MARKER = "__mutmut_"
 
@@ -134,14 +136,26 @@ def plan(project_root: Path, base: str, head: str, directory: str, shards: int, 
                 continue
             relative = source.relative_to(project_root).as_posix()
             mutmut_relative = source.relative_to(root).as_posix()
-            try:
-                code = source.read_text(encoding="utf-8")
-            except UnicodeDecodeError:
-                continue
             module = mutmut_relative.removesuffix(".py").replace("/", ".")
             if module.endswith(".__init__"):
                 module = module.removesuffix(".__init__")
-            mutated = mutate_file_contents(mutmut_relative, code)
+            in_scope = any(target.partition(".*")[0] == module for target in targets)
+            try:
+                code = source.read_text(encoding="utf-8")
+                mutated = mutate_file_contents(mutmut_relative, code)
+            except Exception as error:
+                # A source outside the PR scope must not abort the campaign,
+                # but a scoped file that cannot be planned is a hard failure
+                # (silently dropping it would hide its mutants).
+                if in_scope:
+                    raise InventoryError(
+                        f"Cannot plan scoped source {relative}: {error}"
+                    ) from error
+                print(
+                    f"WARN: ignoring unprocessable source outside the scope: {relative}",
+                    file=sys.stderr,
+                )
+                continue
             if not mutated.mutant_names:
                 continue
             staged = mutated.code
