@@ -368,9 +368,11 @@ def test_hidden_job_never_restores_an_archive_cache_over_the_runner_volume() -> 
         uses = str(step.get("uses", ""))
         options = step.get("with") or {}
         assert not uses.startswith("actions/cache"), step["name"]
-        if uses.startswith("actions/setup-"):
-            cache = options.get("cache", False)
-            assert str(cache).lower() in {"false", ""}, step["name"]
+        if uses.startswith("actions/setup-go"):
+            # setup-go active son cache par défaut : l'absence de l'option vaut true.
+            assert options.get("cache") is False, step["name"]
+        elif uses.startswith("actions/setup-"):
+            assert options.get("cache", False) in {False, ""}, step["name"]
 
 
 def test_hidden_job_setup_steps_fail_clearly_before_the_job_timeout() -> None:
@@ -384,3 +386,37 @@ def test_hidden_job_setup_steps_fail_clearly_before_the_job_timeout() -> None:
         bound = step.get("timeout-minutes")
         assert bound is not None, f"{step['name']} peut bloquer sans borne"
         assert bound < job_budget / 2, step["name"]
+
+
+def _collect(tmp_path, *, required: str, setup_go: str) -> dict:
+    import subprocess
+
+    step = next(s for s in _hidden_job()["steps"] if s.get("id") == "collect")
+    output = tmp_path / "output"
+    output.touch()
+    subprocess.run(
+        ["bash", "-c", step["run"]],
+        check=True,
+        env={
+            "PATH": "/usr/bin:/bin",
+            "RUNNER_TEMP": str(tmp_path),
+            "GITHUB_OUTPUT": str(output),
+            "REQUIRED": required,
+            "SETUP_GO": setup_go,
+        },
+    )
+    return dict(line.split("=", 1) for line in output.read_text().splitlines())
+
+
+def test_hidden_failed_go_setup_is_reported_as_error_not_skipped(tmp_path) -> None:
+    # Le périmètre se résout après setup-go : REQUIRED reste vide si elle échoue.
+    assert _collect(tmp_path, required="", setup_go="failure")["status"] == "error"
+
+
+def test_hidden_collect_keeps_skipped_when_no_go_setup_ran(tmp_path) -> None:
+    assert _collect(tmp_path, required="false", setup_go="skipped")["status"] == "skipped"
+
+
+def test_hidden_required_run_without_report_stays_an_error(tmp_path) -> None:
+    result = _collect(tmp_path, required="true", setup_go="success")
+    assert (result["status"], result["seed-id"]) == ("error", "missing-report")
