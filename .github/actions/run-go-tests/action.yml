@@ -3,9 +3,9 @@ description: "Execute Go tests with coverage reporting"
 
 inputs:
   go-version:
-    description: "Go version"
+    description: "Go version; empty reads the consumer go.mod"
     required: false
-    default: "1.24"
+    default: ""
   coverage-threshold:
     description: "Minimum coverage percentage"
     required: false

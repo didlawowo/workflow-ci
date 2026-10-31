@@ -43,7 +43,7 @@ on:
       go-version:
         required: false
         type: string
-        default: "1.24"
+        default: ""
       node-version:
         required: false
         type: string

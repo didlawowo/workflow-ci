@@ -2,8 +2,8 @@ name: Go Quality & Security
 description: Blocking local lint/vet/format/GoSec evidence; optional non-blocking SARIF publication
 inputs:
   go-version:
-    description: Go version
-    default: '1.24'
+    description: Go version; empty reads the consumer go.mod
+    default: ''
   working-directory:
     description: Working directory
     default: '.'

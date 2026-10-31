@@ -73,6 +73,15 @@ Runner selection has a single source of truth: the GitHub repository variable `v
 
 Python, Go and Node actions accept `working-directory` so monorepos and projects below the repository root are supported consistently. Python custom test commands have an explicit evidence contract: a successful command must create the configured `junit-report-path` (default `coverage-reports/pytest-report.xml`, relative to `working-directory`). `coverage-report-path` follows the same rule.
 
+Go actions and reusable workflows, when called without `go-version`, read the consumer's `go.mod` in
+`working-directory` by default, including its toolchain directive when present.
+An explicit `go-version` remains an override and takes precedence over that file.
+This keeps independent tests, lint and security checks aligned with the module,
+including patch releases, without hardcoding a shared Go version in generated
+quality-evidence wrappers. Existing Go pipeline templates that explicitly pass
+`GO_VERSION` retain that override and require their own adoption change to follow
+the module. Dependency downloads continue to use the runner's `GOPROXY`.
+
 Node dependency audits use the selected `package-manager`: `npm audit`, `pnpm audit`, Yarn Classic `yarn audit`, or Yarn Berry `yarn npm audit`.
 
 ### Environnements preview (label-gated)

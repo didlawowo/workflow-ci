@@ -40,9 +40,10 @@ on:
         type: string
         default: "src"
       go-version:
+        description: "Go version override; empty reads the consumer go.mod"
         required: false
         type: string
-        default: "1.24"
+        default: ""
       golangci-lint-version:
         description: "Exact golangci-lint release or auto based on the configuration major version"
         required: false

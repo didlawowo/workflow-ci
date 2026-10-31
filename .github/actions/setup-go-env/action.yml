@@ -3,9 +3,9 @@ description: "Setup Go with caching"
 
 inputs:
   go-version:
-    description: "Go version to install"
+    description: "Go version to install; empty reads the consumer go.mod"
     required: false
-    default: "1.24"
+    default: ""
   cache-dependency-path:
     description: "Path to go.sum for cache key"
     required: false
@@ -31,6 +31,7 @@ runs:
       uses: actions/setup-go@v6
       with:
         go-version: ${{ inputs.go-version }}
+        go-version-file: ${{ inputs.working-directory }}/go.mod
         cache: false
 
     - name: Download dependencies
