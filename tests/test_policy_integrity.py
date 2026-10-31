@@ -31,6 +31,75 @@ def wrapper(version: str, extra: str = "") -> str:
     )
 
 
+def generated_wrapper(version: str) -> str:
+    return (
+        "jobs:\n  ref-policy:\n    runs-on: arc-runner-example\n    steps:\n"
+        f"      - uses: didlawowo/workflow-ci/.github/actions/checkout-source@{version}\n"
+        "        with:\n          fetch-depth: 0\n"
+        "  evidence:\n"
+        f"    uses: didlawowo/workflow-ci/.github/workflows/quality-evidence.yml@{version}\n"
+    )
+
+
+def test_generated_checkout_and_workflow_versions_can_upgrade_together():
+    ok, reason = policy_integrity.safe_wrapper_upgrade(
+        generated_wrapper("v1.20.1"), generated_wrapper("v1.21.0")
+    )
+    assert ok, reason
+
+
+def test_legacy_checkout_pin_can_catch_up_after_a_staged_workflow_upgrade():
+    base = generated_wrapper("v1.21.0").replace(
+        "checkout-source@v1.21.0", "checkout-source@v1.20.1"
+    )
+    ok, reason = policy_integrity.safe_wrapper_upgrade(
+        base, generated_wrapper("v1.21.1")
+    )
+    assert ok, reason
+
+
+@pytest.mark.parametrize(
+    "replacement",
+    [
+        "checkout-source@main",
+        "checkout-source@v1.21.0-rc1",
+        "checkout-source@v1.21.0extra",
+        "checkout-source@v1.20.1",
+        "another-action@v1.21.0",
+    ],
+)
+def test_generated_checkout_migration_still_rejects_untrusted_changes(replacement):
+    candidate = generated_wrapper("v1.21.0").replace(
+        "checkout-source@v1.21.0", replacement
+    )
+    ok, _ = policy_integrity.safe_wrapper_upgrade(
+        generated_wrapper("v1.20.1"), candidate
+    )
+    assert not ok
+
+
+def test_generated_checkout_upgrade_does_not_allow_other_logic_or_downgrades():
+    base = generated_wrapper("v1.20.1")
+    for candidate in (
+        generated_wrapper("v1.19.4"),
+        generated_wrapper("v1.21.0").replace("fetch-depth: 0", "fetch-depth: 1"),
+    ):
+        ok, _ = policy_integrity.safe_wrapper_upgrade(base, candidate)
+        assert not ok
+
+
+def test_checkout_looking_script_text_is_not_normalized():
+    script = (
+        "  script-job:\n    runs-on: arc-runner-example\n    steps:\n"
+        "      - run: |\n"
+        "          - uses: didlawowo/workflow-ci/.github/actions/checkout-source@v1.20.1\n"
+    )
+    base = generated_wrapper("v1.20.1") + script
+    candidate = generated_wrapper("v1.21.0") + script.replace("v1.20.1", "v1.21.0")
+    ok, _ = policy_integrity.safe_wrapper_upgrade(base, candidate)
+    assert not ok
+
+
 def hosted_reasons(candidate: Path, workflow: str) -> list[str]:
     write(candidate, ".github/workflows/ci.yml", workflow)
     result = policy_integrity.evaluate(candidate.parent / "base", candidate)

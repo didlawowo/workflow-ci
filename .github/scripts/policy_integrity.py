@@ -42,6 +42,12 @@ ACTION_REF_RE = re.compile(
     r"(v\d+\.\d+\.\d+)(?=[ \t]*$)",
     re.MULTILINE,
 )
+# Match only the canonical generated step, not action-looking text embedded in
+# a run/script block. No other action or mutable reference may be normalized.
+CHECKOUT_REF_RE = re.compile(
+    r"(?m)^(      - uses:[ \t]+didlawowo/workflow-ci/\.github/actions/checkout-source@)"
+    r"(v\d+\.\d+\.\d+)([ \t]*)$"
+)
 INPUT_REF_RE = re.compile(
     r"(?m)^(\s*workflow-ci-ref:\s*[\"']?)"
     r"(v\d+\.\d+\.\d+)"
@@ -76,12 +82,14 @@ def _read(root: Path, relative: str) -> str | None:
 
 def _versions(text: str) -> list[str]:
     refs = [match.group(2) for match in ACTION_REF_RE.finditer(text)]
+    refs.extend(match.group(2) for match in CHECKOUT_REF_RE.finditer(text))
     refs.extend(match.group(2) for match in INPUT_REF_RE.finditer(text))
     return refs
 
 
 def _normalize_wrapper(text: str) -> str:
     text = ACTION_REF_RE.sub(r"\1__WORKFLOW_CI_VERSION__", text)
+    text = CHECKOUT_REF_RE.sub(r"\1__WORKFLOW_CI_VERSION__\3", text)
     return INPUT_REF_RE.sub(r"\1__WORKFLOW_CI_VERSION__\3", text)
 
 
