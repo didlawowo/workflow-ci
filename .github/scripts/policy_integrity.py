@@ -49,6 +49,23 @@ INPUT_REF_RE = re.compile(
 )
 SEMVER_RE = re.compile(r"^v(\d+)\.(\d+)\.(\d+)$")
 
+WORKFLOWS_DIR = ".github/workflows"
+# Fail closed without a YAML parser, which the trusted checkout does not install:
+# every line is scanned, so a label reached through a list, an anchor, a matrix or
+# an input default is caught. Only full-line comments and prose are skipped, and a
+# label in a trailing comment is reported rather than risk hiding a real one.
+PROSE_KEY_RE = re.compile(
+    r"""^(\s*(?:-\s+)?)["']?(?:name|description|if|run|script|body)["']?\s*:(.*)$"""
+)
+BLOCK_SCALAR_RE = re.compile(r"^\s*[|>][+-]?\d?[+-]?\s*(?:#.*)?$")
+# GitHub label shapes only, with a bounded suffix. The lookbehind keeps
+# arc-runner-ubuntu-24.04 and paths such as scripts/macos-14 allowed.
+HOSTED_LABEL_RE = re.compile(
+    r"(?<![\w./-])(?:ubuntu|macos|windows)-(?:latest|slim|\d[\d.]{0,10})"
+    r"(?:-[a-z0-9]{1,16}){0,2}(?![\w.-])",
+    re.IGNORECASE,
+)
+
 
 def _read(root: Path, relative: str) -> str | None:
     path = root / relative
@@ -163,6 +180,63 @@ def _hidden_paths(root: Path) -> set[str]:
     }
 
 
+def _is_prose(value: str) -> bool:
+    """Tell a sentence from a value that a matrix or an anchor could reuse."""
+    value = re.split(r"[ \t]#", value, maxsplit=1)[0].strip()
+    return " " in value and value[0] not in "&*[{"
+
+
+def hosted_runner_labels(text: str) -> list[tuple[int, str]]:
+    """Return the GitHub-hosted labels found outside prose, with their line."""
+    found: list[tuple[int, str]] = []
+    block_column: int | None = None
+    for number, line in enumerate(text.splitlines(), start=1):
+        if block_column is not None:
+            indent = len(line) - len(line.lstrip())
+            if not line.strip() or indent > block_column:
+                continue
+            block_column = None
+        if line.lstrip().startswith("#"):
+            continue
+
+        prose = PROSE_KEY_RE.match(line)
+        if prose and BLOCK_SCALAR_RE.match(prose.group(2)):
+            block_column = len(prose.group(1))
+            continue
+        if prose and _is_prose(prose.group(2)):
+            continue
+        found.extend(
+            (number, match.group(0)) for match in HOSTED_LABEL_RE.finditer(line)
+        )
+    return found
+
+
+def _hosted_runner_violations(candidate: Path) -> list[dict[str, str]]:
+    workflows = candidate / WORKFLOWS_DIR
+    if not workflows.is_dir():
+        return []
+    root = candidate.resolve()
+    violations: list[dict[str, str]] = []
+    for path in sorted(workflows.iterdir()):
+        if not path.is_file() or path.suffix not in {".yml", ".yaml"}:
+            continue
+        # A candidate link must not make the trusted job read outside its checkout.
+        if not path.resolve().is_relative_to(root):
+            continue
+        text = path.read_text(encoding="utf-8", errors="replace")
+        for line, label in hosted_runner_labels(text):
+            violations.append(
+                {
+                    "path": path.relative_to(candidate).as_posix(),
+                    "reason": (
+                        f"GitHub-hosted runner {label} at line {line} is forbidden; "
+                        "use arc-runner-<repo>"
+                    ),
+                }
+            )
+    return violations
+
+
 def evaluate(base: Path, candidate: Path, repository: str = "") -> dict[str, Any]:
     changed: list[str] = []
     allowed: list[dict[str, str]] = []
@@ -259,6 +333,8 @@ def evaluate(base: Path, candidate: Path, repository: str = "") -> dict[str, Any
             reason = "protected policy file changed outside the trusted base"
         violations.append({"path": relative, "reason": reason})
 
+    violations.extend(_hosted_runner_violations(candidate))
+
     return {
         "schema_version": 1,
         "status": "fail" if violations else "pass",
@@ -266,6 +342,15 @@ def evaluate(base: Path, candidate: Path, repository: str = "") -> dict[str, Any
         "allowed": allowed,
         "violations": violations,
     }
+
+
+def _annotation_data(value: str) -> str:
+    """Escape a value so a candidate file name cannot inject a workflow command."""
+    return value.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+
+
+def _annotation_property(value: str) -> str:
+    return _annotation_data(value).replace(":", "%3A").replace(",", "%2C")
 
 
 def main() -> int:
@@ -286,8 +371,8 @@ def main() -> int:
     if report["violations"]:
         for violation in report["violations"]:
             print(
-                f"::error file={violation['path']}::Trusted policy integrity: "
-                f"{violation['reason']}"
+                f"::error file={_annotation_property(violation['path'])}::"
+                f"Trusted policy integrity: {_annotation_data(violation['reason'])}"
             )
         return 2
     return 0
