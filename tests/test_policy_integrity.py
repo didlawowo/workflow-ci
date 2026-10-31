@@ -50,9 +50,22 @@ def hosted_reasons(candidate: Path, workflow: str) -> list[str]:
         "jobs:\n  a:\n    strategy:\n      matrix:\n        os: [ubuntu-latest]\n",
         "jobs:\n  a:\n    strategy:\n      matrix:\n        include:\n"
         "          - os: macos-latest\n",
+        "jobs:\n  a:\n    runs-on: [\n      self-hosted,\n      ubuntu-latest\n    ]\n",
+        "jobs:\n  a:\n    runs-on:\n      ubuntu-latest\n",
+        "jobs:\n  a:\n    runs-on: >-\n      ubuntu-latest\n",
+        'jobs:\n  a:\n    "runs-on": ubuntu-latest\n',
+        "jobs:\n  a: {runs-on: ubuntu-latest}\n",
+        "env: {R: &r ubuntu-latest}\njobs:\n  a:\n    runs-on: *r\n",
+        "jobs:\n  a:\n    strategy:\n      matrix: {platform: [windows-11-arm]}\n",
+        "on:\n  workflow_call:\n    inputs:\n      runner:\n"
+        "        default: ubuntu-latest\n",
+        "jobs:\n  a:\n    runs-on: # c\n      - ubuntu-latest\n",
+        """jobs:\n  a:\n    runs-on: "${{ x && ' #' || 'ubuntu-latest' }}"\n""",
+        "jobs:\n  a:\n    steps:\n      - run: |\n          echo ok\n"
+        "  b:\n    runs-on: ubuntu-latest\n",
     ],
 )
-def test_github_hosted_runner_fails_policy_when_a_runner_key_names_it(
+def test_github_hosted_runner_fails_policy_when_a_workflow_selects_it(
     tmp_path: Path, workflow: str
 ) -> None:
     assert any(
@@ -72,6 +85,13 @@ def test_github_hosted_runner_fails_policy_when_a_runner_key_names_it(
         "# runs-on: ubuntu-latest\njobs:\n  a:\n    runs-on: arc-runner-x # ubuntu-latest\n",
         "jobs:\n  a:\n    runs-on: arc-runner-x\n    steps:\n"
         "      - run: echo ubuntu-latest\n",
+        "jobs:\n  a:\n    runs-on: arc-runner-x\n    steps:\n      - run: |\n"
+        "          cat <<EOF\n          runs-on: ubuntu-latest\n          EOF\n",
+        "name: tests on ubuntu-latest\njobs:\n  a:\n    runs-on: arc-runner-x\n",
+        "jobs:\n  a:\n    runs-on: # ubuntu-latest\n      - arc-runner-x\n",
+        "jobs:\n  a:\n    runs-on: arc-runner-ubuntu-24.04\n",
+        "jobs:\n  a:\n    runs-on: arc-runner-x\n"
+        "    defaults:\n      run:\n        working-directory: scripts/macos-14\n",
     ],
 )
 def test_internal_runner_passes_policy_when_no_hosted_label_is_selected(
@@ -85,6 +105,39 @@ def test_disabled_workflow_is_ignored_by_hosted_runner_policy(tmp_path: Path) ->
     write(candidate, ".github/workflows/old.yml.disabled", "runs-on: ubuntu-latest\n")
 
     assert policy_integrity.evaluate(tmp_path / "base", candidate)["status"] == "pass"
+
+
+def test_yaml_extension_is_covered_by_hosted_runner_policy(tmp_path: Path) -> None:
+    candidate = tmp_path / "candidate"
+    write(candidate, ".github/workflows/ci.yaml", "runs-on: ubuntu-latest\n")
+
+    assert policy_integrity.evaluate(tmp_path / "base", candidate)["status"] == "fail"
+
+
+def test_non_utf8_workflow_is_still_scanned(tmp_path: Path) -> None:
+    candidate = tmp_path / "candidate"
+    path = candidate / ".github" / "workflows" / "ci.yml"
+    path.parent.mkdir(parents=True)
+    path.write_bytes(bytes([255]) + b"\nruns-on: ubuntu-latest\n")
+
+    assert policy_integrity.evaluate(tmp_path / "base", candidate)["status"] == "fail"
+
+
+def test_link_outside_candidate_is_not_read(tmp_path: Path) -> None:
+    candidate = tmp_path / "candidate"
+    outside = tmp_path / "outside.yml"
+    outside.write_text("runs-on: ubuntu-latest\n", encoding="utf-8")
+    workflows = candidate / ".github" / "workflows"
+    workflows.mkdir(parents=True)
+    (workflows / "ci.yml").symlink_to(outside)
+
+    assert policy_integrity.evaluate(tmp_path / "base", candidate)["status"] == "pass"
+
+
+def test_annotation_cannot_inject_a_workflow_command() -> None:
+    escaped = policy_integrity._annotation_property("a\n::warning::x,y%.yml")
+
+    assert escaped == "a%0A%3A%3Awarning%3A%3Ax%2Cy%25.yml"
 
 
 def test_hosted_runner_violation_names_file_and_line(tmp_path: Path) -> None:

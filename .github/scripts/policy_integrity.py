@@ -50,13 +50,19 @@ INPUT_REF_RE = re.compile(
 SEMVER_RE = re.compile(r"^v(\d+)\.(\d+)\.(\d+)$")
 
 WORKFLOWS_DIR = ".github/workflows"
-# Keys that can select a runner directly, through a reusable-workflow input, a
-# runner group or a matrix. Scanning only them keeps `run:` scripts out of scope.
-RUNNER_KEY_RE = re.compile(r"^(\s*)(?:-\s+)?(?:runs-on|runner|labels|os)\s*:\s*(.*)$")
-LIST_ITEM_RE = re.compile(r"^(\s*)-\s+(.*)$")
-# The lookbehind keeps self-hosted labels such as arc-runner-ubuntu-gpu allowed.
+# Fail closed without a YAML parser, which the trusted checkout does not install:
+# every key is scanned, so a label reached through a list, an anchor, a matrix or
+# an input default is caught. Only keys that cannot select a runner are skipped.
+PROSE_KEY_RE = re.compile(
+    r"""^\s*(?:-\s+)?["']?(?:name|description|if|run|script|body)["']?\s*:(.*)$"""
+)
+BLOCK_SCALAR_RE = re.compile(r"^\s*[|>][+-]?\d*\s*$")
+# GitHub label shapes only, with a bounded suffix. The lookbehind keeps
+# arc-runner-ubuntu-24.04 and paths such as scripts/macos-14 allowed.
 HOSTED_LABEL_RE = re.compile(
-    r"(?<![\w.-])(?:ubuntu|macos|windows)-[a-z0-9][a-z0-9.-]*", re.IGNORECASE
+    r"(?<![\w./-])(?:ubuntu|macos|windows)-(?:latest|slim|\d[\d.]{0,10})"
+    r"(?:-[a-z0-9]{1,16}){0,2}(?![\w.-])",
+    re.IGNORECASE,
 )
 
 
@@ -173,28 +179,38 @@ def _hidden_paths(root: Path) -> set[str]:
     }
 
 
+def _without_comment(line: str) -> str:
+    """Drop a YAML comment, keeping a `#` that sits inside a quoted string."""
+    quote = ""
+    for index, char in enumerate(line):
+        if quote:
+            quote = "" if char == quote else quote
+        elif char in "\"'":
+            quote = char
+        elif char == "#" and (index == 0 or line[index - 1].isspace()):
+            return line[:index]
+    return line
+
+
 def hosted_runner_labels(text: str) -> list[tuple[int, str]]:
-    """Return the GitHub-hosted labels named by runner keys, with their line."""
+    """Return the GitHub-hosted labels found outside prose, with their line."""
     found: list[tuple[int, str]] = []
-    block_indent: int | None = None
+    prose_indent: int | None = None
     for number, line in enumerate(text.splitlines(), start=1):
-        if line.lstrip().startswith("#"):
-            continue
-        key = RUNNER_KEY_RE.match(line)
-        if key:
-            value = re.split(r"\s#", key.group(2), maxsplit=1)[0].strip()
-            block_indent = len(key.group(1)) if not value else None
-        elif block_indent is not None:
-            item = LIST_ITEM_RE.match(line)
-            if item is None or len(item.group(1)) < block_indent:
-                if line.strip():
-                    block_indent = None
+        indent = len(line) - len(line.lstrip())
+        if prose_indent is not None:
+            if not line.strip() or indent > prose_indent:
                 continue
-            value = re.split(r"\s#", item.group(2), maxsplit=1)[0]
-        else:
+            prose_indent = None
+
+        code = _without_comment(line)
+        prose = PROSE_KEY_RE.match(code)
+        if prose:
+            if BLOCK_SCALAR_RE.match(prose.group(1)):
+                prose_indent = indent
             continue
         found.extend(
-            (number, match.group(0)) for match in HOSTED_LABEL_RE.finditer(value)
+            (number, match.group(0)) for match in HOSTED_LABEL_RE.finditer(code)
         )
     return found
 
@@ -203,9 +219,13 @@ def _hosted_runner_violations(candidate: Path) -> list[dict[str, str]]:
     workflows = candidate / WORKFLOWS_DIR
     if not workflows.is_dir():
         return []
+    root = candidate.resolve()
     violations: list[dict[str, str]] = []
     for path in sorted(workflows.iterdir()):
         if not path.is_file() or path.suffix not in {".yml", ".yaml"}:
+            continue
+        # A candidate link must not make the trusted job read outside its checkout.
+        if not path.resolve().is_relative_to(root):
             continue
         text = path.read_text(encoding="utf-8", errors="replace")
         for line, label in hosted_runner_labels(text):
@@ -328,6 +348,15 @@ def evaluate(base: Path, candidate: Path, repository: str = "") -> dict[str, Any
     }
 
 
+def _annotation_data(value: str) -> str:
+    """Escape a value so a candidate file name cannot inject a workflow command."""
+    return value.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+
+
+def _annotation_property(value: str) -> str:
+    return _annotation_data(value).replace(":", "%3A").replace(",", "%2C")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--base", required=True, type=Path)
@@ -346,8 +375,8 @@ def main() -> int:
     if report["violations"]:
         for violation in report["violations"]:
             print(
-                f"::error file={violation['path']}::Trusted policy integrity: "
-                f"{violation['reason']}"
+                f"::error file={_annotation_property(violation['path'])}::"
+                f"Trusted policy integrity: {_annotation_data(violation['reason'])}"
             )
         return 2
     return 0
