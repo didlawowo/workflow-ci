@@ -351,3 +351,36 @@ def test_jetracer_safety_evaluator_is_hardware_free_and_randomized() -> None:
     assert "SessionWriter" in source
     assert "TemporaryDirectory" in source
     assert "/dev/" not in source
+
+
+def _hidden_job() -> dict:
+    import yaml
+
+    workflow = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
+    return workflow["jobs"]["hidden-evidence"]
+
+
+def test_hidden_job_never_restores_an_archive_cache_over_the_runner_volume() -> None:
+    # Régression keryx#718 : setup-go cache:true décompressait 1,1 Go sur le
+    # volume persistant /cache déjà peuplé (48 000 "File exists") jusqu'au
+    # timeout du job. Aucune étape ne doit restaurer ou sauver une archive.
+    for step in _hidden_job()["steps"]:
+        uses = str(step.get("uses", ""))
+        options = step.get("with") or {}
+        assert not uses.startswith("actions/cache"), step["name"]
+        if uses.startswith("actions/setup-"):
+            cache = options.get("cache", False)
+            assert str(cache).lower() in {"false", ""}, step["name"]
+
+
+def test_hidden_job_setup_steps_fail_clearly_before_the_job_timeout() -> None:
+    # Une étape d'installation bloquée doit échouer d'elle-même (avec le
+    # résultat collecté) bien avant que le job entier soit annulé en silence.
+    job = _hidden_job()
+    job_budget = job["timeout-minutes"]
+    setup = [s for s in job["steps"] if str(s.get("uses", "")).startswith("actions/setup-")]
+    assert setup, "le job installe au moins la toolchain Go"
+    for step in setup:
+        bound = step.get("timeout-minutes")
+        assert bound is not None, f"{step['name']} peut bloquer sans borne"
+        assert bound < job_budget / 2, step["name"]

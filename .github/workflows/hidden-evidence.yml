@@ -79,13 +79,17 @@ jobs:
           fetch-depth: 1
           persist-credentials: false
 
-      - name: Set up Go toolchain and cache for Go candidates
+      # Pas de cache d'archive : GOMODCACHE/GOCACHE pointent vers /cache, un volume
+      # persistant du runner déjà peuplé. Restaurer par-dessus (tar sur des
+      # fichiers en lecture seule) bloquait l'étape jusqu'au timeout du job, et le
+      # post-step ré-archivait plus d'1 Go. Les modules viennent du proxy partagé.
+      - name: Set up Go toolchain for Go candidates
         if: ${{ hashFiles('candidate/go.sum') != '' }}
+        timeout-minutes: 4
         uses: actions/setup-go@v7
         with:
           go-version-file: candidate/go.mod
-          cache: true
-          cache-dependency-path: candidate/go.sum
+          cache: false
 
       - name: Verify trusted, base and candidate identities
         shell: bash
