@@ -12,10 +12,10 @@ on:
         required: true
         type: string
       mutation-shards:
-        description: "Number of protected mutation campaign workers (1 to 16)"
+        description: "Protected mutation campaign workers: 0 sizes Python campaigns automatically, 1 runs one job, 2 to 16 fixed"
         required: false
         type: number
-        default: 1
+        default: 0
       working-directory:
         required: false
         type: string
@@ -284,6 +284,7 @@ jobs:
     with:
       scope-key: ${{ format('ci-v2-{0}', inputs.repo-type) }}
       mutation-shards: ${{ inputs.mutation-shards }}
+      repo-type: ${{ inputs.repo-type }}
       trusted-runner: ${{ inputs.runner }}
       working-directory: ${{ inputs.working-directory }}
 
