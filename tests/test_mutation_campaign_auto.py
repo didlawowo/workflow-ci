@@ -169,3 +169,62 @@ def test_inventory_should_plan_and_shard_against_real_mutmut(tmp_path):
     for key, item in fragment["mutants"].items():
         assert item["mutant_sha256"] == plan_json["mutants"][key]["mutant_sha256"]
         assert item["status"] in inventory.COUNTERS
+
+
+def _git_repo(tmp_path):
+    repo = tmp_path / "repo"
+    (repo / "src" / "pkg").mkdir(parents=True)
+    (repo / "pyproject.toml").write_text(
+        '[project]\nname="demo"\nversion="0.1.0"\n'
+        '[tool.mutmut]\nsource_paths=["src/"]\n'
+    )
+    (repo / "README.md").write_text("base\n")
+    (repo / "src" / "pkg" / "__init__.py").write_text("")
+    (repo / "src" / "pkg" / "core.py").write_text(
+        "def calc(a, b):\n    return a + b\n"
+    )
+    git(repo, "init", "-q")
+    git(repo, "config", "user.name", "Fixture")
+    git(repo, "config", "user.email", "fixture@example.test")
+    git(repo, "add", ".")
+    git(repo, "commit", "-qm", "base")
+    base = git(repo, "rev-parse", "HEAD")
+    (repo / "README.md").write_text("documentation only\n")
+    git(repo, "add", ".")
+    git(repo, "commit", "-qm", "docs")
+    head = git(repo, "rev-parse", "HEAD")
+    return repo, base, head
+
+
+@pytest.mark.skipif(not HAVE_MUTMUT, reason="mutmut is not provisioned")
+def test_plan_should_return_empty_plan_when_auto_and_no_targets(tmp_path):
+    repo, base, head = _git_repo(tmp_path)
+    plan_json = inventory.plan(repo, base, head, ".", 0, "medium")
+    assert plan_json["mutants"] == {}
+    assert plan_json["sources"] == {}
+    assert plan_json["shard_count"] == 1
+    mutation_campaign.validate_plan(plan_json, repo, base, head, ".", 1)
+
+
+@pytest.mark.skipif(not HAVE_MUTMUT, reason="mutmut is not provisioned")
+def test_plan_should_fail_when_explicit_shards_and_no_targets(tmp_path, monkeypatch):
+    repo, base, head = _git_repo(tmp_path)
+    monkeypatch.setattr(inventory, "mutation_targets", lambda *a, **k: iter(()))
+    with pytest.raises(inventory.InventoryError):
+        inventory.plan(repo, base, head, ".", 2, "medium")
+
+
+@pytest.mark.skipif(not HAVE_MUTMUT, reason="mutmut is not provisioned")
+def test_shard_should_emit_zero_fragment_when_partition_empty(tmp_path):
+    repo, base, head = _git_repo(tmp_path)
+    plan_json = inventory.plan(repo, base, head, ".", 0, "medium")
+    fragment = inventory.shard(repo, plan_json, 0)
+    assert fragment["mutants"] == {}
+    assert fragment["shard_index"] == 0
+    assert fragment["shard_count"] == 1
+    assert fragment["exit_code"] == 0
+    assert fragment["stats"]["total"] == 0
+    verdict = mutation_campaign.aggregate(
+        plan_json, [fragment], repo, repo, base, head, ".", "medium", 1
+    )
+    assert verdict["stats"]["total"] == 0

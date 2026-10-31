@@ -94,7 +94,9 @@ for Python repositories, sizing one to sixteen workers from the planned mutant
 inventory (about one worker per 1,200 mutants). Set `1` to force one ordinary
 mutation job, or a number from 2 to 16 to fix the worker count. The campaign
 uses at most four workers concurrently; planning and each worker are bounded to
-45 minutes, verification to ten minutes.
+45 minutes, verification to ten minutes. Automatic mode tolerates a scope with no
+mutable changed function: an empty inventory becomes an empty one-worker campaign
+instead of a failure, while a fixed worker count keeps the previous error.
 
 This is a protected-runner protocol, not an automatic port of a consumer's native
 mutation engine. Python repositories get the central entrypoints shipped by this

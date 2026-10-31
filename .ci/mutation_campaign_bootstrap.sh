@@ -36,18 +36,14 @@ if [[ ! -x "$PYTHON" ]]; then
   exit 1
 fi
 
-WORKING_DIRECTORY="${MUTATION_WORKING_DIRECTORY:-.}"
-if [[ "$WORKING_DIRECTORY" == /* ]]; then
-  echo "::error::Campaign working-directory must be relative." >&2
+# The trusted caller (mutation_campaign_run.py) resolves and validates
+# working-directory, then starts this entrypoint with the current directory
+# already set to the PR project. The current directory IS the project root.
+PROJECT_ROOT="$(pwd -P)"
+if [[ ! -d "$PROJECT_ROOT" ]]; then
+  bootstrap_error "campaign project directory is missing."
   exit 1
 fi
-REPOSITORY_ROOT="$(pwd -P)"
-PROJECT_ROOT="$(cd "$REPOSITORY_ROOT/$WORKING_DIRECTORY" && pwd -P)"
-case "$PROJECT_ROOT" in
-  "$REPOSITORY_ROOT"|"$REPOSITORY_ROOT"/*) ;;
-  *) echo "::error::Campaign working-directory escapes the checkout." >&2; exit 1 ;;
-esac
-cd "$PROJECT_ROOT"
 
 if command -v uv >/dev/null 2>&1 && [[ -f pyproject.toml ]]; then
   if [[ -f uv.lock ]]; then

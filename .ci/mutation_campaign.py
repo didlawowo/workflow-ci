@@ -55,12 +55,11 @@ def validate_plan(
     sources, mutants = plan.get("sources"), plan.get("mutants")
     if (
         not isinstance(sources, dict)
-        or not sources
         or not isinstance(mutants, dict)
-        or not mutants
         or len(mutants) > 100_000
+        or bool(sources) != bool(mutants)
     ):
-        raise ValueError("Campaign requires a nonempty bounded expected inventory")
+        raise ValueError("Campaign requires a coherent bounded expected inventory")
     for relative, expected_hash in sources.items():
         if (
             not isinstance(relative, str)
@@ -182,7 +181,11 @@ def aggregate(
     stats["total"] = len(statuses)
     payload = {
         "stats": stats,
-        "scope": {"base_sha": base, "head_sha": head, "no_targets": False},
+        "scope": {
+            "base_sha": base,
+            "head_sha": head,
+            "no_targets": not plan["mutants"],
+        },
         "diagnostics": "".join(f"{key}: {statuses[key]}\n" for key in sorted(statuses)),
         "review": {
             "base_sha": base,

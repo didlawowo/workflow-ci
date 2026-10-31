@@ -96,6 +96,18 @@ def _source_paths(project_root: Path) -> list[Path]:
     raise InventoryError("Cannot determine mutation source paths")
 
 
+def _empty_plan(base: str, head: str, directory: str) -> dict:
+    return {
+        "schema_version": 1,
+        "base_sha": base,
+        "head_sha": head,
+        "working_directory": directory,
+        "shard_count": 1,
+        "sources": {},
+        "mutants": {},
+    }
+
+
 def plan(project_root: Path, base: str, head: str, directory: str, shards: int, depth: str) -> dict:
     from mutmut.mutation.file_mutation import mutate_file_contents
 
@@ -105,7 +117,11 @@ def plan(project_root: Path, base: str, head: str, directory: str, shards: int, 
         )
     )
     if not targets:
-        raise InventoryError("Mutation plan requires at least one changed function")
+        if shards:
+            raise InventoryError("Mutation plan requires at least one changed function")
+        # Automatic sizing tolerates an empty scope: a PR touching no mutable
+        # function produces an empty plan instead of failing the campaign.
+        return _empty_plan(base, head, directory)
     from mutation_scope import matches_function
 
     sources: dict[str, str] = {}
@@ -215,7 +231,25 @@ def shard(project_root: Path, plan_json: dict, index: int) -> dict:
         if partition(key, shard_count) == index
     )
     if not keys:
-        raise InventoryError("Campaign shard partition is empty")
+        # Automatic campaigns can legitimately schedule an empty partition
+        # (no mutable function changed); it reports a zero fragment instead
+        # of running Mutmut with no keys.
+        return {
+            "shard_index": index,
+            "shard_count": shard_count,
+            "plan_sha256": plan_digest(plan_json),
+            "base_sha": plan_json["base_sha"],
+            "head_sha": plan_json["head_sha"],
+            "exit_code": 0,
+            "mutants": {},
+            "stats": {**dict.fromkeys(COUNTERS, 0), "total": 0},
+            "review": {
+                "base_sha": plan_json["base_sha"],
+                "head_sha": plan_json["head_sha"],
+                "reviewed_equivalents": [],
+                "mutants": {},
+            },
+        }
     completed = subprocess.run(
         ["mutmut", "run", *keys], cwd=project_root, check=False
     )
