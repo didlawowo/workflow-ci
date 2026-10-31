@@ -77,6 +77,11 @@ def hosted_reasons(candidate: Path, workflow: str) -> list[str]:
         "jobs:\n  a:\n    strategy:\n      matrix:\n        include:\n"
         "          - name: ubuntu-latest\n",
         "jobs:\n  a:\n    runs-on: arc-runner-x # ubuntu-latest\n",
+        "jobs:\n  a:\n    strategy:\n      matrix:\n        include:\n"
+        "          - name: ubuntu-latest # linux\n",
+        "description: macos-14 # x\n",
+        "jobs:\n  a:\n    strategy:\n      matrix:\n        include:\n"
+        "          - name: 'ubuntu-latest' # x\n",
     ],
 )
 def test_github_hosted_runner_fails_policy_when_a_workflow_selects_it(
@@ -102,6 +107,7 @@ def test_github_hosted_runner_fails_policy_when_a_workflow_selects_it(
         "jobs:\n  a:\n    runs-on: arc-runner-x\n    steps:\n      - run: |\n"
         "          cat <<EOF\n          runs-on: ubuntu-latest\n          EOF\n",
         "name: tests on ubuntu-latest\njobs:\n  a:\n    runs-on: arc-runner-x\n",
+        "jobs:\n  a:\n    steps:\n      - run: |2-\n          echo ubuntu-latest\n",
         "jobs:\n  a:\n    runs-on: arc-runner-ubuntu-24.04\n",
         "jobs:\n  a:\n    runs-on: arc-runner-x\n"
         "    defaults:\n      run:\n        working-directory: scripts/macos-14\n",

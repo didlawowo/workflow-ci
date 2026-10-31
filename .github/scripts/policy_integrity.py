@@ -57,7 +57,7 @@ WORKFLOWS_DIR = ".github/workflows"
 PROSE_KEY_RE = re.compile(
     r"""^(\s*(?:-\s+)?)["']?(?:name|description|if|run|script|body)["']?\s*:(.*)$"""
 )
-BLOCK_SCALAR_RE = re.compile(r"^\s*[|>][+-]?\d*\s*(?:#.*)?$")
+BLOCK_SCALAR_RE = re.compile(r"^\s*[|>][+-]?\d?[+-]?\s*(?:#.*)?$")
 # GitHub label shapes only, with a bounded suffix. The lookbehind keeps
 # arc-runner-ubuntu-24.04 and paths such as scripts/macos-14 allowed.
 HOSTED_LABEL_RE = re.compile(
@@ -182,7 +182,7 @@ def _hidden_paths(root: Path) -> set[str]:
 
 def _is_prose(value: str) -> bool:
     """Tell a sentence from a value that a matrix or an anchor could reuse."""
-    value = value.strip()
+    value = value.split(" #", maxsplit=1)[0].strip()
     return " " in value and value[0] not in "&*[{"
 
 
