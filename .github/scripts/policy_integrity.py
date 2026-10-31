@@ -182,7 +182,7 @@ def _hidden_paths(root: Path) -> set[str]:
 
 def _is_prose(value: str) -> bool:
     """Tell a sentence from a value that a matrix or an anchor could reuse."""
-    value = value.split(" #", maxsplit=1)[0].strip()
+    value = re.split(r"[ \t]#", value, maxsplit=1)[0].strip()
     return " " in value and value[0] not in "&*[{"
 
 

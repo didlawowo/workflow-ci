@@ -80,6 +80,7 @@ def hosted_reasons(candidate: Path, workflow: str) -> list[str]:
         "jobs:\n  a:\n    strategy:\n      matrix:\n        include:\n"
         "          - name: ubuntu-latest # linux\n",
         "description: macos-14 # x\n",
+        "description: macos-14\t# x\n",
         "jobs:\n  a:\n    strategy:\n      matrix:\n        include:\n"
         "          - name: 'ubuntu-latest' # x\n",
     ],
