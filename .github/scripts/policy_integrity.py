@@ -51,12 +51,13 @@ SEMVER_RE = re.compile(r"^v(\d+)\.(\d+)\.(\d+)$")
 
 WORKFLOWS_DIR = ".github/workflows"
 # Fail closed without a YAML parser, which the trusted checkout does not install:
-# every key is scanned, so a label reached through a list, an anchor, a matrix or
-# an input default is caught. Only keys that cannot select a runner are skipped.
+# every line is scanned, so a label reached through a list, an anchor, a matrix or
+# an input default is caught. Only full-line comments and prose are skipped, and a
+# label in a trailing comment is reported rather than risk hiding a real one.
 PROSE_KEY_RE = re.compile(
-    r"""^\s*(?:-\s+)?["']?(?:name|description|if|run|script|body)["']?\s*:(.*)$"""
+    r"""^(\s*(?:-\s+)?)["']?(?:name|description|if|run|script|body)["']?\s*:(.*)$"""
 )
-BLOCK_SCALAR_RE = re.compile(r"^\s*[|>][+-]?\d*\s*$")
+BLOCK_SCALAR_RE = re.compile(r"^\s*[|>][+-]?\d*\s*(?:#.*)?$")
 # GitHub label shapes only, with a bounded suffix. The lookbehind keeps
 # arc-runner-ubuntu-24.04 and paths such as scripts/macos-14 allowed.
 HOSTED_LABEL_RE = re.compile(
@@ -179,38 +180,33 @@ def _hidden_paths(root: Path) -> set[str]:
     }
 
 
-def _without_comment(line: str) -> str:
-    """Drop a YAML comment, keeping a `#` that sits inside a quoted string."""
-    quote = ""
-    for index, char in enumerate(line):
-        if quote:
-            quote = "" if char == quote else quote
-        elif char in "\"'":
-            quote = char
-        elif char == "#" and (index == 0 or line[index - 1].isspace()):
-            return line[:index]
-    return line
+def _is_prose(value: str) -> bool:
+    """Tell a sentence from a value that a matrix or an anchor could reuse."""
+    value = value.strip()
+    return " " in value and value[0] not in "&*[{"
 
 
 def hosted_runner_labels(text: str) -> list[tuple[int, str]]:
     """Return the GitHub-hosted labels found outside prose, with their line."""
     found: list[tuple[int, str]] = []
-    prose_indent: int | None = None
+    block_column: int | None = None
     for number, line in enumerate(text.splitlines(), start=1):
-        indent = len(line) - len(line.lstrip())
-        if prose_indent is not None:
-            if not line.strip() or indent > prose_indent:
+        if block_column is not None:
+            indent = len(line) - len(line.lstrip())
+            if not line.strip() or indent > block_column:
                 continue
-            prose_indent = None
+            block_column = None
+        if line.lstrip().startswith("#"):
+            continue
 
-        code = _without_comment(line)
-        prose = PROSE_KEY_RE.match(code)
-        if prose:
-            if BLOCK_SCALAR_RE.match(prose.group(1)):
-                prose_indent = indent
+        prose = PROSE_KEY_RE.match(line)
+        if prose and BLOCK_SCALAR_RE.match(prose.group(2)):
+            block_column = len(prose.group(1))
+            continue
+        if prose and _is_prose(prose.group(2)):
             continue
         found.extend(
-            (number, match.group(0)) for match in HOSTED_LABEL_RE.finditer(code)
+            (number, match.group(0)) for match in HOSTED_LABEL_RE.finditer(line)
         )
     return found
 

@@ -63,6 +63,20 @@ def hosted_reasons(candidate: Path, workflow: str) -> list[str]:
         """jobs:\n  a:\n    runs-on: "${{ x && ' #' || 'ubuntu-latest' }}"\n""",
         "jobs:\n  a:\n    steps:\n      - run: |\n          echo ok\n"
         "  b:\n    runs-on: ubuntu-latest\n",
+        'jobs:\n  a:\n    runs-on: ["a \\" # x", ubuntu-latest]\n',
+        "x: {a: don't, b: 'x # y', runs-on: ubuntu-latest}\n",
+        """jobs:\n  a:\n    runs-on: [it's, "q", 'a # b', ubuntu-latest]\n""",
+        "jobs:\n  a:\n    runs-on: [a\u00a0#, ubuntu-latest]\n",
+        "jobs:\n  a:\n    strategy:\n      matrix:\n        include:\n"
+        "          - name: >\n              Linux\n"
+        "            os: ubuntu-latest\n",
+        "jobs:\n  a:\n    steps:\n      - run: |\n          echo ok\n"
+        "        with:\n          runner: ubuntu-latest\n",
+        "name: &r ubuntu-latest\njobs:\n  a:\n    runs-on: *r\n",
+        "jobs:\n  a:\n    strategy:\n      matrix: {name: [ubuntu-latest]}\n",
+        "jobs:\n  a:\n    strategy:\n      matrix:\n        include:\n"
+        "          - name: ubuntu-latest\n",
+        "jobs:\n  a:\n    runs-on: arc-runner-x # ubuntu-latest\n",
     ],
 )
 def test_github_hosted_runner_fails_policy_when_a_workflow_selects_it(
@@ -82,13 +96,12 @@ def test_github_hosted_runner_fails_policy_when_a_workflow_selects_it(
         "jobs:\n  a:\n    runs-on: ${{ inputs.runner }}\n",
         "jobs:\n  a:\n    runs-on: [self-hosted, macOS, keryx-ios]\n",
         "jobs:\n  a:\n    runs-on: arc-runner-ubuntu-gpu\n",
-        "# runs-on: ubuntu-latest\njobs:\n  a:\n    runs-on: arc-runner-x # ubuntu-latest\n",
+        "# runs-on: ubuntu-latest\njobs:\n  a:\n    runs-on: arc-runner-x\n",
         "jobs:\n  a:\n    runs-on: arc-runner-x\n    steps:\n"
         "      - run: echo ubuntu-latest\n",
         "jobs:\n  a:\n    runs-on: arc-runner-x\n    steps:\n      - run: |\n"
         "          cat <<EOF\n          runs-on: ubuntu-latest\n          EOF\n",
         "name: tests on ubuntu-latest\njobs:\n  a:\n    runs-on: arc-runner-x\n",
-        "jobs:\n  a:\n    runs-on: # ubuntu-latest\n      - arc-runner-x\n",
         "jobs:\n  a:\n    runs-on: arc-runner-ubuntu-24.04\n",
         "jobs:\n  a:\n    runs-on: arc-runner-x\n"
         "    defaults:\n      run:\n        working-directory: scripts/macos-14\n",
