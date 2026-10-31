@@ -49,6 +49,16 @@ INPUT_REF_RE = re.compile(
 )
 SEMVER_RE = re.compile(r"^v(\d+)\.(\d+)\.(\d+)$")
 
+WORKFLOWS_DIR = ".github/workflows"
+# Keys that can select a runner directly, through a reusable-workflow input, a
+# runner group or a matrix. Scanning only them keeps `run:` scripts out of scope.
+RUNNER_KEY_RE = re.compile(r"^(\s*)(?:-\s+)?(?:runs-on|runner|labels|os)\s*:\s*(.*)$")
+LIST_ITEM_RE = re.compile(r"^(\s*)-\s+(.*)$")
+# The lookbehind keeps self-hosted labels such as arc-runner-ubuntu-gpu allowed.
+HOSTED_LABEL_RE = re.compile(
+    r"(?<![\w.-])(?:ubuntu|macos|windows)-[a-z0-9][a-z0-9.-]*", re.IGNORECASE
+)
+
 
 def _read(root: Path, relative: str) -> str | None:
     path = root / relative
@@ -163,6 +173,54 @@ def _hidden_paths(root: Path) -> set[str]:
     }
 
 
+def hosted_runner_labels(text: str) -> list[tuple[int, str]]:
+    """Return the GitHub-hosted labels named by runner keys, with their line."""
+    found: list[tuple[int, str]] = []
+    block_indent: int | None = None
+    for number, line in enumerate(text.splitlines(), start=1):
+        if line.lstrip().startswith("#"):
+            continue
+        key = RUNNER_KEY_RE.match(line)
+        if key:
+            value = re.split(r"\s#", key.group(2), maxsplit=1)[0].strip()
+            block_indent = len(key.group(1)) if not value else None
+        elif block_indent is not None:
+            item = LIST_ITEM_RE.match(line)
+            if item is None or len(item.group(1)) < block_indent:
+                if line.strip():
+                    block_indent = None
+                continue
+            value = re.split(r"\s#", item.group(2), maxsplit=1)[0]
+        else:
+            continue
+        found.extend(
+            (number, match.group(0)) for match in HOSTED_LABEL_RE.finditer(value)
+        )
+    return found
+
+
+def _hosted_runner_violations(candidate: Path) -> list[dict[str, str]]:
+    workflows = candidate / WORKFLOWS_DIR
+    if not workflows.is_dir():
+        return []
+    violations: list[dict[str, str]] = []
+    for path in sorted(workflows.iterdir()):
+        if not path.is_file() or path.suffix not in {".yml", ".yaml"}:
+            continue
+        text = path.read_text(encoding="utf-8", errors="replace")
+        for line, label in hosted_runner_labels(text):
+            violations.append(
+                {
+                    "path": path.relative_to(candidate).as_posix(),
+                    "reason": (
+                        f"GitHub-hosted runner {label} at line {line} is forbidden; "
+                        "use arc-runner-<repo>"
+                    ),
+                }
+            )
+    return violations
+
+
 def evaluate(base: Path, candidate: Path, repository: str = "") -> dict[str, Any]:
     changed: list[str] = []
     allowed: list[dict[str, str]] = []
@@ -258,6 +316,8 @@ def evaluate(base: Path, candidate: Path, repository: str = "") -> dict[str, Any
         else:
             reason = "protected policy file changed outside the trusted base"
         violations.append({"path": relative, "reason": reason})
+
+    violations.extend(_hosted_runner_violations(candidate))
 
     return {
         "schema_version": 1,

@@ -3,6 +3,8 @@ from __future__ import annotations
 import importlib.util
 from pathlib import Path
 
+import pytest
+
 MODULE_PATH = (
     Path(__file__).resolve().parents[1] / ".github" / "scripts" / "policy_integrity.py"
 )
@@ -27,6 +29,76 @@ def wrapper(version: str, extra: str = "") -> str:
         f"      workflow-ci-ref: {version}\n"
         f"{extra}"
     )
+
+
+def hosted_reasons(candidate: Path, workflow: str) -> list[str]:
+    write(candidate, ".github/workflows/ci.yml", workflow)
+    result = policy_integrity.evaluate(candidate.parent / "base", candidate)
+    return [violation["reason"] for violation in result["violations"]]
+
+
+@pytest.mark.parametrize(
+    "workflow",
+    [
+        "jobs:\n  a:\n    runs-on: ubuntu-latest\n",
+        'jobs:\n  a:\n    runs-on: "macos-15"\n',
+        "jobs:\n  a:\n    runs-on: [windows-latest]\n",
+        "jobs:\n  a:\n    runs-on: ${{ vars.RUNNER || 'ubuntu-24.04' }}\n",
+        "jobs:\n  a:\n    runs-on:\n      - ubuntu-latest\n",
+        "jobs:\n  a:\n    runs-on:\n      group: ci\n      labels: ubuntu-latest\n",
+        "jobs:\n  a:\n    uses: ./x.yml\n    with:\n      runner: ubuntu-latest\n",
+        "jobs:\n  a:\n    strategy:\n      matrix:\n        os: [ubuntu-latest]\n",
+        "jobs:\n  a:\n    strategy:\n      matrix:\n        include:\n"
+        "          - os: macos-latest\n",
+    ],
+)
+def test_github_hosted_runner_fails_policy_when_a_runner_key_names_it(
+    tmp_path: Path, workflow: str
+) -> None:
+    assert any(
+        "GitHub-hosted runner" in reason
+        for reason in hosted_reasons(tmp_path / "candidate", workflow)
+    )
+
+
+@pytest.mark.parametrize(
+    "workflow",
+    [
+        "jobs:\n  a:\n    runs-on: arc-runner-keryx\n",
+        "jobs:\n  a:\n    runs-on: ${{ vars.RUNNER || 'arc-runner-keryx' }}\n",
+        "jobs:\n  a:\n    runs-on: ${{ inputs.runner }}\n",
+        "jobs:\n  a:\n    runs-on: [self-hosted, macOS, keryx-ios]\n",
+        "jobs:\n  a:\n    runs-on: arc-runner-ubuntu-gpu\n",
+        "# runs-on: ubuntu-latest\njobs:\n  a:\n    runs-on: arc-runner-x # ubuntu-latest\n",
+        "jobs:\n  a:\n    runs-on: arc-runner-x\n    steps:\n"
+        "      - run: echo ubuntu-latest\n",
+    ],
+)
+def test_internal_runner_passes_policy_when_no_hosted_label_is_selected(
+    tmp_path: Path, workflow: str
+) -> None:
+    assert hosted_reasons(tmp_path / "candidate", workflow) == []
+
+
+def test_disabled_workflow_is_ignored_by_hosted_runner_policy(tmp_path: Path) -> None:
+    candidate = tmp_path / "candidate"
+    write(candidate, ".github/workflows/old.yml.disabled", "runs-on: ubuntu-latest\n")
+
+    assert policy_integrity.evaluate(tmp_path / "base", candidate)["status"] == "pass"
+
+
+def test_hosted_runner_violation_names_file_and_line(tmp_path: Path) -> None:
+    candidate = tmp_path / "candidate"
+    write(
+        candidate,
+        ".github/workflows/ci.yml",
+        "jobs:\n  a:\n    runs-on: ubuntu-latest\n",
+    )
+
+    violation = policy_integrity.evaluate(tmp_path / "base", candidate)["violations"][0]
+
+    assert violation["path"] == ".github/workflows/ci.yml"
+    assert "ubuntu-latest at line 3" in violation["reason"]
 
 
 def test_unmodified_policy_passes(tmp_path: Path) -> None:
