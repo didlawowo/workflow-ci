@@ -88,18 +88,29 @@ first export the auditable function evidence and exact head SHA.
 
 ### Complete campaigns with bounded workers
 
-Set `mutation-shards` to a number from 2 to 16 on `quality-evidence.yml`, `ci.yml`
-or `mutation-policy.yml` to use `mutation-campaign.yml`. The default remains one
-ordinary mutation job. The campaign uses at most four workers concurrently;
-planning and each worker are bounded to 45 minutes, verification to ten minutes.
+Set `mutation-shards` on `quality-evidence.yml`, `ci.yml` or `mutation-policy.yml`
+to use `mutation-campaign.yml`. The default `0` runs the campaign automatically
+for Python repositories, sizing one to sixteen workers from the planned mutant
+inventory (about one worker per 1,200 mutants). Set `1` to force one ordinary
+mutation job, or a number from 2 to 16 to fix the worker count. The campaign
+uses at most four workers concurrently; planning and each worker are bounded to
+45 minutes, verification to ten minutes. Automatic mode tolerates a scope with no
+mutable changed function: an empty inventory becomes an empty one-worker campaign
+instead of a failure, while a fixed worker count keeps the previous error.
 
 This is a protected-runner protocol, not an automatic port of a consumer's native
-mutation engine. Install two reviewed entrypoints on the protected base before
-enabling the campaign:
+mutation engine. Python repositories get the central entrypoints shipped by this
+repository (`.ci/mutation-plan.sh`, `.ci/mutation-shard.sh`): they enumerate the
+inventory with Mutmut's own operators, so no consumer script is required. The
+planner skips sources it cannot process outside the PR scope, but Mutmut itself
+rejects undecodable files inside the configured source paths: keep generated or
+binary `.py` fixtures out of `source_paths`. A consumer may override them by
+declaring reviewed entrypoints on the protected base:
 
 - `.ci/mutation-plan.sh <output-json>` generates the **entire expected native
   mutant inventory**, without rewriting candidate sources or adding suppression
-  pragmas. It receives the current base/head SHAs, depth and shard count.
+  pragmas. It receives the current base/head SHAs, depth and shard count; a shard
+  count of `0` asks the planner to resolve `shard_count` inside the plan itself.
 - `.ci/mutation-shard.sh <output-json>` reads `MUTATION_PLAN`, executes exactly the
   partition selected by `MUTATION_SHARD_INDEX` and `MUTATION_SHARD_COUNT`, and exports
   all individual statuses and raw counts. Nonzero execution exits fail the job.

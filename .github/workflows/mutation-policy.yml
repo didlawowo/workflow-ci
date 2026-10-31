@@ -19,10 +19,15 @@ on:
         type: string
         default: "."
       mutation-shards:
-        description: "Use a protected campaign planner and 2 to 16 bounded workers"
+        description: "Protected mutation campaign workers: 0 sizes Python campaigns automatically, 1 runs one job, 2 to 16 fixed"
         required: false
         type: number
-        default: 1
+        default: 0
+      repo-type:
+        description: "Repository family used to route automatic mode (python routes to the campaign)"
+        required: false
+        type: string
+        default: "python"
     outputs:
       required:
         description: "Whether mutation testing is mandatory for this PR"
@@ -47,7 +52,7 @@ concurrency:
   cancel-in-progress: true
 jobs:
   campaign:
-    if: github.event_name == 'pull_request' && inputs.mutation-shards > 1
+    if: github.event_name == 'pull_request' && (inputs.mutation-shards > 1 || (inputs.mutation-shards == 0 && inputs.repo-type == 'python'))
     uses: $/.github/workflows/mutation-campaign.yml
     with:
       runner: ${{ inputs.trusted-runner || vars.RUNNER || format('arc-runner-{0}', github.event.repository.name) }}
@@ -60,7 +65,7 @@ jobs:
       actions: read
 
   mutation-run:
-    if: github.event_name == 'pull_request' && inputs.mutation-shards <= 1
+    if: github.event_name == 'pull_request' && inputs.mutation-shards <= 1 && !(inputs.mutation-shards == 0 && inputs.repo-type == 'python')
     # Use a dedicated execution runner when configured; otherwise inherit
     # the repository runner. Keep PR execution read-only and isolated.
     permissions:
@@ -82,7 +87,10 @@ jobs:
           SHARDS: ${{ inputs.mutation-shards }}
         run: |
           set -euo pipefail
-          test "${SHARDS:-1}" = 1
+          case "${SHARDS:-1}" in
+            1|0) ;;
+            *) exit 1 ;;
+          esac
       - name: Fetch central workflow implementation without submodule traversal
         env:
           WORKFLOW_REPOSITORY: ${{ job.workflow_repository }}
@@ -601,7 +609,7 @@ jobs:
 
   mutation-verify:
     name: Mutation policy gate
-    if: always() && github.event_name == 'pull_request' && inputs.mutation-shards <= 1
+    if: always() && github.event_name == 'pull_request' && inputs.mutation-shards <= 1 && !(inputs.mutation-shards == 0 && inputs.repo-type == 'python')
     needs: [mutation-run]
     permissions:
       contents: read

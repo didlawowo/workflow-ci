@@ -11,7 +11,7 @@ on:
         type: string
         default: "."
       shards:
-        description: Number of bounded workers, from 1 to 16
+        description: "Number of bounded workers: 0 sizes the campaign automatically for Python plans, 1 to 16 fixed"
         required: true
         type: number
     outputs:
@@ -43,6 +43,7 @@ jobs:
       required: ${{ steps.policy.outputs.required }}
       depth: ${{ steps.policy.outputs.depth }}
       matrix: ${{ steps.plan.outputs.matrix }}
+      shard-count: ${{ steps.generate.outputs.shard-count }}
     steps:
       - uses: $/.github/actions/mutation-campaign-checkout
         with:
@@ -63,6 +64,7 @@ jobs:
           MUTATION_EXECUTION_MODE: ${{ vars.MUTATION_EXECUTION_MODE || 'automatic' }}
         run: uv run --no-project --python 3.12 python .workflow-ci/.github/scripts/mutation_policy.py classify
       - name: Generate expected mutant inventory from protected planner
+        id: generate
         if: steps.policy.outputs.required == 'true'
         env:
           MUTATION_BASE_SHA: ${{ github.event.pull_request.base.sha }}
@@ -82,7 +84,7 @@ jobs:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           DIRECTORY: ${{ inputs.working-directory }}
-          SHARDS: ${{ inputs.shards }}
+          SHARDS: ${{ steps.generate.outputs.shard-count }}
         run: |
           set -euo pipefail
           uv run --no-project --python 3.12 python .workflow-ci/.ci/mutation_campaign.py plan \
@@ -125,7 +127,7 @@ jobs:
           MUTATION_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           MUTATION_DEPTH: ${{ needs.plan.outputs.depth }}
           DIRECTORY: ${{ inputs.working-directory }}
-          SHARDS: ${{ inputs.shards }}
+          SHARDS: ${{ needs.plan.outputs.shard-count }}
           INDEX: ${{ matrix.index }}
         run: |
           set -euo pipefail
@@ -189,7 +191,7 @@ jobs:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           DIRECTORY: ${{ inputs.working-directory }}
-          SHARDS: ${{ inputs.shards }}
+          SHARDS: ${{ needs.plan.outputs.shard-count }}
           DEPTH: ${{ needs.plan.outputs.depth }}
         run: |
           set -euo pipefail
