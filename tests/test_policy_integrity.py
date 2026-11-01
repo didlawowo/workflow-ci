@@ -505,6 +505,17 @@ def test_quality_duplicate_version_input_fails_closed(tmp_path: Path) -> None:
     assert policy_integrity.evaluate(base, candidate)["status"] == "fail"
 
 
+def test_campaign_checkout_peels_annotated_release_tags() -> None:
+    action = (
+        MODULE_PATH.parents[1] / "actions" / "mutation-campaign-checkout" / "action.yml"
+    ).read_text(encoding="utf-8")
+
+    assert (
+        'test "$(git -C .workflow-ci rev-parse HEAD)" = '
+        '"$(git -C .workflow-ci rev-parse "${WORKFLOW_SHA}^{commit}")"' in action
+    )
+
+
 def test_initial_trust_check_peels_tags_and_rejects_wrong_commit(
     tmp_path: Path,
 ) -> None:
