@@ -16,6 +16,22 @@ if [[ -z "${VIRTUAL_ENV:-}" ]]; then
     bootstrap_error "uv is required to provision the isolated campaign environment."
     exit 1
   fi
+  # Keep the isolated interpreter aligned with the consumer, as the single-job
+  # path does. Read only a validated Python minor; never execute PR file content.
+  if [[ -L .python-version ]]; then
+    bootstrap_error "consumer .python-version must be a regular file."
+    exit 1
+  fi
+  if [[ -f .python-version ]]; then
+    IFS= read -r REQUESTED_VERSION < .python-version || true
+    case "$REQUESTED_VERSION" in
+      3.12|3.13|3.14) PYTHON_VERSION="$REQUESTED_VERSION" ;;
+      *)
+        bootstrap_error "unsupported consumer .python-version; expected 3.12, 3.13 or 3.14."
+        exit 1
+        ;;
+    esac
+  fi
   MUTATION_VENV="${RUNNER_TEMP:-/tmp}/workflow-ci-campaign-venv"
   rm -rf "$MUTATION_VENV"
   if ! uv python install "$PYTHON_VERSION"; then
