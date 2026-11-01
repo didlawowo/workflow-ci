@@ -23,7 +23,7 @@ runs:
         WORKFLOW_SHA: ${{ inputs.workflow-sha }}
       run: |
         set -euo pipefail
-        test "$(git -C .workflow-ci rev-parse HEAD)" = "$WORKFLOW_SHA"
+        test "$(git -C .workflow-ci rev-parse HEAD)" = "$(git -C .workflow-ci rev-parse "${WORKFLOW_SHA}^{commit}")"
     - name: Checkout protected base without submodule traversal
       shell: bash
       env:
