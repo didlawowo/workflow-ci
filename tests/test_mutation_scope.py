@@ -1,7 +1,10 @@
 import importlib.util
 import subprocess
+import sys
 from pathlib import Path
 from unittest.mock import patch
+
+import pytest
 
 MODULE_PATH = Path(__file__).resolve().parents[1] / ".ci" / "mutation_scope.py"
 SPEC = importlib.util.spec_from_file_location("mutation_scope", MODULE_PATH)
@@ -63,6 +66,45 @@ def test_new_module_still_requires_mutants(tmp_path: Path):
     (repo / "src/service.py").write_text("def compute(value):\n    return value + 1\n")
     head = _commit(repo, "add module")
     assert mutation_scope.mutation_targets(repo, base, head)
+
+
+@pytest.mark.parametrize("depth", ["medium", "high"])
+@pytest.mark.parametrize("contents", [b"def broken(:\n", b"# invalid utf8: \xff\n"])
+def test_scope_should_fail_with_filename_when_changed_source_is_unreadable(
+    tmp_path, depth, contents
+):
+    repo = _init_repo(tmp_path)
+    base = _commit(repo, "initial")
+    (repo / "src/broken.py").write_bytes(contents)
+    head = _commit(repo, "unreadable source")
+    with pytest.raises(
+        ValueError, match=r"Cannot compute mutation scope for src/broken.py with Python"
+    ) as caught:
+        mutation_scope.mutation_targets(repo, base, head, depth=depth)
+    assert sys.version.split()[0] in str(caught.value)
+    assert caught.value.__cause__ is not None
+
+
+def test_scope_should_report_unsupported_python_syntax(tmp_path):
+    if sys.version_info >= (3, 14):
+        pytest.skip("PEP 758 is supported by this interpreter")
+    repo = _init_repo(tmp_path)
+    base = _commit(repo, "initial")
+    (repo / "src/service.py").write_text(
+        "def compute():\n    try:\n        return 1\n"
+        "    except TypeError, ValueError:\n        return 0\n"
+    )
+    head = _commit(repo, "Python 3.14 syntax")
+    with pytest.raises(ValueError, match="src/service.py.*Python"):
+        mutation_scope.mutation_targets(repo, base, head)
+
+
+def test_scope_should_ignore_unreadable_files_outside_trusted_sources(tmp_path):
+    repo = _init_repo(tmp_path)
+    base = _commit(repo, "initial")
+    (repo / "test_broken.py").write_text("def broken(:\n")
+    head = _commit(repo, "broken test outside scope")
+    assert mutation_scope.mutation_targets(repo, base, head) == ()
 
 
 def test_stacked_pr_scope_only_targets_child_delta(tmp_path: Path):
@@ -262,6 +304,7 @@ def test_changed_lines_compares_exact_base_and_head_trees():
         check=True,
         capture_output=True,
         text=True,
+        errors="replace",
     )
 
 

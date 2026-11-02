@@ -236,6 +236,13 @@ def test_plan_should_return_empty_plan_when_auto_and_no_targets(tmp_path):
 @pytest.mark.skipif(not HAVE_MUTMUT, reason="mutmut is not provisioned")
 def test_plan_should_skip_broken_sources_outside_the_scope(tmp_path):
     repo, base, _ = _git_repo(tmp_path)
+    # Keep these files unchanged in the PR: changed unreadable production
+    # files must fail scope computation rather than disappear from it.
+    (repo / "src" / "pkg" / "broken.py").write_text("def x(:\n    pass\n")
+    (repo / "src" / "pkg" / "binary.py").write_bytes(b"\xff\xfe\x00garbage")
+    git(repo, "add", ".")
+    git(repo, "commit", "-qm", "pre-existing unprocessable sources")
+    base = git(repo, "rev-parse", "HEAD")
     (repo / "src" / "pkg" / "core.py").write_text(
         "def calc(a, b):\n    return a + b\n"
         "\n"
@@ -243,8 +250,6 @@ def test_plan_should_skip_broken_sources_outside_the_scope(tmp_path):
     )
     # A syntax error and non-UTF-8 bytes in sources that the PR scope never
     # targets must be skipped with a warning, not abort the whole campaign.
-    (repo / "src" / "pkg" / "broken.py").write_text("def x(:\n    pass\n")
-    (repo / "src" / "pkg" / "binary.py").write_bytes(b"\xff\xfe\x00garbage")
     git(repo, "add", ".")
     git(repo, "commit", "-qm", "head")
     head = git(repo, "rev-parse", "HEAD")
