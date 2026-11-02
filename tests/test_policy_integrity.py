@@ -607,3 +607,14 @@ def test_policy_integrity_never_starts_a_job_for_forks() -> None:
     condition = workflow["jobs"]["policy-integrity"]["if"]
     assert "github.event.pull_request.head.repo.full_name == github.repository" in condition
     assert "github.event_name != 'pull_request_target'" in condition
+
+
+def test_quality_evidence_never_starts_a_job_for_forks() -> None:
+    import yaml
+
+    workflow = yaml.safe_load(
+        (MODULE_PATH.parents[1] / "workflows" / "quality-evidence.yml").read_text()
+    )
+    guard = "github.event.pull_request.head.repo.full_name == github.repository"
+    for name, job in workflow["jobs"].items():
+        assert guard in job["if"], name

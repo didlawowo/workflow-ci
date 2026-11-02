@@ -102,6 +102,8 @@ concurrency:
 
 jobs:
   mutation:
+    # A fork PR starts no job on an internal runner, even once approved.
+    if: (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
     name: "Mutation quality gate"
     with:
       scope-key: ${{ format('{0}-{1}', inputs.repo-type, inputs.working-directory) }}
@@ -118,7 +120,7 @@ jobs:
 
   independent-verification:
     name: "Independent quality execution"
-    if: inputs.enable-independent-verification
+    if: inputs.enable-independent-verification && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
     runs-on: ${{ inputs.runner }}
     timeout-minutes: 25
     permissions:
@@ -304,7 +306,7 @@ jobs:
 
   trusted-gate:
     name: "Trusted quality gate"
-    if: always()
+    if: always() && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
     needs: [independent-verification, mutation]
     runs-on: ${{ inputs.runner }}
     timeout-minutes: 5
@@ -370,7 +372,7 @@ jobs:
   publish-evidence:
     name: "Publish trusted quality evidence"
     timeout-minutes: 10
-    if: always()
+    if: always() && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
     needs: [trusted-gate, independent-verification, mutation]
     concurrency:
       group: quality-report-${{ github.repository }}-${{ github.event.pull_request.number || github.ref_name }}-${{ inputs.repo-type }}-${{ inputs.working-directory }}
