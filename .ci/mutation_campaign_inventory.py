@@ -46,20 +46,20 @@ def resolve_shard_count(requested: int, total: int) -> int:
 
 def variant_name(key: str) -> str:
     module, _, name = key.rpartition(".")
-    if not name.startswith("x_") or VARIANT_MARKER not in name:
+    if not name.startswith(("x_", "xǁ")) or VARIANT_MARKER not in name:
         raise InventoryError(f"Malformed mutant key: {key}")
     return name
 
 
 def extract_variants(code: str) -> dict[str, str]:
-    """Return every ``x_<fn>__mutmut_N`` function source inside a staged file."""
+    """Return function and class-method mutant sources inside a staged file."""
     tree = ast.parse(code)
     variants: dict[str, str] = {}
     for node in ast.walk(tree):
         if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
             continue
         name = node.name
-        if not name.startswith("x_") or not re.search(
+        if not name.startswith(("x_", "xǁ")) or not re.search(
             rf"{VARIANT_MARKER}\d+$", name
         ):
             continue
@@ -89,7 +89,8 @@ def _source_paths(project_root: Path) -> list[Path]:
         raw = data.get("tool", {}).get("mutmut", {}).get("source_paths", [])
         if isinstance(raw, str):
             raw = [raw]
-        return [project_root / part for part in raw]
+        if raw:
+            return [project_root / part for part in raw]
     for candidate in ("src",):
         if (project_root / candidate).is_dir():
             return [project_root / candidate]

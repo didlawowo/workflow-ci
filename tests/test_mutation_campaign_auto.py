@@ -40,13 +40,34 @@ def test_extract_variants_should_find_trampoline_function_sources():
         "class Calc:\n"
         "    def x_mǁmul__mutmut_1(self, a, b):\n"
         "        return a / b\n"
+        "    async def xǁCalcǁmul__mutmut_3(self, a, b):\n"
+        "        return a - b\n"
+        "    def xǁCalcǁmul__mutmut_orig(self, a, b):\n"
+        "        return a * b\n"
         "def x_add__mutmut_2(a, b):\n"
         "    return a - b\n"
         "def x_add__mutmut_orig(a, b):\n"
         "    return a + b\n"
     )
     variants = inventory.extract_variants(code)
-    assert set(variants) == {"x_mǁmul__mutmut_1", "x_add__mutmut_2"}
+    assert set(variants) == {
+        "x_mǁmul__mutmut_1",
+        "x_add__mutmut_2",
+        "xǁCalcǁmul__mutmut_3",
+    }
+    for name in variants:
+        assert inventory.variant_name(f"pkg.core.{name}") == name
+
+
+@pytest.mark.parametrize(
+    "configuration", ["", "[tool.mutmut]\n", "[tool.mutmut]\nsource_paths=[]\n"]
+)
+def test_source_paths_should_fall_back_to_src_when_not_configured(tmp_path, configuration):
+    (tmp_path / "src").mkdir()
+    (tmp_path / "pyproject.toml").write_text(
+        '[project]\nname="demo"\nversion="0.1.0"\n' + configuration
+    )
+    assert inventory._source_paths(tmp_path) == [tmp_path / "src"]
 
 
 def test_plan_mode_should_publish_resolved_count_from_central_entrypoint(tmp_path):
@@ -122,21 +143,28 @@ def git(root, *args):
 
 
 @pytest.mark.skipif(not HAVE_MUTMUT, reason="mutmut is not provisioned")
-def test_inventory_should_plan_and_shard_against_real_mutmut(tmp_path):
+@pytest.mark.parametrize("class_method", [False, True])
+def test_inventory_should_plan_and_shard_against_real_mutmut(tmp_path, class_method):
     repo = tmp_path / "repo"
     (repo / "src" / "pkg").mkdir(parents=True)
     (repo / "tests").mkdir(parents=True)
     (repo / "pyproject.toml").write_text(
         '[project]\nname="demo"\nversion="0.1.0"\n'
-        '[tool.mutmut]\nsource_paths=["src/"]\n'
     )
     (repo / "src" / "pkg" / "__init__.py").write_text("")
-    (repo / "src" / "pkg" / "core.py").write_text(
-        "def calc(a, b):\n    return a + b\n"
+    code = (
+        "class Calc:\n    def calc(self, a, b):\n        return a + b\n"
+        if class_method
+        else "def calc(a, b):\n    return a + b\n"
     )
+    (repo / "src" / "pkg" / "core.py").write_text(code)
     (repo / "tests" / "test_core.py").write_text(
-        "from pkg.core import calc\n\n"
-        "def test_calc():\n    assert calc(2, 3) == 5\n"
+        (
+            "from pkg.core import Calc\ncalc = Calc().calc\n\n"
+            if class_method
+            else "from pkg.core import calc\n\n"
+        )
+        + "def test_calc():\n    assert calc(2, 3) == 5\n"
     )
     git(repo, "init", "-q")
     git(repo, "config", "user.name", "Fixture")
@@ -145,7 +173,7 @@ def test_inventory_should_plan_and_shard_against_real_mutmut(tmp_path):
     git(repo, "commit", "-qm", "base")
     base = git(repo, "rev-parse", "HEAD")
     (repo / "src" / "pkg" / "core.py").write_text(
-        "def calc(a, b):\n    return a + b + 0\n"
+        code.replace("a + b", "a + b + 0")
     )
     git(repo, "add", ".")
     git(repo, "commit", "-qm", "head")
@@ -155,6 +183,8 @@ def test_inventory_should_plan_and_shard_against_real_mutmut(tmp_path):
     keys = set(plan_json["mutants"])
     assert keys, "the planner must enumerate real Mutmut keys"
     assert all(key.startswith("pkg.core.") for key in keys)
+    if class_method:
+        assert all(".xǁCalcǁcalc__mutmut_" in key for key in keys)
     assert plan_json["shard_count"] == 1
     assert set(plan_json["sources"]) == {"src/pkg/core.py"}
     mutation_campaign.validate_plan(
