@@ -8,6 +8,7 @@ import ast
 import configparser
 import re
 import subprocess
+import sys
 from pathlib import Path
 
 
@@ -78,6 +79,7 @@ def _changed_lines(repo: Path, base: str, head: str) -> dict[str, set[int]]:
         check=True,
         capture_output=True,
         text=True,
+        errors="replace",
     )
 
     changed: dict[str, set[int]] = {}
@@ -247,8 +249,12 @@ def mutation_targets(
 
         try:
             tree = ast.parse(path.read_text(encoding="utf-8"))
-        except (SyntaxError, UnicodeDecodeError):
-            continue
+        except (SyntaxError, UnicodeDecodeError) as error:
+            raise ValueError(
+                f"Cannot compute mutation scope for {relative} with Python "
+                f"{sys.version.split()[0]}: {error}. "
+                "Use the repository's target Python version and valid UTF-8 source."
+            ) from error
 
         if syntax_unchanged(repo, base, relative, tree):
             continue
