@@ -11,6 +11,9 @@ on:
 jobs:
   policy-integrity:
     name: "Trusted policy integrity"
+    # pull_request_target ignores contributor approval: a fork PR must not start a
+    # job on an internal runner. Other events still reach the context check below.
+    if: github.event_name != 'pull_request_target' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ${{ inputs.runner }}
     timeout-minutes: 5
     permissions:

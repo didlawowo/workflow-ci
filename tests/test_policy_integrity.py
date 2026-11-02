@@ -596,3 +596,14 @@ def test_initial_trust_check_peels_tags_and_rejects_wrong_commit(
         ).returncode
         != 0
     )
+
+
+def test_policy_integrity_never_starts_a_job_for_forks() -> None:
+    import yaml
+
+    workflow = yaml.safe_load(
+        (MODULE_PATH.parents[1] / "workflows" / "policy-integrity.yml").read_text()
+    )
+    condition = workflow["jobs"]["policy-integrity"]["if"]
+    assert "github.event.pull_request.head.repo.full_name == github.repository" in condition
+    assert "github.event_name != 'pull_request_target'" in condition
