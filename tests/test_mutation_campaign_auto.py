@@ -61,7 +61,9 @@ def test_extract_variants_should_find_trampoline_function_sources():
 @pytest.mark.parametrize(
     "configuration", ["", "[tool.mutmut]\n", "[tool.mutmut]\nsource_paths=[]\n"]
 )
-def test_source_paths_should_fall_back_to_src_when_not_configured(tmp_path, configuration):
+def test_source_paths_should_fall_back_to_src_when_not_configured(
+    tmp_path, configuration
+):
     (tmp_path / "src").mkdir()
     (tmp_path / "pyproject.toml").write_text(
         '[project]\nname="demo"\nversion="0.1.0"\n' + configuration
@@ -136,9 +138,7 @@ def test_run_should_fail_closed_on_symlinked_consumer_entrypoint(tmp_path):
 
 
 def git(root, *args):
-    return subprocess.check_output(
-        ["git", "-C", str(root), *args], text=True
-    ).strip()
+    return subprocess.check_output(["git", "-C", str(root), *args], text=True).strip()
 
 
 @pytest.mark.skipif(not HAVE_MUTMUT, reason="mutmut is not provisioned")
@@ -176,9 +176,7 @@ def test_inventory_should_plan_and_shard_against_real_mutmut(
     git(repo, "add", ".")
     git(repo, "commit", "-qm", "base")
     base = git(repo, "rev-parse", "HEAD")
-    (repo / "src" / "pkg" / "core.py").write_text(
-        code.replace("a + b", "a + b + 0")
-    )
+    (repo / "src" / "pkg" / "core.py").write_text(code.replace("a + b", "a + b + 0"))
     git(repo, "add", ".")
     git(repo, "commit", "-qm", "head")
     head = git(repo, "rev-parse", "HEAD")
@@ -202,7 +200,9 @@ def test_inventory_should_plan_and_shard_against_real_mutmut(
         assert item["mutant_sha256"] == plan_json["mutants"][key]["mutant_sha256"]
         assert item["status"] in inventory.COUNTERS
     survivors = set(fragment["review"]["reviewed_equivalents"])
-    killed = {key for key, item in fragment["mutants"].items() if item["status"] == "killed"}
+    killed = {
+        key for key, item in fragment["mutants"].items() if item["status"] == "killed"
+    }
     assert survivors, "weakly tested arithmetic must leave surviving mutants"
     assert killed, "tested arithmetic mutants must be killed"
     assert survivors == {
@@ -241,9 +241,7 @@ def _git_repo(tmp_path):
     )
     (repo / "README.md").write_text("base\n")
     (repo / "src" / "pkg" / "__init__.py").write_text("")
-    (repo / "src" / "pkg" / "core.py").write_text(
-        "def calc(a, b):\n    return a + b\n"
-    )
+    (repo / "src" / "pkg" / "core.py").write_text("def calc(a, b):\n    return a + b\n")
     git(repo, "init", "-q")
     git(repo, "config", "user.name", "Fixture")
     git(repo, "config", "user.email", "fixture@example.test")
@@ -278,9 +276,7 @@ def test_plan_should_skip_broken_sources_outside_the_scope(tmp_path):
     git(repo, "commit", "-qm", "pre-existing unprocessable sources")
     base = git(repo, "rev-parse", "HEAD")
     (repo / "src" / "pkg" / "core.py").write_text(
-        "def calc(a, b):\n    return a + b\n"
-        "\n"
-        "def extra(a):\n    return a + 1\n"
+        "def calc(a, b):\n    return a + b\n\ndef extra(a):\n    return a + 1\n"
     )
     # A syntax error and non-UTF-8 bytes in sources that the PR scope never
     # targets must be skipped with a warning, not abort the whole campaign.
@@ -314,3 +310,63 @@ def test_shard_should_emit_zero_fragment_when_partition_empty(tmp_path):
         plan_json, [fragment], repo, repo, base, head, ".", "medium", 1
     )
     assert verdict["stats"]["total"] == 0
+
+
+@pytest.mark.parametrize("newline", ["\n", "\r\n", "\r"])
+def test_variant_proofs_preserve_exact_ast_source(newline):
+    import ast
+
+    code = newline.join(
+        [
+            "class Café:",
+            "    @staticmethod",
+            "    async def xǁCaféǁméthode__mutmut_1():",
+            '        return "été\u2028fin"  # commentaire',
+            'def x_été__mutmut_2(): return "é"',
+            "def x_nested__mutmut_3():",
+            "    def x_inner__mutmut_4():",
+            "        return 4",
+            "    return x_inner__mutmut_4()",
+            "",
+        ]
+    )
+    expected = {
+        node.name: ast.get_source_segment(code, node)
+        for node in ast.walk(ast.parse(code))
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+    }
+    assert inventory.extract_variants(code) == expected
+
+
+def test_survivor_proofs_extract_each_file_once_and_fail_on_missing_variant(
+    tmp_path, monkeypatch
+):
+    staged = tmp_path / "mutants" / "src" / "calc.py"
+    staged.parent.mkdir(parents=True)
+    staged.write_text(
+        "def x_calc__mutmut_1(): return 1\ndef x_calc__mutmut_2(): return 2\n"
+    )
+    original = inventory.extract_variants
+    calls = []
+
+    def measured(code):
+        calls.append(code)
+        return original(code)
+
+    monkeypatch.setattr(inventory, "extract_variants", measured)
+    cache = {}
+    for index in (1, 2):
+        assert (
+            inventory._staged_variant(
+                tmp_path, "src/calc.py", f"x_calc__mutmut_{index}", cache
+            )
+            == f"def x_calc__mutmut_{index}(): return {index}"
+        )
+    assert len(calls) == 1
+    with pytest.raises(inventory.InventoryError, match="missing"):
+        inventory._staged_variant(tmp_path, "src/calc.py", "x_missing__mutmut_3", cache)
+    # A new campaign must observe new bytes, not reuse cached evidence.
+    staged.write_text("def x_calc__mutmut_1(): return 99\n")
+    assert inventory._staged_variant(
+        tmp_path, "src/calc.py", "x_calc__mutmut_1", {}
+    ).endswith("return 99")

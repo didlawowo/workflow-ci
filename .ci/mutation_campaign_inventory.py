@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import ast
 import hashlib
+import io
 import json
 import math
 import os
@@ -23,9 +24,7 @@ from mutation_evidence import COUNTERS, digest_function
 from mutation_campaign import partition, plan_digest
 from mutation_scope import _module_name, mutation_targets
 
-MUTANTS_PER_SHARD = max(
-    1, int(os.environ.get("MUTATION_MUTANTS_PER_SHARD", "1200"))
-)
+MUTANTS_PER_SHARD = max(1, int(os.environ.get("MUTATION_MUTANTS_PER_SHARD", "1200")))
 MAX_SHARDS = 16
 VARIANT_MARKER = "__mutmut_"
 
@@ -54,6 +53,9 @@ def variant_name(key: str) -> str:
 def extract_variants(code: str) -> dict[str, str]:
     """Return function and class-method mutant sources inside a staged file."""
     tree = ast.parse(code)
+    # AST columns are UTF-8 byte offsets. Split physical lines once, preserving
+    # CRLF and Unicode separators inside strings exactly like get_source_segment.
+    lines = [line.encode("utf-8") for line in io.StringIO(code, newline="")]
     variants: dict[str, str] = {}
     for node in ast.walk(tree):
         if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
@@ -63,9 +65,18 @@ def extract_variants(code: str) -> dict[str, str]:
             rf"{VARIANT_MARKER}\d+$", name
         ):
             continue
-        segment = ast.get_source_segment(code, node)
-        if segment is not None:
-            variants[name] = segment
+        first, last = node.lineno - 1, node.end_lineno - 1
+        if first == last:
+            segment = lines[first][node.col_offset : node.end_col_offset]
+        else:
+            segment = b"".join(
+                [
+                    lines[first][node.col_offset :],
+                    *lines[first + 1 : last],
+                    lines[last][: node.end_col_offset],
+                ]
+            )
+        variants[name] = segment.decode("utf-8")
     return variants
 
 
@@ -111,7 +122,9 @@ def _empty_plan(base: str, head: str, directory: str) -> dict:
     }
 
 
-def plan(project_root: Path, base: str, head: str, directory: str, shards: int, depth: str) -> dict:
+def plan(
+    project_root: Path, base: str, head: str, directory: str, shards: int, depth: str
+) -> dict:
     from mutmut.mutation.file_mutation import mutate_file_contents
 
     targets = list(
@@ -180,9 +193,7 @@ def plan(project_root: Path, base: str, head: str, directory: str, shards: int, 
             if file_mutants:
                 sources[relative] = sha256(source.read_bytes())
     if not mutants:
-        raise InventoryError(
-            "Mutation plan found no mutants for the changed functions"
-        )
+        raise InventoryError("Mutation plan found no mutants for the changed functions")
     shard_count = resolve_shard_count(shards, len(mutants))
     return {
         "schema_version": 1,
@@ -195,11 +206,15 @@ def plan(project_root: Path, base: str, head: str, directory: str, shards: int, 
     }
 
 
-def _staged_variant(project_root: Path, relative: str, name: str) -> str:
+def _staged_variant(
+    project_root: Path, relative: str, name: str, cache: dict[str, dict[str, str]]
+) -> str:
     staged = project_root / "mutants" / relative
     if not staged.is_file():
         raise InventoryError(f"Staged mutant source is missing: {relative}")
-    variants = extract_variants(staged.read_text(encoding="utf-8"))
+    if relative not in cache:
+        cache[relative] = extract_variants(staged.read_text(encoding="utf-8"))
+    variants = cache[relative]
     if name not in variants:
         raise InventoryError(f"Staged mutant source is missing: {name}")
     return variants[name]
@@ -210,9 +225,7 @@ def _key_statuses(project_root: Path, keys: set[str]) -> dict[str, str]:
     diagnostics exporter, but keyed individually for the fragment."""
     statuses: dict[str, str] = {}
     for path in (project_root / "mutants").rglob("*.meta"):
-        entries = json.loads(path.read_text(encoding="utf-8")).get(
-            "exit_code_by_key"
-        )
+        entries = json.loads(path.read_text(encoding="utf-8")).get("exit_code_by_key")
         if not isinstance(entries, dict):
             raise InventoryError("Malformed per-mutant metadata")
         for key, code in entries.items():
@@ -232,18 +245,14 @@ def _key_statuses(project_root: Path, keys: set[str]) -> dict[str, str]:
             statuses[key] = status
     missing = keys - set(statuses)
     if missing:
-        raise InventoryError(
-            f"Mutmut did not report a status for {sorted(missing)[0]}"
-        )
+        raise InventoryError(f"Mutmut did not report a status for {sorted(missing)[0]}")
     return statuses
 
 
 def shard(project_root: Path, plan_json: dict, index: int) -> dict:
     shard_count = plan_json["shard_count"]
     keys = sorted(
-        key
-        for key in plan_json["mutants"]
-        if partition(key, shard_count) == index
+        key for key in plan_json["mutants"] if partition(key, shard_count) == index
     )
     if not keys:
         # Automatic campaigns can legitimately schedule an empty partition
@@ -265,9 +274,7 @@ def shard(project_root: Path, plan_json: dict, index: int) -> dict:
                 "mutants": {},
             },
         }
-    completed = subprocess.run(
-        ["mutmut", "run", *keys], cwd=project_root, check=False
-    )
+    completed = subprocess.run(["mutmut", "run", *keys], cwd=project_root, check=False)
     if completed.returncode:
         raise InventoryError(f"mutmut run failed with status {completed.returncode}")
     all_statuses = _key_statuses(project_root, set(keys))
@@ -293,6 +300,8 @@ def shard(project_root: Path, plan_json: dict, index: int) -> dict:
         "mutants": {},
     }
     proofs: dict[str, object] = review["mutants"]  # type: ignore[index]
+    # Invocation-local cache: never reuse evidence across campaigns or revisions.
+    staged_variants: dict[str, dict[str, str]] = {}
     for key in survivors:
         entry = plan_json["mutants"][key]
         name = variant_name(key)
@@ -301,7 +310,9 @@ def shard(project_root: Path, plan_json: dict, index: int) -> dict:
             "source": relative,
             "source_sha256": plan_json["sources"][relative],
             "mutant_sha256": entry["mutant_sha256"],
-            "mutant_source": _staged_variant(project_root, relative, name),
+            "mutant_source": _staged_variant(
+                project_root, relative, name, staged_variants
+            ),
         }
     return {
         "shard_index": index,
@@ -333,9 +344,7 @@ def main() -> int:
         index = int(os.environ["MUTATION_SHARD_INDEX"])
         declared = int(os.environ["MUTATION_SHARD_COUNT"])
         if declared != plan_json.get("shard_count"):
-            raise InventoryError(
-                "Declared shard count differs from the validated plan"
-            )
+            raise InventoryError("Declared shard count differs from the validated plan")
         payload = shard(project_root, plan_json, index)
     else:
         raise InventoryError(f"Unsupported inventory mode: {mode}")
