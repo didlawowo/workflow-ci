@@ -46,6 +46,10 @@ sharded campaign, described below, additionally checks every expected mutant,
 including mutants outside those changed functions. A missing diagnostic, stale
 identity, inconsistent counter or unresolved selected mutant is always blocking.
 
+Python mutation targets exclude `tests/` directories, `test_*.py` and `*_test.py`
+modules, including tests colocated in configured source directories. Those tests
+still execute against the production mutants; their assertions are not mutated.
+
 Runner proxy settings are inherited through an explicit credential-free allowlist.
 The central executor drops forge tokens, action command files and persistent HOME.
 It does not choose an endpoint or add a fallback registry. Scratch is disposable.
