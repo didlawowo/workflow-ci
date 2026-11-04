@@ -40,13 +40,15 @@ def mutation_source_paths(root: Path) -> tuple[str, ...]:
 
 def _is_in_source_path(relative: str, source_paths: tuple[str, ...]) -> bool:
     candidate = Path(relative)
+    # Test code executes against mutants; it is never a production mutation
+    # target, even when source_paths includes a package with colocated tests.
+    parts = candidate.parts
+    name = candidate.name
+    if "tests" in parts or name.startswith("test_") or name.endswith("_test.py"):
+        return False
     if not source_paths:
         # Bootstrap repositories can have no protected mutmut scope yet.
-        # Default to production Python while excluding test modules.
-        parts = candidate.parts
-        name = candidate.name
-        if "tests" in parts or name.startswith("test_") or name.endswith("_test.py"):
-            return False
+        # Default to production Python.
         return True
 
     for raw in source_paths:

@@ -232,6 +232,48 @@ def test_resolve_shard_count_should_clamp_zero_per_shard(monkeypatch):
     importlib.reload(inventory)
 
 
+@pytest.mark.skipif(not HAVE_MUTMUT, reason="mutmut is not provisioned")
+@pytest.mark.parametrize("depth", ["medium", "high"])
+def test_real_campaign_executes_colocated_tests_without_mutating_them(tmp_path, depth):
+    repo = tmp_path / "repo"
+    package = repo / "pkg"
+    package.mkdir(parents=True)
+    (repo / "pyproject.toml").write_text(
+        '[tool.mutmut]\nsource_paths=["pkg/"]\n'
+        'pytest_add_cli_args_test_selection=["pkg/"]\n'
+    )
+    (package / "__init__.py").write_text("")
+    source = package / "core.py"
+    test = package / "test_core.py"
+    source.write_text("def calc(value):\n    return value + 1\n")
+    test.write_text(
+        "from pkg.core import calc\ndef test_calc():\n    assert calc(3) == 4\n"
+    )
+    git(repo, "init", "-q")
+    git(repo, "config", "user.name", "Fixture")
+    git(repo, "config", "user.email", "fixture@example.test")
+    git(repo, "add", ".")
+    git(repo, "commit", "-qm", "base")
+    base = git(repo, "rev-parse", "HEAD")
+    source.write_text("def calc(value):\n    return value + 2\n")
+    test.write_text(
+        "from pkg.core import calc\ndef test_calc():\n    assert calc(3) == 5\n"
+    )
+    git(repo, "add", ".")
+    git(repo, "commit", "-qm", "change implementation and colocated test")
+    head = git(repo, "rev-parse", "HEAD")
+
+    plan_json = inventory.plan(repo, base, head, ".", 0, depth)
+    assert plan_json["mutants"]
+    assert set(plan_json["sources"]) == {"pkg/core.py"}
+    assert all(key.startswith("pkg.core.") for key in plan_json["mutants"])
+    mutation_campaign.validate_plan(plan_json, repo, base, head, ".", 1)
+    fragment = inventory.shard(repo, plan_json, 0)
+    assert set(fragment["mutants"]) == set(plan_json["mutants"])
+    assert fragment["stats"]["killed"] == len(plan_json["mutants"])
+    assert fragment["stats"]["survived"] == 0
+
+
 def _git_repo(tmp_path):
     repo = tmp_path / "repo"
     (repo / "src" / "pkg").mkdir(parents=True)
