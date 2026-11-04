@@ -116,15 +116,22 @@ runs:
         esac
         set -e
 
-        VULN_COUNT="$(printf '%s\n' "$AUDIT_OUTPUT" | jq -s '
+        VULN_COUNT="$(printf '%s\n' "$AUDIT_OUTPUT" | jq -s --arg level "$LEVEL" '
+          def ranks: {info: 0, low: 1, moderate: 2, high: 3, critical: 4};
+          if (ranks | has($level)) | not then error("Unknown audit severity") else . end |
           if length == 1 and (.[0].metadata?.vulnerabilities?.total // null) != null then
-            .[0].metadata.vulnerabilities.total
+            .[0].metadata.vulnerabilities |
+            [to_entries[] | select(.key != "total") |
+              if (.key as $key | ranks | has($key)) then . else error("Unknown audit severity") end |
+              select(ranks[.key] >= ranks[$level]) | .value] | add // 0
           elif length == 1 and (.[0].data?.vulnerabilities // null) != null then
             .[0].data.vulnerabilities
-          else
+          elif any(.[]; .type? == "auditAdvisory" or .type? == "auditSummary") then
             [ .[] | select(.type? == "auditAdvisory") ] | length
+          else
+            error("Unrecognized audit response")
           end
-        ' 2>/dev/null || echo 0)"
+        ' 2>/dev/null || echo 1)"
 
         if [ "$AUDIT_STATUS" -ne 0 ] && [ "${VULN_COUNT:-0}" -eq 0 ]; then
           # Never convert an unparseable failing audit into a false clean bill.
