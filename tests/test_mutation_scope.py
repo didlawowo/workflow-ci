@@ -185,6 +185,35 @@ def test_scope_ignores_python_changes_outside_trusted_source_paths(tmp_path: Pat
     assert mutation_scope.mutation_targets(repo, base, head) == ()
 
 
+@pytest.mark.parametrize("depth", ["medium", "high"])
+@pytest.mark.parametrize("configured", ["src/", "src/pkg/", "."])
+@pytest.mark.parametrize(
+    "test_path", ["pkg/test_core.py", "pkg/core_test.py", "pkg/tests/helper.py"]
+)
+def test_configured_packages_keep_colocated_tests_out_of_targets(
+    tmp_path: Path, depth: str, configured: str, test_path: str
+):
+    repo = _init_repo(tmp_path)
+    (repo / "pyproject.toml").write_text(
+        f'[tool.mutmut]\nsource_paths = ["{configured}"]\n'
+    )
+    production = repo / "src/pkg/core.py"
+    test = repo / "src" / test_path
+    test.parent.mkdir(parents=True, exist_ok=True)
+    production.write_text("def compute(value):\n    return value + 1\n")
+    test.write_text("def check():\n    assert True\n")
+    base = _commit(repo, "base")
+    test.write_text("def check():\n    assert 1 + 1 == 2\n")
+    tests_only = _commit(repo, "change test")
+    assert mutation_scope.mutation_targets(repo, base, tests_only, depth=depth) == ()
+    production.write_text("def compute(value):\n    return value + 2\n")
+    head = _commit(repo, "change production")
+    expected = (
+        "pkg.core.*__mutmut_*" if depth == "high" else "pkg.core.*compute__mutmut_*"
+    )
+    assert mutation_scope.mutation_targets(repo, base, head, depth=depth) == (expected,)
+
+
 def test_bootstrap_scope_ignores_tests_without_mutmut_config(tmp_path: Path):
     repo = _init_repo(tmp_path)
     (repo / "pyproject.toml").write_text(
