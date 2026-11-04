@@ -21,7 +21,7 @@ from pathlib import Path
 
 from mutation_evidence import COUNTERS, digest_function
 from mutation_campaign import partition, plan_digest
-from mutation_scope import mutation_targets
+from mutation_scope import _module_name, mutation_targets
 
 MUTANTS_PER_SHARD = max(
     1, int(os.environ.get("MUTATION_MUTANTS_PER_SHARD", "1200"))
@@ -136,14 +136,14 @@ def plan(project_root: Path, base: str, head: str, directory: str, shards: int, 
             if source.is_symlink() or not source.is_file():
                 continue
             relative = source.relative_to(project_root).as_posix()
-            mutmut_relative = source.relative_to(root).as_posix()
-            module = mutmut_relative.removesuffix(".py").replace("/", ".")
-            if module.endswith(".__init__"):
-                module = module.removesuffix(".__init__")
+            # source_paths limits which files are mutated; it does not strip
+            # package names from native Mutmut IDs. Use the same project-relative
+            # module identity as the scope and the engine (including src layouts).
+            module = _module_name(relative)
             in_scope = any(target.partition(".*")[0] == module for target in targets)
             try:
                 code = source.read_text(encoding="utf-8")
-                mutated = mutate_file_contents(mutmut_relative, code)
+                mutated = mutate_file_contents(relative, code)
             except Exception as error:
                 # A source outside the PR scope must not abort the campaign,
                 # but a scoped file that cannot be planned is a hard failure

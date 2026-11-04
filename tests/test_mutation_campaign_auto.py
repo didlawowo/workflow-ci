@@ -1,7 +1,6 @@
 """Automatic campaign sizing, central entrypoint fallback and the inventory contract."""
 
 import importlib
-import json
 import os
 from pathlib import Path
 import subprocess
@@ -144,12 +143,17 @@ def git(root, *args):
 
 @pytest.mark.skipif(not HAVE_MUTMUT, reason="mutmut is not provisioned")
 @pytest.mark.parametrize("class_method", [False, True])
-def test_inventory_should_plan_and_shard_against_real_mutmut(tmp_path, class_method):
+@pytest.mark.parametrize("source_paths", [None, "src/", "src/pkg/"])
+@pytest.mark.parametrize("depth", ["medium", "high"])
+def test_inventory_should_plan_and_shard_against_real_mutmut(
+    tmp_path, class_method, source_paths, depth
+):
     repo = tmp_path / "repo"
     (repo / "src" / "pkg").mkdir(parents=True)
     (repo / "tests").mkdir(parents=True)
     (repo / "pyproject.toml").write_text(
         '[project]\nname="demo"\nversion="0.1.0"\n'
+        + (f'[tool.mutmut]\nsource_paths=["{source_paths}"]\n' if source_paths else "")
     )
     (repo / "src" / "pkg" / "__init__.py").write_text("")
     code = (
@@ -179,7 +183,7 @@ def test_inventory_should_plan_and_shard_against_real_mutmut(tmp_path, class_met
     git(repo, "commit", "-qm", "head")
     head = git(repo, "rev-parse", "HEAD")
 
-    plan_json = inventory.plan(repo, base, head, ".", 0, "medium")
+    plan_json = inventory.plan(repo, base, head, ".", 0, depth)
     keys = set(plan_json["mutants"])
     assert keys, "the planner must enumerate real Mutmut keys"
     assert all(key.startswith("pkg.core.") for key in keys)
