@@ -121,9 +121,16 @@ runs:
           if (ranks | has($level)) | not then error("Unknown audit severity") else . end |
           if length == 1 and (.[0].metadata?.vulnerabilities?.total // null) != null then
             .[0].metadata.vulnerabilities |
-            [to_entries[] | select(.key != "total") |
-              if (.key as $key | ranks | has($key)) then . else error("Unknown audit severity") end |
-              select(ranks[.key] >= ranks[$level]) | .value] | add // 0
+            if (keys | sort) != (["total"] + (ranks | keys) | sort) then
+              error("Incomplete audit severity breakdown")
+            elif all(.[]; type == "number" and . >= 0 and floor == .) | not then
+              error("Invalid audit vulnerability count")
+            elif ([to_entries[] | select(.key != "total") | .value] | add) != .total then
+              error("Inconsistent audit vulnerability total")
+            else
+              [to_entries[] | select(.key != "total") |
+                select(ranks[.key] >= ranks[$level]) | .value] | add // 0
+            end
           elif length == 1 and (.[0].data?.vulnerabilities // null) != null then
             .[0].data.vulnerabilities
           elif any(.[]; .type? == "auditAdvisory" or .type? == "auditSummary") then

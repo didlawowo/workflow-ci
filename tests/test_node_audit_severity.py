@@ -65,3 +65,18 @@ def run_audit(tmp_path, payload, level, status):
         capture_output=True,
     )
     return int(output.read_text().strip().split("=", 1)[1])
+
+
+@pytest.mark.parametrize(
+    "counts",
+    [
+        {"total": 21},
+        {"total": 21, "moderate": 21},
+        {"info": 0, "low": 0, "moderate": 21, "high": 0, "critical": 0, "total": 20},
+        {"info": 0, "low": 0, "moderate": 0, "high": -1, "critical": 0, "total": -1},
+        {"info": 0, "low": 0, "moderate": 0, "high": "0", "critical": 0, "total": 0},
+    ],
+)
+def test_incomplete_or_invalid_severity_breakdown_cannot_report_clean(tmp_path, counts):
+    payload = json.dumps({"metadata": {"vulnerabilities": counts}})
+    assert run_audit(tmp_path, payload, "high", 0) == 1
