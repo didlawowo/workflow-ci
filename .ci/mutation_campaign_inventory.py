@@ -143,9 +143,15 @@ def plan(
     sources: dict[str, str] = {}
     mutants: dict[str, dict[str, str]] = {}
     for root in _source_paths(project_root):
-        if not root.is_dir():
+        # Mutmut accepts both directories and individual files in
+        # source_paths; a file entry must not be silently skipped.
+        if root.is_file() and root.suffix == ".py":
+            candidates = [root]
+        elif root.is_dir():
+            candidates = sorted(root.rglob("*.py"))
+        else:
             continue
-        for source in sorted(root.rglob("*.py")):
+        for source in candidates:
             if source.is_symlink() or not source.is_file():
                 continue
             relative = source.relative_to(project_root).as_posix()

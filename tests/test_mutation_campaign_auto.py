@@ -143,7 +143,7 @@ def git(root, *args):
 
 @pytest.mark.skipif(not HAVE_MUTMUT, reason="mutmut is not provisioned")
 @pytest.mark.parametrize("class_method", [False, True])
-@pytest.mark.parametrize("source_paths", [None, "src/", "src/pkg/"])
+@pytest.mark.parametrize("source_paths", [None, "src/", "src/pkg/", "src/pkg/core.py"])
 @pytest.mark.parametrize("depth", ["medium", "high"])
 def test_inventory_should_plan_and_shard_against_real_mutmut(
     tmp_path, class_method, source_paths, depth
