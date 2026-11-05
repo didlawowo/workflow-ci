@@ -142,12 +142,24 @@ def plan(
 
     sources: dict[str, str] = {}
     mutants: dict[str, dict[str, str]] = {}
+    seen: set[Path] = set()
     for root in _source_paths(project_root):
-        if not root.is_dir():
+        # Mutmut accepts both directories and individual files in
+        # source_paths; a file entry must not be silently skipped.
+        if root.is_file() and root.suffix == ".py":
+            candidates = [root]
+        elif root.is_dir():
+            candidates = sorted(root.rglob("*.py"))
+        else:
             continue
-        for source in sorted(root.rglob("*.py")):
+        for source in candidates:
             if source.is_symlink() or not source.is_file():
                 continue
+            # A file listed both on its own and under a listed directory is
+            # planned once.
+            if source in seen:
+                continue
+            seen.add(source)
             relative = source.relative_to(project_root).as_posix()
             # source_paths limits which files are mutated; it does not strip
             # package names from native Mutmut IDs. Use the same project-relative

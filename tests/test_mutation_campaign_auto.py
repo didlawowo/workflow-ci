@@ -143,7 +143,7 @@ def git(root, *args):
 
 @pytest.mark.skipif(not HAVE_MUTMUT, reason="mutmut is not provisioned")
 @pytest.mark.parametrize("class_method", [False, True])
-@pytest.mark.parametrize("source_paths", [None, "src/", "src/pkg/"])
+@pytest.mark.parametrize("source_paths", [None, "src/", "src/pkg/", "src/pkg/core.py"])
 @pytest.mark.parametrize("depth", ["medium", "high"])
 def test_inventory_should_plan_and_shard_against_real_mutmut(
     tmp_path, class_method, source_paths, depth
@@ -412,3 +412,11 @@ def test_survivor_proofs_extract_each_file_once_and_fail_on_missing_variant(
     assert inventory._staged_variant(
         tmp_path, "src/calc.py", "x_calc__mutmut_1", {}
     ).endswith("return 99")
+
+
+def test_plan_should_ignore_non_python_file_source_paths(tmp_path):
+    (tmp_path / "pyproject.toml").write_text(
+        '[tool.mutmut]\nsource_paths=["README.md"]\n'
+    )
+    (tmp_path / "README.md").write_text("def calc(): pass\n")
+    assert inventory._source_paths(tmp_path) == [tmp_path / "README.md"]
