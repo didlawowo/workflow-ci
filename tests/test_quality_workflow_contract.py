@@ -1,5 +1,7 @@
 from pathlib import Path
 
+import yaml
+
 ROOT = Path(__file__).resolve().parents[1]
 WORKFLOW = ROOT / ".github" / "workflows" / "quality-evidence.yml"
 
@@ -714,3 +716,13 @@ def test_workflow_ci_main_has_self_release_caller():
     assert "uses: ./.github/workflows/release.yml" in content
     assert "workflow-ci-ref: ${{ github.sha }}" in content
     assert "runs-on: arc-runner-workflow-ci" in content
+
+
+def test_only_short_trusted_jobs_may_use_the_optional_light_runner():
+    data = yaml.safe_load(WORKFLOW.read_text())
+    light = data[True]["workflow_call"]["inputs"]["light-runner"]
+    assert light["required"] is False and light["default"] == ""
+    jobs = data["jobs"]
+    for name in ("trusted-gate", "publish-evidence"):
+        assert jobs[name]["runs-on"] == "${{ inputs.light-runner || inputs.runner }}"
+    assert jobs["independent-verification"]["runs-on"] == "${{ inputs.runner }}"
