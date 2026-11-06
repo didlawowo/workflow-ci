@@ -4,10 +4,10 @@ All notable changes to this project are documented here.
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 and follows the [Conventional Commits](https://www.conventionalcommits.org) spec.
 
-## [1.21.9] - 2026-11-05
+## [1.22.0] - 2026-11-06
 
-### Bug Fixes
+### Features
 
-- *(mutation)* Planifier les source_paths de type fichier (#252)
+- *(quality)* Pool léger LIGHT_RUNNER pour le verdict et la publication (#253)
 
 
