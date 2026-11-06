@@ -11,11 +11,6 @@ on:
         description: "Exact runner label to use (for example arc-runner-photo-analyser)"
         required: true
         type: string
-      light-runner:
-        description: "Optional exact label of a warm runner without Docker (for example arc-runner-photo-analyser-light) for the short trusted gate and report publisher jobs; empty keeps runner"
-        required: false
-        type: string
-        default: ""
       workflow-ci-ref:
         description: "Deprecated compatibility input; internal actions resolve to the called workflow commit via $/"
         required: false
@@ -313,7 +308,9 @@ jobs:
     name: "Trusted quality gate"
     if: always() && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
     needs: [independent-verification, mutation]
-    runs-on: ${{ inputs.light-runner || inputs.runner }}
+    # Short job without Docker or caches: the repository's warm light pool when
+    # its LIGHT_RUNNER variable exists (github-manager), else the main runner.
+    runs-on: ${{ vars.LIGHT_RUNNER || inputs.runner }}
     timeout-minutes: 5
     permissions:
       contents: read
@@ -382,7 +379,9 @@ jobs:
     concurrency:
       group: quality-report-${{ github.repository }}-${{ github.event.pull_request.number || github.ref_name }}-${{ inputs.repo-type }}-${{ inputs.working-directory }}
       cancel-in-progress: false
-    runs-on: ${{ inputs.light-runner || inputs.runner }}
+    # Short job without Docker or caches: the repository's warm light pool when
+    # its LIGHT_RUNNER variable exists (github-manager), else the main runner.
+    runs-on: ${{ vars.LIGHT_RUNNER || inputs.runner }}
     permissions:
       contents: read
       actions: read

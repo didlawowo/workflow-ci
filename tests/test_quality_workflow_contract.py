@@ -718,11 +718,12 @@ def test_workflow_ci_main_has_self_release_caller():
     assert "runs-on: arc-runner-workflow-ci" in content
 
 
-def test_only_short_trusted_jobs_may_use_the_optional_light_runner():
-    data = yaml.safe_load(WORKFLOW.read_text())
-    light = data[True]["workflow_call"]["inputs"]["light-runner"]
-    assert light["required"] is False and light["default"] == ""
-    jobs = data["jobs"]
+
+def test_only_short_trusted_jobs_may_use_the_light_runner_variable():
+    content = WORKFLOW.read_text()
+    jobs = yaml.safe_load(content)["jobs"]
+    light = "${{ vars.LIGHT_RUNNER || inputs.runner }}"
     for name in ("trusted-gate", "publish-evidence"):
-        assert jobs[name]["runs-on"] == "${{ inputs.light-runner || inputs.runner }}"
+        assert jobs[name]["runs-on"] == light
+    assert content.count("LIGHT_RUNNER") == 4  # deux commentaires, deux runs-on
     assert jobs["independent-verification"]["runs-on"] == "${{ inputs.runner }}"
