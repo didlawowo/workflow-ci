@@ -66,8 +66,8 @@ suivantes :
   Un oracle rouge signale d'abord un écart du candidat ;
 - un changement de contrat métier (seuil, invariant, interface) exige cette
   décision avant tout changement de l'oracle. Seul un bug de l'oracle prouvé
-  indépendamment du candidat (flake, import cassé) se corrige sur la même
-  base ;
+  indépendamment du candidat (flake, import cassé) se corrige sans cette
+  décision, toujours dans une PR dédiée ;
 - le framework commun (`run.py`, `common/`, `hidden-evidence.yml`) reste
   générique et suit le test d'éligibilité.
 
