@@ -1,5 +1,83 @@
 # Règles locales — workflow-ci
 
+## Périmètre : un socle générique, pas un patch par consommateur
+
+`workflow-ci` est le socle CI commun à tous les dépôts. Il définit les
+conventions ; les consommateurs s'y conforment. Un agent qui travaille sur un
+dépôt consommateur et rencontre un échec de CI corrige d'abord **chez lui**. Il
+ne vient pas adapter `workflow-ci` à son dépôt.
+
+### Test d'éligibilité
+
+Une issue ou une PR sur `workflow-ci` n'est recevable que si les trois
+conditions sont réunies :
+
+1. **Générique** : le changement profite à tout consommateur qui a le même
+   besoin, pas à un seul dépôt. La description l'énonce sans nommer de
+   consommateur. Un dépôt ne sert que d'exemple ou de reproduction.
+2. **Conforme au contrat existant** : le comportement suit une convention déjà
+   documentée (`.python-version`, `go.mod`, lockfile, outillage verrouillé du
+   consommateur, runner fourni par l'appelant) ou un standard de l'outil. Une
+   nouvelle convention de nommage ou de configuration commune à plusieurs
+   dépôts exige une décision de Chris, référencée dans l'issue. Un `input` ou
+   une variable opt-in, sans effet par défaut, n'en exige pas.
+3. **Contrôles inchangés ou durcis** : une option nouvelle est un `input` ou
+   une variable explicite, sans effet tant qu'elle n'est pas positionnée. Un
+   gate, un seuil ou un scan ne s'assouplit jamais pour débloquer un dépôt. Un
+   défaut fonctionnel erroné (mauvaise version lue, chemin mal résolu) peut
+   être corrigé s'il satisfait les conditions 1 et 2.
+
+### Refus systématiques
+
+Refuser, et rediriger vers le dépôt consommateur ou, pour un défaut de
+proxy, de DNS ou de runner, vers l'infrastructure (`continuous-delivery`) :
+
+- un nom de consommateur, un chemin, une constante ou un comportement propre à
+  un dépôt dans `.github/`, `.ci/`, `.forgejo/` ou les actions (`if repo ==`,
+  profil dédié à un runner ou à une machine, valeur métier) ;
+- un seuil, un gate, un niveau d'audit, un scan ou une règle d'intégrité
+  affaibli parce qu'un consommateur échoue ;
+- un nouveau template, une nouvelle documentation ou un nouvel exemple écrit
+  pour un seul dépôt (`templates/<repo>-*.yaml`, `docs/` d'incident d'un
+  consommateur) ;
+- une nouvelle consigne d'exploitation pour un dépôt nommé dans `README.md`.
+  Les résidus existants (template moto-tracker, consigne Ioniq) ne s'étendent
+  pas et sont à retirer ;
+- un cache, un fallback public ou une réécriture de lockfile (voir la section
+  sur les proxies ci-dessous).
+
+La réponse d'un agent à une telle demande est courte : « Hors périmètre de
+`workflow-ci`. La correction va dans `<dépôt>` : <fichier ou réglage à
+modifier, ou point à investiguer>. » Si un vrai manque générique apparaît, ouvrir une issue
+`workflow-ci` qui décrit ce besoin générique et ses défauts ; ne pas livrer le
+patch spécifique en attendant.
+
+### Évaluateurs cachés
+
+`hidden-evaluators/` héberge par conception un oracle par dépôt, hors de
+portée du candidat. `hidden-evaluators/<repo>/` et `registry.json` échappent
+donc à la condition 1 et aux refus ci-dessus, et relèvent des règles
+suivantes :
+
+- un oracle ne change jamais dans le flux d'une PR candidate. La création ou
+  la modification d'un oracle passe par une PR `workflow-ci` dédiée, qui cite
+  la décision de Chris ;
+- un oracle ne s'aligne jamais sur le comportement du candidat qu'il évalue.
+  Un oracle rouge signale d'abord un écart du candidat ;
+- un changement de contrat métier (seuil, invariant, interface) exige cette
+  décision avant tout changement de l'oracle. Seul un bug de l'oracle prouvé
+  indépendamment du candidat (flake, import cassé) se corrige sans cette
+  décision, toujours dans une PR dédiée ;
+- le framework commun (`run.py`, `common/`, `hidden-evidence.yml`) reste
+  générique et suit le test d'éligibilité.
+
+### Revue d'une PR entrante
+
+Avant toute revue détaillée, vérifier le test d'éligibilité. Une PR qui échoue
+reçoit une revue de refus avec la redirection ci-dessus et une recommandation
+de fermeture, même si le code est correct et la CI verte. La fermeture revient
+à Chris.
+
 ## Architecture des proxies de dépendances
 
 Les proxies de dépendances sont l'autorité de cache partagée. `workflow-ci` ne
