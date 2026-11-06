@@ -133,6 +133,10 @@ are supplied centrally. If a repository needs custom Sonar properties such as so
 rules, merge that file to `main` before enabling Sonar. Only then set `SONAR_ENABLED=true`; the
 evaluated PR is intentionally not allowed to change its own Sonar policy.
 
+The short `Trusted quality gate` and `Publish trusted quality evidence` jobs run on the caller's
+`LIGHT_RUNNER` repository variable when it is set (a warm ARC pool without Docker, declared in
+github-manager), otherwise on `runner`. The verdict job keeps no write permission either way.
+
 Quality Gate thresholds stay in SonarQube, so tightening coverage/security/duplication rules does
 not require another workflow-ci release.
 
