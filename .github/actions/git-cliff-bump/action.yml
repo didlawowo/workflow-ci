@@ -173,6 +173,10 @@ runs:
         args: --tag ${{ steps.decide.outputs.version }} --unreleased --prepend CHANGELOG.md
       env:
         CURL_HOME: ${{ steps.download-config.outputs.curl-home }}
+        # git-cliff-action also writes its default output path
+        # (git-cliff/CHANGELOG.md) inside the caller checkout; keep that copy
+        # out of the release commit. --prepend/--output still write CHANGELOG.md.
+        OUTPUT: /tmp/git-cliff-changelog.md
 
     - name: Create CHANGELOG from full history (first run)
       if: steps.decide.outputs.released == 'true' && steps.changelog.outputs.mode == 'create'
@@ -182,6 +186,10 @@ runs:
         args: --tag ${{ steps.decide.outputs.version }} --output CHANGELOG.md
       env:
         CURL_HOME: ${{ steps.download-config.outputs.curl-home }}
+        # git-cliff-action also writes its default output path
+        # (git-cliff/CHANGELOG.md) inside the caller checkout; keep that copy
+        # out of the release commit. --prepend/--output still write CHANGELOG.md.
+        OUTPUT: /tmp/git-cliff-changelog.md
 
     - name: Extract release notes
       if: steps.decide.outputs.released == 'true'

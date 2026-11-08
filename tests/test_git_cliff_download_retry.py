@@ -118,3 +118,13 @@ def test_curl_config_is_scoped_to_every_upstream_call_not_the_job():
             assert "CURL_HOME" not in step.get("env", {})
         assert "GITHUB_ENV" not in step.get("run", "")
         assert "continue-on-error" not in step
+
+
+def test_every_git_cliff_call_writes_its_default_output_outside_the_checkout():
+    """#257: without OUTPUT, git-cliff-action also writes git-cliff/CHANGELOG.md
+    in the caller checkout and the release commit's `git add -A` ships it."""
+    steps = [s for s in action_steps() if "git-cliff-action" in s.get("uses", "")]
+    assert len(steps) == 4
+    for step in steps:
+        output = step.get("env", {}).get("OUTPUT", "")
+        assert output.startswith("/tmp/"), step["name"]
