@@ -117,3 +117,17 @@ def test_existing_virtual_env_ignores_version_file(tmp_path: Path) -> None:
     result, calls = _bootstrap(tmp_path, "3.99\n", virtual_env=str(venv))
     assert result.returncode == 0, result.stderr
     assert "uv python install" not in calls
+
+
+def test_toolchain_keeps_consumer_pytest_and_requires_pytest9_safe_mutmut(
+    tmp_path: Path,
+) -> None:
+    """A consumer on pytest>=9 must not be unresolvable: the only pytest 9.2
+    incompatibility (mutmut #615) is fixed in mutmut 3.8.1, so the bootstrap
+    raises the mutmut floor instead of capping pytest."""
+    result, calls = _bootstrap(tmp_path, None)
+    assert result.returncode == 0, result.stderr
+    install = next(line for line in calls.splitlines() if "pip install" in line)
+    specs = install.split("-q ", 1)[1].split()
+    assert specs[0] == "pytest" and all("<" not in spec for spec in specs[:2])
+    assert "mutmut>=3.8.1,<4" in install

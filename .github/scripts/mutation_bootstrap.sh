@@ -51,8 +51,8 @@ fi
 runtime_path="$PATH"
 runtime_pythonpath="${PYTHONPATH:-}"
 runtime_virtualenv=""
-mutmut_spec='mutmut>=3,<4'
-pytest_spec='pytest<9'
+mutmut_spec='mutmut>=3.8.1,<4'
+pytest_spec='pytest'
 
 if [[ "$mutation_engine" == "mutmut" ]]; then
   python_bin="$(command -v python3 || true)"

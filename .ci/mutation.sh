@@ -140,14 +140,16 @@ elif command -v uv >/dev/null 2>&1 && [[ -f requirements.txt ]]; then
   uv pip install --python "$PYTHON" -r requirements.txt
 fi
 
-# Mutmut 3 currently accesses pytest's removed private _nodeid attribute.
+# pytest 9.2 removed the private _nodeid attribute mutmut 3 used (boxed/mutmut#615);
+# mutmut 3.8.1 fixes it, so the floor replaces any pytest cap and keeps the
+# consumer's own pytest.
 if command -v uv >/dev/null 2>&1; then
-  if ! uv pip install --python "$PYTHON" -q 'pytest<9' pytest-cov 'mutmut>=3,<4'; then
+  if ! uv pip install --python "$PYTHON" -q pytest pytest-cov 'mutmut>=3.8.1,<4'; then
     bootstrap_error "uv failed to install pytest/mutmut into the isolated environment."
     exit 1
   fi
 else
-  if ! "$PYTHON" -m pip install -q 'pytest<9' pytest-cov 'mutmut>=3,<4'; then
+  if ! "$PYTHON" -m pip install -q pytest pytest-cov 'mutmut>=3.8.1,<4'; then
     bootstrap_error "pip failed to install pytest/mutmut into the pre-provisioned environment."
     exit 1
   fi
