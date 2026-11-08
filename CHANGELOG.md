@@ -4,6 +4,17 @@ All notable changes to this project are documented here.
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 and follows the [Conventional Commits](https://www.conventionalcommits.org) spec.
 
+## [1.22.2] - 2026-11-08
+
+### Bug Fixes
+
+- *(mutation)* Ne plus borner pytest<9, exiger mutmut>=3.8.1 (#262)
+
+- *(git-cliff-bump)* Ne plus écrire git-cliff/CHANGELOG.md dans le dépôt appelant (#264)
+
+- *(mutation)* Rattacher une fonction imbriquée modifiée à sa fonction englobante (#265)
+
+
 ## [1.22.1] - 2026-11-06
 
 ### Documentation
