@@ -128,5 +128,6 @@ def test_toolchain_keeps_consumer_pytest_and_requires_pytest9_safe_mutmut(
     result, calls = _bootstrap(tmp_path, None)
     assert result.returncode == 0, result.stderr
     install = next(line for line in calls.splitlines() if "pip install" in line)
-    assert "pytest<9" not in install
+    specs = install.split("-q ", 1)[1].split()
+    assert specs[0] == "pytest" and all("<" not in spec for spec in specs[:2])
     assert "mutmut>=3.8.1,<4" in install
