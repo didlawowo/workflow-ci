@@ -552,3 +552,21 @@ def test_verification_preserves_exact_module_class_and_method_identity():
     assert not mutation_scope.matches_function(
         "service.sub.x_func__mutmut_1", "service.*__mutmut_*"
     )
+
+
+def test_changed_closure_targets_its_enclosing_function(tmp_path: Path):
+    """#259: mutmut stores a nested def's mutants under the enclosing function
+    (x_create_app__mutmut_N), so targeting the closure itself can never be
+    satisfied and the evidence gate fails on a fully killed campaign."""
+    repo = _init_repo(tmp_path)
+    source = repo / "src" / "observer_app.py"
+    body = (
+        "def create_app():\n    def plan(x):\n        return x + {}\n    return plan\n"
+    )
+    source.write_text(body.format(1), encoding="utf-8")
+    base = _commit(repo, "initial")
+    source.write_text(body.format(2), encoding="utf-8")
+    head = _commit(repo, "change closure")
+    assert mutation_scope.mutation_targets(repo, base, head, depth="medium") == (
+        "observer_app.*create_app__mutmut_*",
+    )

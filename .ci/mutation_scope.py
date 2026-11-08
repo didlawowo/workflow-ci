@@ -159,6 +159,11 @@ class _ChangedFunctionVisitor(ast.NodeVisitor):
         self.changed_lines = changed_lines
         self.stack: list[str] = []
         self.functions: set[tuple[str, ...]] = set()
+        # Depth of enclosing function definitions. mutmut generates no
+        # trampoline for a nested def: its mutants are stored under the
+        # enclosing top-level function or method (x_outer__mutmut_N), so a
+        # changed closure must target that enclosing function, never itself.
+        self.function_depth = 0
 
     def visit_ClassDef(self, node: ast.ClassDef) -> None:
         self.stack.append(node.name)
@@ -189,11 +194,17 @@ class _ChangedFunctionVisitor(ast.NodeVisitor):
         end = getattr(node, "end_lineno", node.lineno)
 
         qualified = tuple([*self.stack, node.name])
-        if any(start <= line <= end for line in self.changed_lines):
+        if self.function_depth == 0 and any(
+            start <= line <= end for line in self.changed_lines
+        ):
+            # A nested def is covered by this same range check on its
+            # enclosing function, which is the identity mutmut uses.
             self.functions.add(qualified)
 
         self.stack.append(node.name)
+        self.function_depth += 1
         self.generic_visit(node)
+        self.function_depth -= 1
         self.stack.pop()
 
 
