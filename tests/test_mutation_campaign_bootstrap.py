@@ -131,3 +131,33 @@ def test_toolchain_keeps_consumer_pytest_and_requires_pytest9_safe_mutmut(
     specs = install.split("-q ", 1)[1].split()
     assert specs[0] == "pytest" and all("<" not in spec for spec in specs[:2])
     assert "mutmut>=3.8.1,<4" in install
+
+
+def test_shard_stages_pytest_ini_before_running_mutmut(tmp_path: Path) -> None:
+    """#258: the campaign shard must pre-seed mutants/ with standalone pytest
+    configs like .ci/mutation.sh, or pytest resolves the checkout's own ini
+    against uninstrumented sources and every mutant ends up no_tests."""
+    project, venv = tmp_path / "project", tmp_path / "venv"
+    project.mkdir()
+    (project / "pytest.ini").write_text("[pytest]\npythonpath = . src\n")
+    (venv / "bin").mkdir(parents=True)
+    probe = venv / "bin" / "python"
+    probe.write_text(
+        '#!/usr/bin/env bash\n[[ "$1" == -m ]] && exit 0\ntest -f mutants/pytest.ini\n'
+    )
+    probe.chmod(0o755)
+    env = {
+        "PATH": "/usr/bin:/bin",
+        "VIRTUAL_ENV": str(venv),
+        "MUTATION_PLAN": str(probe),
+    }
+    shard = [str(ROOT / ".ci" / "mutation-shard.sh"), str(tmp_path / "out.json")]
+    result = subprocess.run(
+        ["bash", *shard],
+        cwd=project,
+        env=env,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
