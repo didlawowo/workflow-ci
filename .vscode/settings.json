@@ -1,24 +1,23 @@
 {
-  "workbench.colorTheme": "Monokai",
-  "peacock.color": "#204ee6",
+  "workbench.colorTheme": "Aura Dark",
   "workbench.colorCustomizations": {
-    "activityBar.activeBackground": "#4d72eb",
-    "activityBar.background": "#4d72eb",
-    "activityBar.foreground": "#e7e7e7",
-    "activityBar.inactiveForeground": "#e7e7e799",
-    "activityBarBadge.background": "#153cbd",
-    "activityBarBadge.foreground": "#e7e7e7",
-    "commandCenter.border": "#e7e7e799",
-    "sash.hoverBorder": "#4d72eb",
-    "statusBar.background": "#204ee6",
-    "statusBar.foreground": "#e7e7e7",
-    "statusBarItem.hoverBackground": "#153cbd",
-    "statusBarItem.remoteBackground": "#204ee6",
-    "statusBarItem.remoteForeground": "#e7e7e7",
-    "titleBar.activeBackground": "#204ee6",
-    "titleBar.activeForeground": "#e7e7e7",
-    "titleBar.inactiveBackground": "#204ee699",
-    "titleBar.inactiveForeground": "#e7e7e799"
+    "activityBar.activeBackground": "#d3f0ea",
+    "activityBar.background": "#d3f0ea",
+    "activityBar.foreground": "#15202b",
+    "activityBar.inactiveForeground": "#15202b99",
+    "activityBarBadge.background": "#86d7c7",
+    "activityBarBadge.foreground": "#15202b",
+    "commandCenter.border": "#15202b99",
+    "sash.hoverBorder": "#d3f0ea",
+    "statusBar.background": "#ade4d9",
+    "statusBar.foreground": "#15202b",
+    "statusBarItem.hoverBackground": "#86d7c7",
+    "statusBarItem.remoteBackground": "#ade4d9",
+    "statusBarItem.remoteForeground": "#15202b",
+    "titleBar.activeBackground": "#ade4d9",
+    "titleBar.activeForeground": "#15202b",
+    "titleBar.inactiveBackground": "#ade4d999",
+    "titleBar.inactiveForeground": "#15202b99"
   },
-  "window.title": "🔵 infra · workflow-ci ${separator}${activeEditorShort}"
+  "window.title": "🟢 my-apps · workflow-ci ${separator}${activeEditorShort}"
 }
