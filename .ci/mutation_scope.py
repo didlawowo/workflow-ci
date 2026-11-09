@@ -171,13 +171,50 @@ def _is_inert_value(value: ast.expr | None) -> bool:
     return isinstance(value, ast.Name) and value.id not in _MUTMUT_MUTATED_NAMES
 
 
-def _has_mutable_code(node: _FunctionNode) -> bool:
+def _mentions_mutated_name(node: ast.AST) -> bool:
+    """Whether any identifier under ``node`` is one operator_name rewrites.
+
+    libcst models every identifier as ``cst.Name`` (import aliases, ``global``
+    names, parameters, attribute names, def names), so mutmut can rewrite a
+    ``deepcopy`` wherever it appears, not only as a value.
+    """
+    for child in ast.walk(node):
+        names: list[str | None] = []
+        if isinstance(child, ast.Name):
+            names.append(child.id)
+        elif isinstance(child, ast.alias):
+            names.extend([*child.name.split("."), child.asname])
+        elif isinstance(child, ast.arg):
+            names.append(child.arg)
+        elif isinstance(child, ast.Attribute):
+            names.append(child.attr)
+        elif isinstance(child, ast.keyword):
+            names.append(child.arg)
+        elif isinstance(child, (ast.Global, ast.Nonlocal)):
+            names.extend(child.names)
+        elif isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            names.append(child.name)
+        if any(name in _MUTMUT_MUTATED_NAMES for name in names):
+            return True
+    return False
+
+
+def _is_triple_quoted(value: ast.Constant, source: str) -> bool:
+    """operator_string leaves only triple-quoted strings (docstrings) intact."""
+    segment = ast.get_source_segment(source, value) or ""
+    return segment.lstrip("rRbBuUfF").startswith(('"""', "'''"))
+
+
+def _has_mutable_code(node: _FunctionNode, source: str) -> bool:
     """Whether mutmut can produce at least one mutant inside ``node``.
 
     Conservative: only bodies made exclusively of statements no operator can
     rewrite answer False; anything else (compound statements, calls,
-    literals, assignments, defaults) keeps the function in scope.
+    literals, assignments, defaults, a ``deepcopy`` identifier) keeps the
+    function in scope.
     """
+    if _mentions_mutated_name(node):
+        return True
     arguments = node.args
     if arguments.defaults or any(arguments.kw_defaults):
         return True
@@ -190,6 +227,7 @@ def _has_mutable_code(node: _FunctionNode) -> bool:
                 index == 0
                 and isinstance(value, ast.Constant)
                 and isinstance(value.value, str)
+                and _is_triple_quoted(value, source)
             )
             if is_docstring or _is_inert_value(value):
                 continue
@@ -201,7 +239,9 @@ def _has_mutable_code(node: _FunctionNode) -> bool:
         if isinstance(statement, (ast.FunctionDef, ast.AsyncFunctionDef)):
             # A skipped nested def (decorated, reserved name) is ignored by
             # mutmut together with its decorators and whole subtree.
-            if _mutmut_generates_mutants(statement) and _has_mutable_code(statement):
+            if _mutmut_generates_mutants(statement) and _has_mutable_code(
+                statement, source
+            ):
                 return True
             continue
         return True
@@ -209,7 +249,7 @@ def _has_mutable_code(node: _FunctionNode) -> bool:
 
 
 def _changed_mutmut_functions(
-    tree: ast.Module, changed_lines: set[int]
+    tree: ast.Module, changed_lines: set[int], source: str
 ) -> set[tuple[str, ...]]:
     """Qualified functions mutmut can mutate whose source range was changed.
 
@@ -232,7 +272,7 @@ def _changed_mutmut_functions(
 
     functions: set[tuple[str, ...]] = set()
     for qualified, node in candidates:
-        if not _mutmut_generates_mutants(node) or not _has_mutable_code(node):
+        if not _mutmut_generates_mutants(node) or not _has_mutable_code(node, source):
             continue
         start = min(
             [node.lineno, *(decorator.lineno for decorator in node.decorator_list)]
@@ -296,7 +336,8 @@ def mutation_targets(
             continue
 
         try:
-            tree = ast.parse(path.read_text(encoding="utf-8"))
+            source = path.read_text(encoding="utf-8")
+            tree = ast.parse(source)
         except (SyntaxError, UnicodeDecodeError) as error:
             raise ValueError(
                 f"Cannot compute mutation scope for {relative} with Python "
@@ -311,7 +352,7 @@ def mutation_targets(
             targets.add(f"{module}.*__mutmut_*")
             continue
 
-        for qualified in _changed_mutmut_functions(tree, lines):
+        for qualified in _changed_mutmut_functions(tree, lines, source):
             targets.add(f"{module}.*{'*'.join(qualified)}__mutmut_*")
 
     return tuple(sorted(targets))

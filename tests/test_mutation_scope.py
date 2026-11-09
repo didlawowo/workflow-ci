@@ -715,3 +715,18 @@ def test_enclosing_function_with_mutable_code_stays_a_target(tmp_path: Path):
     assert mutation_scope.mutation_targets(repo, base, head, depth="medium") == (
         "decorated_closure_mixed.*outer_mixed__mutmut_*",
     )
+
+
+@pytest.mark.parametrize(
+    "body",
+    ["def f(x):\n    'doc{}'\n    return x\n", "def f(x{}):\n    from copy import deepcopy\n    return x{}\n"],
+)
+def test_inert_looking_code_mutmut_rewrites_stays_a_target(tmp_path: Path, body: str):
+    """#266 review: mutmut mutates single-quoted docstrings and any deepcopy name."""
+    repo = _init_repo(tmp_path)
+    source = repo / "src" / "m.py"
+    source.write_text(body.format("", ""), encoding="utf-8")
+    base = _commit(repo, "initial")
+    source.write_text(body.format("2", "2"), encoding="utf-8")
+    head = _commit(repo, "change")
+    assert mutation_scope.mutation_targets(repo, base, head, depth="medium") == ("m.*f__mutmut_*",)
