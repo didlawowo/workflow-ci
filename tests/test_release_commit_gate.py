@@ -80,7 +80,7 @@ def test_multiline_record_separator_preserves_breaking_footer():
 def test_action_gates_git_cliff_bump_before_computing_version():
     steps = yaml.safe_load(ACTION.read_text())["runs"]["steps"]
     scope = next(step for step in steps if step.get("id") == "release-scope")
-    compute = next(step for step in steps if step.get("name") == "Compute next version")
+    computes = [s for s in steps if s.get("name", "").startswith("Compute next version")]
     decide = next(step for step in steps if step.get("id") == "decide")
 
     assert "git log" in scope["run"]
@@ -90,6 +90,8 @@ def test_action_gates_git_cliff_bump_before_computing_version():
     assert 'TAG_PATTERN="[0-9]*"' in scope["run"]
     assert 'git describe --tags --abbrev=0 --match "$TAG_PATTERN"' in scope["run"]
     assert 'echo "last-tag=$last" >> "$GITHUB_OUTPUT"' in scope["run"]
-    assert compute["if"] == "steps.release-scope.outputs.releasable == 'true'"
+    assert len(computes) == 2  # upstream action + preinstalled git-cliff
+    for compute in computes:
+        assert compute["if"].startswith("steps.release-scope.outputs.releasable == 'true' && ")
     assert "-f /tmp/next-version.txt" in decide["run"]
     assert 'LAST="${{ steps.release-scope.outputs.last-tag }}"' in decide["run"]
