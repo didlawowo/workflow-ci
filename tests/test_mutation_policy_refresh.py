@@ -656,3 +656,15 @@ def test_agit_short_pages_read_service_file_on_second_page(monkeypatch, tmp_path
     assert "required=true" in rendered
     assert "labels=complexity:medium(default),python-production-change" in rendered
     assert "depth=medium" in rendered
+
+
+def test_missing_counter_reads_short_pages_until_empty(monkeypatch):
+    """#254 review: without changed_files, a short Forgejo page (30) is not the end."""
+    pages = {
+        "pulls/404/files?per_page=100": [{"filename": f"docs/p{i}.md"} for i in range(30)],
+        "pulls/404/files?per_page=100&page=2": [{"filename": "service.py"}],
+        "pulls/404/files?per_page=100&page=3": [],
+    }
+    monkeypatch.setattr(mutation_policy, "_api_request", lambda method, path, payload=None: pages[path])
+    files = mutation_policy._pull_request_files({"pull_request": {"number": 404}})
+    assert files is not None and files[-1] == "service.py" and len(files) == 31
