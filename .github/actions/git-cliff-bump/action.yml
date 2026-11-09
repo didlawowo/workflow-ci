@@ -77,6 +77,24 @@ runs:
           'max-time = 60' > "$curl_home/.curlrc"
         printf 'curl-home=%s\n' "$curl_home" >> "$GITHUB_OUTPUT"
 
+    - name: Detect preinstalled git-cliff
+      id: cliff-bin
+      shell: bash
+      env:
+        GIT_CLIFF_VERSION: "2.14.2"
+      run: |
+        set -euo pipefail
+        # Runner images may preload git-cliff. Reuse it only at the pinned
+        # version, so both paths render the same changelog; otherwise the
+        # upstream action downloads that same version.
+        if command -v git-cliff >/dev/null 2>&1 \
+          && git-cliff --version 2>&1 | grep -qF " ${GIT_CLIFF_VERSION}"; then
+          echo "preinstalled=true" >> "$GITHUB_OUTPUT"
+          echo "Using preinstalled git-cliff: $(command -v git-cliff)"
+        else
+          echo "preinstalled=false" >> "$GITHUB_OUTPUT"
+        fi
+
     - name: Detect releasable conventional commits
       id: release-scope
       shell: bash
@@ -121,14 +139,22 @@ runs:
         fi
 
     - name: Compute next version
-      if: steps.release-scope.outputs.releasable == 'true'
+      if: steps.release-scope.outputs.releasable == 'true' && steps.cliff-bin.outputs.preinstalled != 'true'
       uses: orhun/git-cliff-action@v4
       with:
+        version: v2.14.2
         config: ${{ steps.cfg.outputs.path }}
         args: --bumped-version
       env:
         CURL_HOME: ${{ steps.download-config.outputs.curl-home }}
         OUTPUT: /tmp/next-version.txt
+
+    - name: Compute next version (preinstalled git-cliff)
+      if: steps.release-scope.outputs.releasable == 'true' && steps.cliff-bin.outputs.preinstalled == 'true'
+      shell: bash
+      env:
+        CLIFF_CONFIG: ${{ steps.cfg.outputs.path }}
+      run: git-cliff --config "$CLIFF_CONFIG" --bumped-version > /tmp/next-version.txt
 
     - name: Decide if release is needed
       id: decide
@@ -166,9 +192,10 @@ runs:
         fi
 
     - name: Prepend new section to existing CHANGELOG
-      if: steps.decide.outputs.released == 'true' && steps.changelog.outputs.mode == 'prepend'
+      if: steps.decide.outputs.released == 'true' && steps.changelog.outputs.mode == 'prepend' && steps.cliff-bin.outputs.preinstalled != 'true'
       uses: orhun/git-cliff-action@v4
       with:
+        version: v2.14.2
         config: ${{ steps.cfg.outputs.path }}
         args: --tag ${{ steps.decide.outputs.version }} --unreleased --prepend CHANGELOG.md
       env:
@@ -178,10 +205,19 @@ runs:
         # out of the release commit. --prepend/--output still write CHANGELOG.md.
         OUTPUT: /tmp/git-cliff-changelog.md
 
+    - name: Prepend new section to existing CHANGELOG (preinstalled git-cliff)
+      if: steps.decide.outputs.released == 'true' && steps.changelog.outputs.mode == 'prepend' && steps.cliff-bin.outputs.preinstalled == 'true'
+      shell: bash
+      env:
+        CLIFF_CONFIG: ${{ steps.cfg.outputs.path }}
+        RELEASE_TAG: ${{ steps.decide.outputs.version }}
+      run: git-cliff --config "$CLIFF_CONFIG" --tag "$RELEASE_TAG" --unreleased --prepend CHANGELOG.md > /tmp/git-cliff-changelog.md
+
     - name: Create CHANGELOG from full history (first run)
-      if: steps.decide.outputs.released == 'true' && steps.changelog.outputs.mode == 'create'
+      if: steps.decide.outputs.released == 'true' && steps.changelog.outputs.mode == 'create' && steps.cliff-bin.outputs.preinstalled != 'true'
       uses: orhun/git-cliff-action@v4
       with:
+        version: v2.14.2
         config: ${{ steps.cfg.outputs.path }}
         args: --tag ${{ steps.decide.outputs.version }} --output CHANGELOG.md
       env:
@@ -191,12 +227,29 @@ runs:
         # out of the release commit. --prepend/--output still write CHANGELOG.md.
         OUTPUT: /tmp/git-cliff-changelog.md
 
+    - name: Create CHANGELOG from full history (first run) (preinstalled git-cliff)
+      if: steps.decide.outputs.released == 'true' && steps.changelog.outputs.mode == 'create' && steps.cliff-bin.outputs.preinstalled == 'true'
+      shell: bash
+      env:
+        CLIFF_CONFIG: ${{ steps.cfg.outputs.path }}
+        RELEASE_TAG: ${{ steps.decide.outputs.version }}
+      run: git-cliff --config "$CLIFF_CONFIG" --tag "$RELEASE_TAG" --output CHANGELOG.md
+
     - name: Extract release notes
-      if: steps.decide.outputs.released == 'true'
+      if: steps.decide.outputs.released == 'true' && steps.cliff-bin.outputs.preinstalled != 'true'
       uses: orhun/git-cliff-action@v4
       with:
+        version: v2.14.2
         config: ${{ steps.cfg.outputs.path }}
         args: --tag ${{ steps.decide.outputs.version }} --unreleased --strip header
       env:
         CURL_HOME: ${{ steps.download-config.outputs.curl-home }}
         OUTPUT: /tmp/release-notes.md
+
+    - name: Extract release notes (preinstalled git-cliff)
+      if: steps.decide.outputs.released == 'true' && steps.cliff-bin.outputs.preinstalled == 'true'
+      shell: bash
+      env:
+        CLIFF_CONFIG: ${{ steps.cfg.outputs.path }}
+        RELEASE_TAG: ${{ steps.decide.outputs.version }}
+      run: git-cliff --config "$CLIFF_CONFIG" --tag "$RELEASE_TAG" --unreleased --strip header > /tmp/release-notes.md

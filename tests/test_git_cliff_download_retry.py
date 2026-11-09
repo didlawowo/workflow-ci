@@ -128,3 +128,15 @@ def test_every_git_cliff_call_writes_its_default_output_outside_the_checkout():
     for step in steps:
         output = step.get("env", {}).get("OUTPUT", "")
         assert output.startswith("/tmp/"), step["name"]
+
+
+def test_preinstalled_git_cliff_twins_every_pinned_upstream_call():
+    steps = action_steps()
+    upstream = [s for s in steps if s.get("uses", "").startswith("orhun/git-cliff-action@")]
+    twins = [s for s in steps if "preinstalled == 'true'" in s.get("if", "")]
+    assert len(twins) == len(upstream) == 4
+    for step in upstream:
+        assert step["with"]["version"] == "v2.14.2"
+        assert "preinstalled != 'true'" in step["if"]
+    for step in twins:
+        assert step["run"].startswith('git-cliff --config "$CLIFF_CONFIG"')
