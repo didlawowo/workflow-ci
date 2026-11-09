@@ -570,3 +570,148 @@ def test_changed_closure_targets_its_enclosing_function(tmp_path: Path):
     assert mutation_scope.mutation_targets(repo, base, head, depth="medium") == (
         "observer_app.*create_app__mutmut_*",
     )
+
+
+def test_nested_class_method_is_not_a_target(tmp_path: Path):
+    """#266: mutmut ne génère pas de mutant pour une méthode d'une classe imbriquée."""
+    repo = _init_repo(tmp_path)
+    source = repo / "src" / "nested_classes.py"
+    source.write_text(
+        "class A:\n"
+        "    class B:\n"
+        "        def m(self):\n"
+        "            return 1 + N\n"
+        "\n"
+        "    def direct(self):\n"
+        "        return 3 + 4\n",
+        encoding="utf-8",
+    )
+    base = _commit(repo, "initial")
+
+    source.write_text(
+        "class A:\n"
+        "    class B:\n"
+        "        def m(self):\n"
+        "            return 1 + N + 1\n"
+        "\n"
+        "    def direct(self):\n"
+        "        return 3 + 4\n",
+        encoding="utf-8",
+    )
+    intermediate = _commit(repo, "change nested method")
+    assert mutation_scope.mutation_targets(repo, base, intermediate, depth="medium") == ()
+
+    source.write_text(
+        "class A:\n"
+        "    class B:\n"
+        "        def m(self):\n"
+        "            return 1 + N + 1\n"
+        "\n"
+        "    def direct(self):\n"
+        "        return 3 + 5\n",
+        encoding="utf-8",
+    )
+    head = _commit(repo, "change direct method")
+    assert mutation_scope.mutation_targets(repo, base, head, depth="medium") == (
+        "nested_classes.*A*direct__mutmut_*",
+    )
+
+
+def test_defs_under_if_or_try_are_not_targets(tmp_path: Path):
+    """#266: mutmut ne cible pas les defs nichés sous if ou try au niveau module."""
+    repo = _init_repo(tmp_path)
+    source = repo / "src" / "conditional_defs.py"
+    source.write_text(
+        "import sys\n"
+        "\n"
+        "if sys.version_info >= (3, 0):\n"
+        "    def under_if():\n"
+        "        return 1 + N\n"
+        "\n"
+        "try:\n"
+        "    def under_try():\n"
+        "        return 3 + N\n"
+        "except ImportError:\n"
+        "    pass\n",
+        encoding="utf-8",
+    )
+    base = _commit(repo, "initial")
+
+    source.write_text(
+        "import sys\n"
+        "\n"
+        "if sys.version_info >= (3, 0):\n"
+        "    def under_if():\n"
+        "        return 1 + N + 1\n"
+        "\n"
+        "try:\n"
+        "    def under_try():\n"
+        "        return 3 + N + 1\n"
+        "except ImportError:\n"
+        "    pass\n",
+        encoding="utf-8",
+    )
+    head = _commit(repo, "change guarded defs")
+    assert mutation_scope.mutation_targets(repo, base, head, depth="medium") == ()
+
+
+def test_enclosing_function_with_only_decorated_closure_is_not_a_target(tmp_path: Path):
+    """#266: mutmut ignore la closure décorée et l'englobante n'a pas d'autre code mutable."""
+    repo = _init_repo(tmp_path)
+    source = repo / "src" / "decorated_closure.py"
+    source.write_text(
+        "import functools\n"
+        "\n"
+        "def outer():\n"
+        "    @functools.cache\n"
+        "    def inner():\n"
+        "        return 1 + N\n"
+        "    return inner\n",
+        encoding="utf-8",
+    )
+    base = _commit(repo, "initial")
+
+    source.write_text(
+        "import functools\n"
+        "\n"
+        "def outer():\n"
+        "    @functools.cache\n"
+        "    def inner():\n"
+        "        return 1 + N + 1\n"
+        "    return inner\n",
+        encoding="utf-8",
+    )
+    head = _commit(repo, "change decorated closure")
+    assert mutation_scope.mutation_targets(repo, base, head, depth="medium") == ()
+
+
+def test_enclosing_function_with_mutable_code_stays_a_target(tmp_path: Path):
+    """#266: contrôle, outer_mixed a du code mutable hors de la closure décorée."""
+    repo = _init_repo(tmp_path)
+    source = repo / "src" / "decorated_closure_mixed.py"
+    source.write_text(
+        "import functools\n"
+        "\n"
+        "def outer_mixed():\n"
+        "    @functools.cache\n"
+        "    def inner():\n"
+        "        return 1 + N\n"
+        "    return inner() + 3\n",
+        encoding="utf-8",
+    )
+    base = _commit(repo, "initial")
+
+    source.write_text(
+        "import functools\n"
+        "\n"
+        "def outer_mixed():\n"
+        "    @functools.cache\n"
+        "    def inner():\n"
+        "        return 1 + N + 1\n"
+        "    return inner() + 3\n",
+        encoding="utf-8",
+    )
+    head = _commit(repo, "change mixed closure")
+    assert mutation_scope.mutation_targets(repo, base, head, depth="medium") == (
+        "decorated_closure_mixed.*outer_mixed__mutmut_*",
+    )
