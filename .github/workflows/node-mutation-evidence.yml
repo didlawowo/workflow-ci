@@ -89,8 +89,19 @@ jobs:
         shell: bash
         run: echo 'Node mutation not required for this PR.'
 
-      - name: Setup Bun
+      - name: Detect preinstalled bun
+        id: bun-runtime
         if: steps.policy.outputs.required == 'true' && contains(steps.policy.outputs.labels, 'node-production-change') && inputs.package-manager == 'bun'
+        shell: bash
+        run: |
+          if command -v bun >/dev/null 2>&1; then
+            echo "preinstalled=true" >> "$GITHUB_OUTPUT"
+            echo "Using preinstalled bun: $(bun --version)"
+          else
+            echo "preinstalled=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Setup Bun
+        if: steps.policy.outputs.required == 'true' && contains(steps.policy.outputs.labels, 'node-production-change') && inputs.package-manager == 'bun' && steps.bun-runtime.outputs.preinstalled != 'true'
         uses: oven-sh/setup-bun@v2
 
       - name: Setup Node

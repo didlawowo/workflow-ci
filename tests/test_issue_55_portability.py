@@ -1,3 +1,4 @@
+import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -184,3 +185,16 @@ def test_mutation_policy_does_not_turn_non_body_pr_edits_into_missing_evidence()
     assert "github.event.changes.body != null" not in workflow
     assert "if: github.event_name == 'pull_request'" in workflow
     assert "if: always() && github.event_name == 'pull_request'" in workflow
+
+
+def test_setup_uv_and_bun_skip_when_preinstalled_on_runner():
+    import yaml
+
+    files = [*ROOT.glob(".github/actions/*/action.yml"), *ROOT.glob(".github/workflows/*.yml")]
+    for path in (p for p in files if p.name != "bench-uv-cache.yml"):
+        doc = yaml.safe_load(path.read_text())
+        jobs = doc.get("jobs") or {"composite": doc.get("runs", {})}
+        for job in jobs.values():
+            for step in job.get("steps") or []:
+                if re.search(r"/setup-(uv|bun)@", step.get("uses", "")):
+                    assert "outputs.preinstalled != 'true'" in step.get("if", ""), (path, step)
