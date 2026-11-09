@@ -719,7 +719,12 @@ def test_enclosing_function_with_mutable_code_stays_a_target(tmp_path: Path):
 
 @pytest.mark.parametrize(
     "body",
-    ["def f(x):\n    'doc{}'\n    return x\n", "def f(x{}):\n    from copy import deepcopy\n    return x{}\n"],
+    [
+        "def f(x):\n    'doc{}'\n    return x\n",
+        "def f(x{}):\n    from copy import deepcopy\n    return x{}\n",
+        "def f(x):\n    \"\"\"doc{}\"\"\" 'tail'\n    return x\n",
+        "def f[deepcopy](x{}):\n    return x{}\n",
+    ],
 )
 def test_inert_looking_code_mutmut_rewrites_stays_a_target(tmp_path: Path, body: str):
     """#266 review: mutmut mutates single-quoted docstrings and any deepcopy name."""

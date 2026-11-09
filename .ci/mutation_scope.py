@@ -6,9 +6,11 @@ from __future__ import annotations
 import argparse
 import ast
 import configparser
+import io
 import re
 import subprocess
 import sys
+import tokenize
 from pathlib import Path
 
 
@@ -171,38 +173,86 @@ def _is_inert_value(value: ast.expr | None) -> bool:
     return isinstance(value, ast.Name) and value.id not in _MUTMUT_MUTATED_NAMES
 
 
-def _mentions_mutated_name(node: ast.AST) -> bool:
-    """Whether any identifier under ``node`` is one operator_name rewrites.
+_TYPE_PARAM_NODES = tuple(
+    getattr(ast, name)
+    for name in ("TypeVar", "ParamSpec", "TypeVarTuple")
+    if hasattr(ast, name)
+)
+
+
+def _identifiers(node: ast.AST) -> list[str | None]:
+    """Identifiers libcst models as ``cst.Name`` on this single node."""
+    if isinstance(node, ast.Name):
+        return [node.id]
+    if isinstance(node, ast.alias):
+        return [*node.name.split("."), node.asname]
+    if isinstance(node, ast.arg):
+        return [node.arg]
+    if isinstance(node, (ast.Attribute,)):
+        return [node.attr]
+    if isinstance(node, ast.keyword):
+        return [node.arg]
+    if isinstance(node, (ast.Global, ast.Nonlocal)):
+        return list(node.names)
+    if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+        return [node.name]
+    if isinstance(node, ast.ExceptHandler):
+        return [node.name]
+    if isinstance(node, _TYPE_PARAM_NODES):
+        return [node.name]
+    if isinstance(node, (ast.MatchAs, ast.MatchStar)):
+        return [node.name]
+    if isinstance(node, ast.MatchMapping):
+        return [node.rest]
+    return []
+
+
+def _mentions_mutated_name(node: ast.AST, *, root: bool = True) -> bool:
+    """Whether a mutable identifier under ``node`` is one operator_name rewrites.
 
     libcst models every identifier as ``cst.Name`` (import aliases, ``global``
-    names, parameters, attribute names, def names), so mutmut can rewrite a
-    ``deepcopy`` wherever it appears, not only as a value.
+    names, parameters, type parameters, attribute names, def names), so mutmut
+    can rewrite a ``deepcopy`` wherever it appears. Annotations, decorators
+    and nested defs mutmut skips are never mutated, so they are not searched.
     """
-    for child in ast.walk(node):
-        names: list[str | None] = []
-        if isinstance(child, ast.Name):
-            names.append(child.id)
-        elif isinstance(child, ast.alias):
-            names.extend([*child.name.split("."), child.asname])
-        elif isinstance(child, ast.arg):
-            names.append(child.arg)
-        elif isinstance(child, ast.Attribute):
-            names.append(child.attr)
-        elif isinstance(child, ast.keyword):
-            names.append(child.arg)
-        elif isinstance(child, (ast.Global, ast.Nonlocal)):
-            names.extend(child.names)
-        elif isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
-            names.append(child.name)
-        if any(name in _MUTMUT_MUTATED_NAMES for name in names):
-            return True
-    return False
+    if not root and isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+        if not _mutmut_generates_mutants(node):
+            return False
+    if any(name in _MUTMUT_MUTATED_NAMES for name in _identifiers(node)):
+        return True
+    skipped: set[int] = set()
+    if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+        skipped.update(id(decorator) for decorator in node.decorator_list)
+    if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.returns:
+        skipped.add(id(node.returns))
+    if isinstance(node, (ast.arg, ast.AnnAssign)) and node.annotation:
+        skipped.add(id(node.annotation))
+    return any(
+        _mentions_mutated_name(child, root=False)
+        for child in ast.iter_child_nodes(node)
+        if id(child) not in skipped
+    )
 
 
 def _is_triple_quoted(value: ast.Constant, source: str) -> bool:
-    """operator_string leaves only triple-quoted strings (docstrings) intact."""
+    """Whether the docstring is one triple-quoted literal operator_string skips.
+
+    Any other spelling, including an implicit concatenation that starts with a
+    triple-quoted part, contains a part mutmut mutates.
+    """
     segment = ast.get_source_segment(source, value) or ""
-    return segment.lstrip("rRbBuUfF").startswith(('"""', "'''"))
+    try:
+        tokens = [
+            token
+            for token in tokenize.generate_tokens(io.StringIO(segment).readline)
+            if token.type
+            not in {tokenize.NEWLINE, tokenize.NL, tokenize.ENDMARKER, tokenize.COMMENT}
+        ]
+    except (tokenize.TokenError, SyntaxError):
+        return False
+    if len(tokens) != 1 or tokens[0].type != tokenize.STRING:
+        return False
+    return tokens[0].string.lstrip("rRbBuU").startswith(('"""', "'''"))
 
 
 def _has_mutable_code(node: _FunctionNode, source: str) -> bool:
