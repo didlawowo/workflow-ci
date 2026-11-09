@@ -154,58 +154,93 @@ def _mutmut_generates_mutants(node: ast.FunctionDef | ast.AsyncFunctionDef) -> b
     return False
 
 
-class _ChangedFunctionVisitor(ast.NodeVisitor):
-    def __init__(self, changed_lines: set[int]) -> None:
-        self.changed_lines = changed_lines
-        self.stack: list[str] = []
-        self.functions: set[tuple[str, ...]] = set()
-        # Depth of enclosing function definitions. mutmut generates no
-        # trampoline for a nested def: its mutants are stored under the
-        # enclosing top-level function or method (x_outer__mutmut_N), so a
-        # changed closure must target that enclosing function, never itself.
-        self.function_depth = 0
+_FunctionNode = ast.FunctionDef | ast.AsyncFunctionDef
 
-    def visit_ClassDef(self, node: ast.ClassDef) -> None:
-        self.stack.append(node.name)
-        self.generic_visit(node)
-        self.stack.pop()
+# Names mutmut's operator_name rewrites; any other bare name is left intact.
+_MUTMUT_MUTATED_NAMES = frozenset({"True", "False", "deepcopy"})
+# Statements no mutmut operator can rewrite.
+_MUTMUT_INERT_STATEMENTS = (ast.Pass, ast.Import, ast.ImportFrom, ast.Global, ast.Nonlocal)
 
-    def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
-        self._visit_function(node)
 
-    def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
-        self._visit_function(node)
+def _is_inert_value(value: ast.expr | None) -> bool:
+    """A value mutmut never mutates: nothing, None, ``...`` or a plain name."""
+    if value is None:
+        return True
+    if isinstance(value, ast.Constant):
+        return value.value is None or value.value is Ellipsis
+    return isinstance(value, ast.Name) and value.id not in _MUTMUT_MUTATED_NAMES
 
-    def _visit_function(
-        self,
-        node: ast.FunctionDef | ast.AsyncFunctionDef,
-    ) -> None:
-        if not _mutmut_generates_mutants(node):
-            # mutmut ignores the whole subtree of a skipped function: nothing
-            # inside it can produce a mutant, so neither emit nor recurse.
-            return
-        starts = [node.lineno]
-        starts.extend(
-            decorator.lineno
-            for decorator in node.decorator_list
-            if hasattr(decorator, "lineno")
+
+def _has_mutable_code(node: _FunctionNode) -> bool:
+    """Whether mutmut can produce at least one mutant inside ``node``.
+
+    Conservative: only bodies made exclusively of statements no operator can
+    rewrite answer False; anything else (compound statements, calls,
+    literals, assignments, defaults) keeps the function in scope.
+    """
+    arguments = node.args
+    if arguments.defaults or any(arguments.kw_defaults):
+        return True
+    for index, statement in enumerate(node.body):
+        if isinstance(statement, _MUTMUT_INERT_STATEMENTS):
+            continue
+        if isinstance(statement, ast.Expr):
+            value = statement.value
+            is_docstring = (
+                index == 0
+                and isinstance(value, ast.Constant)
+                and isinstance(value.value, str)
+            )
+            if is_docstring or _is_inert_value(value):
+                continue
+            return True
+        if isinstance(statement, ast.Return):
+            if _is_inert_value(statement.value):
+                continue
+            return True
+        if isinstance(statement, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            # A skipped nested def (decorated, reserved name) is ignored by
+            # mutmut together with its decorators and whole subtree.
+            if _mutmut_generates_mutants(statement) and _has_mutable_code(statement):
+                return True
+            continue
+        return True
+    return False
+
+
+def _changed_mutmut_functions(
+    tree: ast.Module, changed_lines: set[int]
+) -> set[tuple[str, ...]]:
+    """Qualified functions mutmut can mutate whose source range was changed.
+
+    Mirrors mutmut's OuterFunctionProvider / combine_mutations_to_source:
+    only module-level functions and the direct methods of a module-level
+    class get a trampoline. A def nested anywhere else (closure, nested
+    class, def under ``if``/``try``) is either folded into its enclosing
+    top-level function or method (x_outer__mutmut_N) or never mutated.
+    """
+    candidates: list[tuple[tuple[str, ...], _FunctionNode]] = []
+    for statement in tree.body:
+        if isinstance(statement, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            candidates.append(((statement.name,), statement))
+        elif isinstance(statement, ast.ClassDef):
+            candidates.extend(
+                ((statement.name, method.name), method)
+                for method in statement.body
+                if isinstance(method, (ast.FunctionDef, ast.AsyncFunctionDef))
+            )
+
+    functions: set[tuple[str, ...]] = set()
+    for qualified, node in candidates:
+        if not _mutmut_generates_mutants(node) or not _has_mutable_code(node):
+            continue
+        start = min(
+            [node.lineno, *(decorator.lineno for decorator in node.decorator_list)]
         )
-        start = min(starts)
-        end = getattr(node, "end_lineno", node.lineno)
-
-        qualified = tuple([*self.stack, node.name])
-        if self.function_depth == 0 and any(
-            start <= line <= end for line in self.changed_lines
-        ):
-            # A nested def is covered by this same range check on its
-            # enclosing function, which is the identity mutmut uses.
-            self.functions.add(qualified)
-
-        self.stack.append(node.name)
-        self.function_depth += 1
-        self.generic_visit(node)
-        self.function_depth -= 1
-        self.stack.pop()
+        end = node.end_lineno or node.lineno
+        if any(start <= line <= end for line in changed_lines):
+            functions.add(qualified)
+    return functions
 
 
 def syntax_unchanged(repo: Path, base: str, relative: str, tree: ast.AST) -> bool:
@@ -276,9 +311,7 @@ def mutation_targets(
             targets.add(f"{module}.*__mutmut_*")
             continue
 
-        visitor = _ChangedFunctionVisitor(lines)
-        visitor.visit(tree)
-        for qualified in visitor.functions:
+        for qualified in _changed_mutmut_functions(tree, lines):
             targets.add(f"{module}.*{'*'.join(qualified)}__mutmut_*")
 
     return tuple(sorted(targets))
