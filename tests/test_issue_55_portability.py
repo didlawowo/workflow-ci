@@ -195,6 +195,9 @@ def test_setup_uv_and_bun_skip_when_preinstalled_on_runner():
         doc = yaml.safe_load(path.read_text())
         jobs = doc.get("jobs") or {"composite": doc.get("runs", {})}
         for job in jobs.values():
-            for step in job.get("steps") or []:
+            steps = job.get("steps") or []
+            detect_ids = {s.get("id") for s in steps if "command -v" in s.get("run", "")}
+            for step in steps:
                 if re.search(r"/setup-(uv|bun)@", step.get("uses", "")):
-                    assert "outputs.preinstalled != 'true'" in step.get("if", ""), (path, step)
+                    guard = re.search(r"steps\.([\w-]+)\.outputs\.preinstalled != 'true'", step.get("if", ""))
+                    assert guard and guard.group(1) in detect_ids, (path, step)
