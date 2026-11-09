@@ -668,3 +668,13 @@ def test_missing_counter_reads_short_pages_until_empty(monkeypatch):
     monkeypatch.setattr(mutation_policy, "_api_request", lambda method, path, payload=None: pages[path])
     files = mutation_policy._pull_request_files({"pull_request": {"number": 404}})
     assert files is not None and files[-1] == "service.py" and len(files) == 31
+
+
+def test_empty_api_body_is_not_the_end_of_the_listing(monkeypatch):
+    """#254 review: a body-less page must not be read as the last page."""
+    pages = {
+        "pulls/405/files?per_page=100": [{"filename": f"docs/p{i}.md"} for i in range(30)],
+        "pulls/405/files?per_page=100&page=2": None,
+    }
+    monkeypatch.setattr(mutation_policy, "_api_request", lambda method, path, payload=None: pages[path])
+    assert mutation_policy._pull_request_files({"pull_request": {"number": 405}}) is None
