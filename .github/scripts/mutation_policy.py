@@ -130,6 +130,7 @@ def _pull_request_file_entries(event: dict) -> list[dict] | None:
         return None
 
     entries: list[dict] = []
+    until_empty_page = False
     page = 1
     while True:
         suffix = "per_page=100" if page == 1 else f"per_page=100&page={page}"
@@ -153,9 +154,21 @@ def _pull_request_file_entries(event: dict) -> list[dict] | None:
             )
         entries.extend(page_entries)
 
+        if page == 1 and changed_count == 0 and page_entries:
+            # Forgejo reports changed_files=0 for AGit pull requests
+            # (refs/for/<branch>) while pulls/{n}/files lists the real delta.
+            # A zero counter contradicted by the API is no completeness bound.
+            # Forgejo also ignores per_page (30 items by default, 50 at most),
+            # so a short page proves nothing: read until an empty page.
+            changed_count = None
+            until_empty_page = True
+
         if isinstance(changed_count, int) and len(entries) >= changed_count:
             break
-        if len(payload) < 100:
+        if until_empty_page:
+            if not payload:
+                break
+        elif len(payload) < 100:
             break
         page += 1
         if page > 100:
