@@ -4,6 +4,13 @@ All notable changes to this project are documented here.
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 and follows the [Conventional Commits](https://www.conventionalcommits.org) spec.
 
+## [1.22.4] - 2026-11-09
+
+### Bug Fixes
+
+- *(git-cliff-bump)* Réutiliser le git-cliff préinstallé du runner (#269)
+
+
 ## [1.22.3] - 2026-11-08
 
 ### Bug Fixes
