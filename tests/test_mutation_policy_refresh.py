@@ -557,3 +557,102 @@ def test_node_production_change_defaults_to_medium(monkeypatch, tmp_path):
     assert "complexity:medium(default)" in rendered
     assert "node-production-change" in rendered
     assert "depth=medium" in rendered
+
+
+def test_agit_swift_pr_with_zero_changed_files_is_not_required(monkeypatch, tmp_path):
+    """#254 : PR AGit Swift avec changed_files nul ne doit pas exiger de mutation."""
+    event = {
+        "number": 401,
+        "pull_request": {
+            "number": 401,
+            "changed_files": 0,
+            "user": {"login": "developer"},
+            "labels": [],
+            "body": "",
+        },
+    }
+
+    def fake_api(method, path, payload=None):
+        if method == "GET" and path == "pulls/401/files?per_page=100":
+            return [
+                {"filename": "Sources/App/Main.swift"},
+                {"filename": "Package.swift"},
+            ]
+        if method == "GET" and path == "pulls/401/files?per_page=100&page=2":
+            return []
+        raise AssertionError((method, path, payload))
+
+    output = tmp_path / "output"
+    monkeypatch.setenv("GITHUB_OUTPUT", str(output))
+    monkeypatch.setattr(mutation_policy, "_api_request", fake_api)
+
+    assert mutation_policy.classify(event) == 0
+    rendered = output.read_text()
+    assert "required=false" in rendered
+    assert "depth=none" in rendered
+
+
+def test_agit_python_pr_with_zero_changed_files_requires_mutation(monkeypatch, tmp_path):
+    """#254 : PR AGit Python avec changed_files nul doit lire la page 2 vide."""
+    event = {
+        "number": 402,
+        "pull_request": {
+            "number": 402,
+            "changed_files": 0,
+            "user": {"login": "developer"},
+            "labels": [],
+            "body": "",
+        },
+    }
+
+    def fake_api(method, path, payload=None):
+        if method == "GET" and path == "pulls/402/files?per_page=100":
+            return [{"filename": "service.py"}]
+        if method == "GET" and path == "pulls/402/files?per_page=100&page=2":
+            return []
+        raise AssertionError((method, path, payload))
+
+    output = tmp_path / "output"
+    monkeypatch.setenv("GITHUB_OUTPUT", str(output))
+    monkeypatch.setattr(mutation_policy, "_api_request", fake_api)
+
+    assert mutation_policy.classify(event) == 0
+    rendered = output.read_text()
+    assert "required=true" in rendered
+    assert "labels=complexity:medium(default),python-production-change" in rendered
+    assert "depth=medium" in rendered
+
+
+def test_agit_short_pages_read_service_file_on_second_page(monkeypatch, tmp_path):
+    """#254 : PR AGit multi-pages courtes doit lire la page 2 contenant service.py."""
+    event = {
+        "number": 403,
+        "pull_request": {
+            "number": 403,
+            "changed_files": 0,
+            "user": {"login": "developer"},
+            "labels": [],
+            "body": "",
+        },
+    }
+
+    def fake_api(method, path, payload=None):
+        if method == "GET" and path == "pulls/403/files?per_page=100":
+            return [
+                {"filename": f"docs/page_{index}.md"} for index in range(30)
+            ]
+        if method == "GET" and path == "pulls/403/files?per_page=100&page=2":
+            return [{"filename": "service.py"}]
+        if method == "GET" and path == "pulls/403/files?per_page=100&page=3":
+            return []
+        raise AssertionError((method, path, payload))
+
+    output = tmp_path / "output"
+    monkeypatch.setenv("GITHUB_OUTPUT", str(output))
+    monkeypatch.setattr(mutation_policy, "_api_request", fake_api)
+
+    assert mutation_policy.classify(event) == 0
+    rendered = output.read_text()
+    assert "required=true" in rendered
+    assert "labels=complexity:medium(default),python-production-change" in rendered
+    assert "depth=medium" in rendered
