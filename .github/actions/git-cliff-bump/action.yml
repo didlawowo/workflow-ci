@@ -153,6 +153,8 @@ runs:
       if: steps.release-scope.outputs.releasable == 'true' && steps.cliff-bin.outputs.preinstalled == 'true'
       shell: bash
       env:
+        # Same token as the upstream action, for configs using remote.github.
+        GITHUB_TOKEN: ${{ env.GITHUB_TOKEN || github.token }}
         CLIFF_CONFIG: ${{ steps.cfg.outputs.path }}
       run: git-cliff --config "$CLIFF_CONFIG" --bumped-version > /tmp/next-version.txt
 
@@ -209,6 +211,8 @@ runs:
       if: steps.decide.outputs.released == 'true' && steps.changelog.outputs.mode == 'prepend' && steps.cliff-bin.outputs.preinstalled == 'true'
       shell: bash
       env:
+        # Same token as the upstream action, for configs using remote.github.
+        GITHUB_TOKEN: ${{ env.GITHUB_TOKEN || github.token }}
         CLIFF_CONFIG: ${{ steps.cfg.outputs.path }}
         RELEASE_TAG: ${{ steps.decide.outputs.version }}
       run: git-cliff --config "$CLIFF_CONFIG" --tag "$RELEASE_TAG" --unreleased --prepend CHANGELOG.md > /tmp/git-cliff-changelog.md
@@ -231,6 +235,8 @@ runs:
       if: steps.decide.outputs.released == 'true' && steps.changelog.outputs.mode == 'create' && steps.cliff-bin.outputs.preinstalled == 'true'
       shell: bash
       env:
+        # Same token as the upstream action, for configs using remote.github.
+        GITHUB_TOKEN: ${{ env.GITHUB_TOKEN || github.token }}
         CLIFF_CONFIG: ${{ steps.cfg.outputs.path }}
         RELEASE_TAG: ${{ steps.decide.outputs.version }}
       run: git-cliff --config "$CLIFF_CONFIG" --tag "$RELEASE_TAG" --output CHANGELOG.md
@@ -250,6 +256,8 @@ runs:
       if: steps.decide.outputs.released == 'true' && steps.cliff-bin.outputs.preinstalled == 'true'
       shell: bash
       env:
+        # Same token as the upstream action, for configs using remote.github.
+        GITHUB_TOKEN: ${{ env.GITHUB_TOKEN || github.token }}
         CLIFF_CONFIG: ${{ steps.cfg.outputs.path }}
         RELEASE_TAG: ${{ steps.decide.outputs.version }}
       run: git-cliff --config "$CLIFF_CONFIG" --tag "$RELEASE_TAG" --unreleased --strip header > /tmp/release-notes.md
