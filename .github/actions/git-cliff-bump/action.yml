@@ -174,9 +174,12 @@ runs:
           echo "released=false" >> "$GITHUB_OUTPUT"
           echo "version=" >> "$GITHUB_OUTPUT"
         else
-          # Normalise tag prefix
+          # Normalise tag prefix. git-cliff keeps the prefix of the last tag
+          # (chart-v1.2.0): strip it before adding it back exactly once.
           PREFIX="${{ inputs.tag-prefix }}"
-          VERSION="${NEXT#v}"
+          VERSION="$NEXT"
+          [ -n "$PREFIX" ] && VERSION="${VERSION#"$PREFIX"}"
+          VERSION="${VERSION#v}"
           [ -n "$PREFIX" ] && VERSION="${PREFIX}${VERSION}"
           echo "released=true" >> "$GITHUB_OUTPUT"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"

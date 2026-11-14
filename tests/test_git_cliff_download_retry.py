@@ -140,3 +140,13 @@ def test_preinstalled_git_cliff_twins_every_pinned_upstream_call():
         assert "preinstalled != 'true'" in step["if"]
     for step in twins:
         assert step["run"].startswith('git-cliff --config "$CLIFF_CONFIG"')
+
+
+@pytest.mark.parametrize("prefix,cliff,expected", [("v", "v1.3.0", "v1.3.0"), ("", "v1.3.0", "1.3.0"), ("chart-v", "chart-v1.3.0", "chart-v1.3.0")])
+def test_decide_adds_the_tag_prefix_once(tmp_path, prefix, cliff, expected):
+    step = next(s for s in action_steps() if s.get("id") == "decide")
+    script = step["run"].replace("${{ inputs.tag-prefix }}", prefix).replace("${{ steps.release-scope.outputs.last-tag }}", "")
+    Path("/tmp/next-version.txt").write_text(cliff + "\n")
+    output = tmp_path / "output"
+    subprocess.run(["bash", "-c", script], env={**os.environ, "GITHUB_OUTPUT": str(output)}, check=True, timeout=5)
+    assert f"version={expected}" in output.read_text().splitlines()
