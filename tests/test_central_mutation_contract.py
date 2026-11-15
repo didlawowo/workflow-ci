@@ -35,6 +35,19 @@ def test_engine_selection_ignores_any_local_consumer_runner(tmp_path):
     assert contract.select_engine(tmp_path) == "go"
 
 
+def test_engine_selection_treats_bare_python_scripts_like_github(tmp_path):
+    (tmp_path / ".venv/lib").mkdir(parents=True)
+    (tmp_path / ".venv/lib/site.py").write_text("")
+    with pytest.raises(ValueError, match="No central"):
+        contract.select_engine(tmp_path)
+    (tmp_path / "scripts").mkdir()
+    (tmp_path / "scripts/tool.py").write_text("")
+    assert contract.select_engine(tmp_path) == "python"
+    (tmp_path / "package.json").write_text("{}")
+    with pytest.raises(ValueError, match="No central"):
+        contract.select_engine(tmp_path)
+
+
 @pytest.mark.parametrize("locked", [False, True])
 def test_project_dependencies_preserve_lock_and_both_dev_schemas(tmp_path, locked):
     (tmp_path / "pyproject.toml").write_text(
