@@ -20,6 +20,14 @@ def select_engine(trusted: Path) -> str:
         return "go"
     if any((trusted / name).is_file() for name in ("pyproject.toml", "setup.cfg")):
         return "python"
+    # Same contract as the GitHub runner selection: Python sources without any
+    # Python or Node project metadata are bare scripts, mutated by the Python
+    # engine (mutation.sh installs pytest/mutmut when no pyproject exists).
+    if not (trusted / "package.json").is_file() and any(
+        ".venv" not in path.relative_to(trusted).parts
+        for path in trusted.rglob("*.py")
+    ):
+        return "python"
     raise ValueError("No central mutation engine for protected-base project metadata")
 
 
