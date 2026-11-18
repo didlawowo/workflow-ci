@@ -757,7 +757,10 @@ def test_documentation_only_mode_is_opt_in_and_keeps_quality_and_secret_scan():
         "Verify Node tests",
         "Verify SonarQube Quality Gate",
     ):
-        assert "env.DOCUMENTATION_ONLY != 'true'" in guarded[name], name
+        assert (
+            "!(needs.change-scope.outputs.documentation-only == 'true')"
+            in guarded[name]
+        ), name
     for name in (
         "Verify Python quality and security",
         "Verify Go quality and security",
@@ -765,3 +768,21 @@ def test_documentation_only_mode_is_opt_in_and_keeps_quality_and_secret_scan():
     ):
         assert "DOCUMENTATION_ONLY" not in guarded[name], name
     assert "change-scope" in jobs["trusted-gate"]["needs"]
+
+
+def test_documentation_only_flag_never_comes_from_the_job_environment():
+    content = WORKFLOW.read_text()
+    # Code under test can write $GITHUB_ENV: the flag must come from needs only.
+    assert "env.DOCUMENTATION_ONLY" not in content
+    assert "DOCUMENTATION_ONLY:" not in content
+    jobs = yaml.safe_load(content)["jobs"]
+    assert "env" not in jobs["independent-verification"]
+    enforce = next(
+        s
+        for s in jobs["independent-verification"]["steps"]
+        if s.get("name") == "Enforce independent verification"
+    )
+    assert (
+        "TRUSTED_DOCUMENTATION_ONLY=\"${{ needs.change-scope.outputs.documentation-only == 'true' }}\""
+        in enforce["run"]
+    )

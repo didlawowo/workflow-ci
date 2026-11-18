@@ -163,10 +163,10 @@ jobs:
     permissions:
       contents: read
       actions: read
-    env:
-      DOCUMENTATION_ONLY: ${{ needs.change-scope.outputs.documentation-only == 'true' }}
+    # The documentation-only flag is always read from the change-scope output,
+    # never from the job environment: code under test can write $GITHUB_ENV.
     outputs:
-      documentation-only: ${{ env.DOCUMENTATION_ONLY }}
+      documentation-only: ${{ needs.change-scope.outputs.documentation-only == 'true' }}
       coverage-percentage: ${{ steps.python-tests.outputs.coverage-percentage || steps.go-tests.outputs.coverage-percentage || steps.node-tests.outputs.coverage-percentage }}
       tests-total: ${{ steps.python-tests.outputs.test-count || steps.go-tests.outputs.test-count || steps.node-tests.outputs.test-count }}
       tests-failed: ${{ steps.python-tests.outputs.tests-failed || steps.go-tests.outputs.tests-failed || steps.node-tests.outputs.tests-failed }}
@@ -205,7 +205,7 @@ jobs:
 
       - name: Verify Python tests
         id: python-tests
-        if: inputs.repo-type == 'python' && env.DOCUMENTATION_ONLY != 'true'
+        if: inputs.repo-type == 'python' && !(needs.change-scope.outputs.documentation-only == 'true')
         continue-on-error: true
         uses: $/.github/actions/run-python-tests
         with:
@@ -221,7 +221,7 @@ jobs:
 
       - name: Verify Go tests
         id: go-tests
-        if: inputs.repo-type == 'go' && env.DOCUMENTATION_ONLY != 'true'
+        if: inputs.repo-type == 'go' && !(needs.change-scope.outputs.documentation-only == 'true')
         continue-on-error: true
         uses: $/.github/actions/run-go-tests
         with:
@@ -233,7 +233,7 @@ jobs:
 
       - name: Verify Node tests
         id: node-tests
-        if: (inputs.repo-type == 'node' || inputs.repo-type == 'typescript' || inputs.repo-type == 'javascript') && env.DOCUMENTATION_ONLY != 'true'
+        if: (inputs.repo-type == 'node' || inputs.repo-type == 'typescript' || inputs.repo-type == 'javascript') && !(needs.change-scope.outputs.documentation-only == 'true')
         continue-on-error: true
         uses: $/.github/actions/run-node-tests
         with:
@@ -294,7 +294,7 @@ jobs:
 
       - name: Verify SonarQube Quality Gate
         id: sonarqube
-        if: vars.SONAR_ENABLED == 'true' && env.DOCUMENTATION_ONLY != 'true'
+        if: vars.SONAR_ENABLED == 'true' && !(needs.change-scope.outputs.documentation-only == 'true')
         continue-on-error: true
         uses: $/.github/actions/sonarqube-scan
         with:
@@ -310,22 +310,24 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          # Interpolated from the change-scope output, not read from $GITHUB_ENV.
+          TRUSTED_DOCUMENTATION_ONLY="${{ needs.change-scope.outputs.documentation-only == 'true' }}"
           TYPE="${{ inputs.repo-type }}"
           FAILED=0
 
           case "$TYPE" in
             python)
-              [[ "$DOCUMENTATION_ONLY" == "true" ]] || test "${{ steps.python-tests.outcome }}" = "success" || FAILED=1
+              [[ "$TRUSTED_DOCUMENTATION_ONLY" == "true" ]] || test "${{ steps.python-tests.outcome }}" = "success" || FAILED=1
               test "${{ steps.python-quality.outputs.quality-passed }}" = "true" || FAILED=1
               test "${{ steps.python-quality.outputs.security-issues }}" = "0" || FAILED=1
               ;;
             go)
-              [[ "$DOCUMENTATION_ONLY" == "true" ]] || test "${{ steps.go-tests.outcome }}" = "success" || FAILED=1
+              [[ "$TRUSTED_DOCUMENTATION_ONLY" == "true" ]] || test "${{ steps.go-tests.outcome }}" = "success" || FAILED=1
               test "${{ steps.go-quality.outputs.quality-passed }}" = "true" || FAILED=1
               test "${{ steps.go-quality.outputs.security-issues }}" = "0" || FAILED=1
               ;;
             node|typescript|javascript)
-              [[ "$DOCUMENTATION_ONLY" == "true" ]] || test "${{ steps.node-tests.outcome }}" = "success" || FAILED=1
+              [[ "$TRUSTED_DOCUMENTATION_ONLY" == "true" ]] || test "${{ steps.node-tests.outcome }}" = "success" || FAILED=1
               test "${{ steps.node-quality.outputs.quality-passed }}" = "true" || FAILED=1
               test "${{ steps.node-quality.outputs.security-issues }}" = "0" || FAILED=1
               ;;
@@ -335,7 +337,7 @@ jobs:
               ;;
           esac
 
-          if [[ "$DOCUMENTATION_ONLY" == "true" ]]; then
+          if [[ "$TRUSTED_DOCUMENTATION_ONLY" == "true" ]]; then
             echo "Documentation-only pull request: tests, coverage and SonarQube not applicable; quality and security enforced."
           elif [[ "${{ vars.SONAR_ENABLED }}" == "true" ]]; then
             if [[ "${{ steps.sonarqube.outcome }}" != "success" ]]; then

@@ -123,10 +123,11 @@ secret scan, remain enforced, and the quality report says "documentation only" i
 
 Some files never count as documentation, whatever the patterns (even `**`): `.github/**`,
 `.ci/**`, `.forgejo/**`, `.gitea/**`, `.gitmodules`, `.gitattributes`,
-`sonar-project.properties`, `.pre-commit-config.yaml`, dependency manifests and lockfiles
-(Python, Node, Go, Rust), symlinks and submodules. An empty diff, a non pull request event or an
+`sonar-project.properties`, `.pre-commit-config.yaml`, `conftest.py`, build files (Dockerfile,
+Taskfile, Makefile), dependency manifests and lockfiles (Python, Node, Go, Rust), symlinks and
+submodules. An empty diff, a non pull request event or an
 unavailable comparison keeps the full verification; a failed or cancelled classification fails
-the trusted gate. Without the input no job is added and check names are unchanged.
+the trusted gate. Without the input the Change scope check is reported as skipped and nothing else changes.
 
 ## SonarQube Quality Gate
 
