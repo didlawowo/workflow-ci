@@ -27,7 +27,6 @@ ROOT = Path(__file__).resolve().parents[1]
         ("success", "success", "false", "", "false", "false", False),
     ],
 )
-@pytest.mark.parametrize("scope_result,documentation_only", [("success", "false")])
 def test_trusted_gate_is_independent_from_publication(
     quality_result,
     mutation_result,
@@ -36,8 +35,6 @@ def test_trusted_gate_is_independent_from_publication(
     report_present,
     independent,
     success,
-    scope_result,
-    documentation_only,
 ):
     data = yaml.safe_load((ROOT / ".github/workflows/quality-evidence.yml").read_text())
     steps = data["jobs"]["trusted-gate"]["steps"]
@@ -50,8 +47,8 @@ def test_trusted_gate_is_independent_from_publication(
             **os.environ,
             "QUALITY_RESULT": quality_result,
             "INDEPENDENT_ENABLED": independent,
-            "SCOPE_RESULT": scope_result,
-            "DOCUMENTATION_ONLY": documentation_only,
+            "SCOPE_RESULT": "skipped",
+            "SCOPE_REQUESTED": "false",
             "MUTATION_RESULT": mutation_result,
             "MUTATION_REQUIRED": required,
             "MUTATION_REPORT_FILE": report_file,
@@ -198,18 +195,19 @@ def test_capture_preserves_trusted_runner_mutation_diagnostics(workflow):
     assert "Preserving mutation diagnostics produced by the trusted runner" in capture
 
 
+
 @pytest.mark.parametrize(
-    "scope_result,documentation_only,quality_result,success",
+    "scope_requested,scope_result,success",
     [
-        ("success", "true", "skipped", True),
-        ("success", "true", "success", False),
-        ("failure", "", "skipped", False),
-        ("skipped", "", "success", False),
+        ("true", "success", True),
+        ("true", "failure", False),
+        ("true", "cancelled", False),
+        ("true", "skipped", False),
+        ("false", "skipped", True),
+        ("false", "success", False),
     ],
 )
-def test_trusted_gate_documentation_only_scope(
-    scope_result, documentation_only, quality_result, success
-):
+def test_trusted_gate_enforces_the_change_scope(scope_requested, scope_result, success):
     data = yaml.safe_load((ROOT / ".github/workflows/quality-evidence.yml").read_text())
     gate = next(
         s
@@ -220,10 +218,10 @@ def test_trusted_gate_documentation_only_scope(
         ["bash", "-c", gate["run"]],
         env={
             **os.environ,
-            "QUALITY_RESULT": quality_result,
+            "QUALITY_RESULT": "success",
             "INDEPENDENT_ENABLED": "true",
             "SCOPE_RESULT": scope_result,
-            "DOCUMENTATION_ONLY": documentation_only,
+            "SCOPE_REQUESTED": scope_requested,
             "MUTATION_RESULT": "success",
             "MUTATION_REQUIRED": "false",
             "MUTATION_REPORT_FILE": "",

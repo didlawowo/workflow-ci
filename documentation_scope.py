@@ -11,11 +11,51 @@ from pathlib import Path
 from image_changes import app_changed, git, paths
 
 
+# Never documentation, whatever the consumer patterns say (for example `**`):
+# CI and policy configuration, dependency manifests and lockfiles.
+PROTECTED_PATHS = [
+    ".github/**",
+    ".ci/**",
+    ".forgejo/**",
+    ".gitea/**",
+    ".gitmodules",
+    ".gitattributes",
+    "sonar-project.properties",
+    "**/.pre-commit-config.yaml",
+    "**/pyproject.toml",
+    "**/uv.lock",
+    "**/requirements*.txt",
+    "**/package.json",
+    "**/package-lock.json",
+    "**/pnpm-lock.yaml",
+    "**/yarn.lock",
+    "**/go.mod",
+    "**/go.sum",
+    "**/Cargo.toml",
+    "**/Cargo.lock",
+]
+# Symlinks and submodules can make code look like a documentation path.
+LINK_MODES = {"120000", "160000"}
+
+
+def changes_links(base, head):
+    raw = git("diff", "--raw", "--no-renames", "--no-ext-diff", base, head)
+    for line in raw.splitlines():
+        modes = line.split("\t", 1)[0].split()[:2]
+        if any(mode.lstrip(":") in LINK_MODES for mode in modes):
+            return True
+    return False
+
+
 def documentation_only(base, head, patterns):
     if not patterns:
         return False
     merge_base = git("merge-base", base, head)
     if not app_changed(merge_base, head, ["**"], []):
+        return False
+    if app_changed(merge_base, head, PROTECTED_PATHS, []):
+        return False
+    if changes_links(merge_base, head):
         return False
     return not app_changed(merge_base, head, ["**"], patterns)
 

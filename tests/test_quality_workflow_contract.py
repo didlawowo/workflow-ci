@@ -727,3 +727,42 @@ def test_only_short_trusted_jobs_may_use_the_light_runner_variable():
         assert jobs[name]["runs-on"] == light
     assert content.count("LIGHT_RUNNER") == 5  # deux commentaires, trois runs-on
     assert jobs["independent-verification"]["runs-on"] == "${{ inputs.runner }}"
+
+
+def test_documentation_only_mode_is_opt_in_and_keeps_quality_and_secret_scan():
+    workflow = yaml.safe_load(WORKFLOW.read_text())
+    inputs = workflow[True]["workflow_call"]["inputs"]
+    assert inputs["documentation-only-paths"]["default"] == ""
+    jobs = workflow["jobs"]
+
+    scope = jobs["change-scope"]
+    assert scope["if"].startswith("inputs.documentation-only-paths != ''")
+    assert scope["outputs"]["documentation-only"].endswith("|| 'false' }}")
+
+    independent = jobs["independent-verification"]
+    assert independent["needs"] == ["change-scope"]
+    assert "!cancelled()" in independent["if"]
+    assert "needs.change-scope.result == 'success'" in independent["if"]
+    assert (
+        "needs.change-scope.result == 'skipped' && inputs.documentation-only-paths == ''"
+        in independent["if"]
+    )
+    guarded = {
+        step["name"]: str(step.get("if", ""))
+        for step in independent["steps"]
+        if "name" in step
+    }
+    for name in (
+        "Verify Python tests",
+        "Verify Go tests",
+        "Verify Node tests",
+        "Verify SonarQube Quality Gate",
+    ):
+        assert "env.DOCUMENTATION_ONLY != 'true'" in guarded[name], name
+    for name in (
+        "Verify Python quality and security",
+        "Verify Go quality and security",
+        "Verify Node quality and security",
+    ):
+        assert "DOCUMENTATION_ONLY" not in guarded[name], name
+    assert "change-scope" in jobs["trusted-gate"]["needs"]

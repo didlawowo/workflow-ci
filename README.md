@@ -114,13 +114,19 @@ the current behaviour.
         **/*.md
 ```
 
-A `Change scope` job compares the pull request head with its merge base using workflow-ci code
-on the git graph only. When the pull request changes files and every one of them matches, the
-`Independent quality execution` job is skipped as not applicable and the trusted gate accepts
-that skip; the mutation gate still runs. Any other file (workflows, `sonar-project.properties`,
-sources, lockfiles, a file moved out of a documentation path), an empty diff, a non pull request
-event or an unavailable comparison keeps the full verification. A failed classification fails
-the trusted gate. Check names are unchanged, so branch protection needs no update.
+A `Change scope` job, started only when the input is set, compares the pull request head with
+its merge base using workflow-ci code on the git graph only. When the pull request changes files
+and every one of them matches, `Independent quality execution` still runs but skips tests,
+coverage and SonarQube as not applicable; quality and security checks, including the TruffleHog
+secret scan, remain enforced, and the quality report says "documentation only" instead of
+"missing". The mutation gate is unchanged.
+
+Some files never count as documentation, whatever the patterns (even `**`): `.github/**`,
+`.ci/**`, `.forgejo/**`, `.gitea/**`, `.gitmodules`, `.gitattributes`,
+`sonar-project.properties`, `.pre-commit-config.yaml`, dependency manifests and lockfiles
+(Python, Node, Go, Rust), symlinks and submodules. An empty diff, a non pull request event or an
+unavailable comparison keeps the full verification; a failed or cancelled classification fails
+the trusted gate. Without the input no job is added and check names are unchanged.
 
 ## SonarQube Quality Gate
 

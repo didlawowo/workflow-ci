@@ -586,14 +586,22 @@ def aggregate_gate(report: dict[str, Any]) -> dict[str, Any]:
     failures: list[str] = []
     missing: list[str] = []
 
+    # Documentation-only pull request: tests, coverage and Sonar are not
+    # applicable; quality and security (secret scan) remain required.
+    documentation_only = bool(report.get("documentation_only"))
+
     tests = report.get("tests") or {}
-    if not tests.get("available"):
+    if documentation_only:
+        pass
+    elif not tests.get("available"):
         missing.append("tests")
     elif (tests.get("failed") or 0) > 0 or tests.get("status") == "failure":
         failures.append("tests")
 
     coverage = report.get("coverage") or {}
-    if not coverage.get("available"):
+    if documentation_only:
+        pass
+    elif not coverage.get("available"):
         missing.append("coverage")
     elif coverage.get("gate_passed") is False:
         failures.append("coverage")
@@ -606,7 +614,9 @@ def aggregate_gate(report: dict[str, Any]) -> dict[str, Any]:
             failures.append(label)
 
     sonar = report.get("sonar") or {}
-    if sonar.get("required") and not sonar.get("available"):
+    if documentation_only:
+        pass
+    elif sonar.get("required") and not sonar.get("available"):
         missing.append("sonar")
     elif sonar.get("status") == "failure":
         failures.append("sonar")
@@ -829,6 +839,8 @@ def render_markdown(report: dict[str, Any]) -> str:
         gate_details.append("failed: " + ", ".join(gate["failures"]))
     if gate["missing"]:
         gate_details.append("missing: " + ", ".join(gate["missing"]))
+    if report.get("documentation_only"):
+        gate_details.append("documentation only: tests, coverage and Sonar not applicable")
     gate_summary = f"{gate_icon} **{gate['status']}**"
     if gate_details:
         gate_summary += " · " + " · ".join(gate_details)
@@ -966,6 +978,7 @@ def main() -> int:
     parser.add_argument("--tests-failed")
     parser.add_argument("--tests-skipped")
     parser.add_argument("--test-status")
+    parser.add_argument("--documentation-only", default="false")
     parser.add_argument("--sonar-status")
     parser.add_argument("--sonar-url")
     parser.add_argument("--base")
@@ -1008,6 +1021,7 @@ def main() -> int:
         scan_errors = None
     report = {
         "schema_version": 1,
+        "documentation_only": args.documentation_only == "true",
         "identity": {
             "base_sha": args.base,
             "head_sha": args.head,

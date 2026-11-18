@@ -1,11 +1,12 @@
 """Tests de documentation_scope.py avec de vrais dépôts Git locaux."""
 
+import os
 from pathlib import Path
 
 import pytest
 import yaml
 
-from documentation_scope import decide, documentation_only
+from documentation_scope import decide, documentation_only, main
 from image_changes import git
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -117,28 +118,53 @@ def test_decide_fail_closed(base, overrides):
     assert not decide(environ)
 
 
-def test_quality_evidence_workflow_contract():
-    workflow = yaml.safe_load(
-        (ROOT / ".github/workflows/quality-evidence.yml").read_text()
-    )
-    trigger = workflow[True] if True in workflow else workflow["on"]
-    inputs = trigger.get("workflow_call", {}).get("inputs") or trigger.get(
-        "pull_request", {}
-    ).get("inputs")
-    assert inputs["documentation-only-paths"]["default"] == ""
+@pytest.mark.parametrize(
+    "name",
+    [".github/workflows/ci.yml", "uv.lock", "web/package.json", "sonar-project.properties"],
+)
+def test_protected_paths_are_never_documentation_even_with_a_catch_all(base, name):
+    head = commit(name)
+    assert not documentation_only(base, head, ["**"])
 
-    jobs = workflow["jobs"]
-    independent = jobs["independent-verification"]
-    assert independent["needs"] == ["change-scope"]
-    condition = str(independent.get("if", ""))
-    assert "needs.change-scope.outputs.documentation-only != 'true'" in condition
 
-    gate = jobs["trusted-gate"]
-    needs = gate["needs"]
-    assert "change-scope" in (needs if isinstance(needs, list) else [needs])
-    scripts = [str(step.get("run", "")) for step in gate.get("steps", [])]
-    assert any(
-        '$SCOPE_RESULT" != "success"' in script
-        and '$QUALITY_RESULT" != "skipped"' in script
-        for script in scripts
-    )
+def test_symlink_or_submodule_under_documentation_keeps_full_verification(base):
+    Path("docs").mkdir()
+    os.symlink("../src/app.py", "docs/link.md")
+    git("add", ".")
+    git("commit", "-qm", "symlink")
+    assert not documentation_only(base, git("rev-parse", "HEAD"), DOCS)
+
+
+def test_deleted_documentation_file_is_documentation(base):
+    commit("docs/old.md")
+    middle = git("rev-parse", "HEAD")
+    git("rm", "-q", "docs/old.md")
+    git("commit", "-qm", "remove")
+    assert documentation_only(middle, git("rev-parse", "HEAD"), DOCS)
+
+
+def test_unknown_head_and_invalid_patterns(base):
+    env = {
+        "DOCUMENTATION_PATHS": "docs/**",
+        "EVENT_NAME": "pull_request",
+        "BASE_SHA": base,
+        "HEAD_SHA": UNKNOWN_SHA,
+    }
+    assert not decide(env)
+    with pytest.raises(ValueError):
+        decide({**env, "DOCUMENTATION_PATHS": ":(exclude)src/**"})
+
+
+def test_main_writes_the_github_output(base, tmp_path, monkeypatch):
+    head = commit("docs/guide.md")
+    output = tmp_path / "out.txt"
+    for key, value in {
+        "DOCUMENTATION_PATHS": "docs/**",
+        "EVENT_NAME": "pull_request",
+        "BASE_SHA": base,
+        "HEAD_SHA": head,
+        "GITHUB_OUTPUT": str(output),
+    }.items():
+        monkeypatch.setenv(key, value)
+    main()
+    assert output.read_text() == "documentation-only=true\n"
