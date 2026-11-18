@@ -13,6 +13,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import xml.etree.ElementTree as ET
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
@@ -657,8 +658,15 @@ def aggregate_gate(report: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def documentation_only_requested(environ: Mapping[str, str]) -> bool:
+    """Trusted change-scope verdict passed by the quality-report action."""
+    return environ.get("QUALITY_DOCUMENTATION_ONLY") == "true"
+
+
 def finalize_report(report: dict[str, Any]) -> dict[str, Any]:
     finalized = dict(report)
+    if documentation_only_requested(os.environ):
+        finalized["documentation_only"] = True
     finalized["gate"] = aggregate_gate(finalized)
     return finalized
 
@@ -839,8 +847,6 @@ def render_markdown(report: dict[str, Any]) -> str:
         gate_details.append("failed: " + ", ".join(gate["failures"]))
     if gate["missing"]:
         gate_details.append("missing: " + ", ".join(gate["missing"]))
-    if report.get("documentation_only"):
-        gate_details.append("documentation only: tests, coverage and Sonar not applicable")
     gate_summary = f"{gate_icon} **{gate['status']}**"
     if gate_details:
         gate_summary += " · " + " · ".join(gate_details)
@@ -978,7 +984,6 @@ def main() -> int:
     parser.add_argument("--tests-failed")
     parser.add_argument("--tests-skipped")
     parser.add_argument("--test-status")
-    parser.add_argument("--documentation-only", default="false")
     parser.add_argument("--sonar-status")
     parser.add_argument("--sonar-url")
     parser.add_argument("--base")
@@ -1021,7 +1026,6 @@ def main() -> int:
         scan_errors = None
     report = {
         "schema_version": 1,
-        "documentation_only": args.documentation_only == "true",
         "identity": {
             "base_sha": args.base,
             "head_sha": args.head,
