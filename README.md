@@ -101,6 +101,34 @@ Sinon, poser le label après le run initial ne déclenche aucun build → l'imag
 `pr-<n>` n'existe pas → `ImagePullBackOff` sur le pod preview. Les templates
 `ci-branch-pipeline.yml` incluent déjà ce type par défaut.
 
+## Documentation-only pull requests
+
+`quality-evidence.yml` accepts an opt-in `documentation-only-paths` input: multiline Git glob
+patterns (same syntax as `detect-image-changes`, no pathspec magic). Empty, the default, keeps
+the current behaviour.
+
+```yaml
+    with:
+      documentation-only-paths: |
+        docs/**
+        **/*.md
+```
+
+A `Change scope` job, started only when the input is set, compares the pull request head with
+its merge base using workflow-ci code on the git graph only. When the pull request changes files
+and every one of them matches, `Independent quality execution` still runs but skips tests,
+coverage and SonarQube as not applicable; quality and security checks, including the TruffleHog
+secret scan, remain enforced, and the quality report says "documentation only" instead of
+"missing". The mutation gate is unchanged.
+
+Some files never count as documentation, whatever the patterns (even `**`): `.github/**`,
+`.ci/**`, `.forgejo/**`, `.gitea/**`, `.gitmodules`, `.gitattributes`,
+`sonar-project.properties`, `.pre-commit-config.yaml`, `conftest.py`, build files (Dockerfile,
+Taskfile, Makefile), dependency manifests and lockfiles (Python, Node, Go, Rust), symlinks and
+submodules. An empty diff, a non pull request event or an
+unavailable comparison keeps the full verification; a failed or cancelled classification fails
+the trusted gate. Without the input the Change scope check is reported as skipped and nothing else changes.
+
 ## SonarQube Quality Gate
 
 The reusable `quality-evidence.yml` workflow runs the official SonarQube scanner against

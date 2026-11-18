@@ -66,6 +66,10 @@ inputs:
     description: "Trusted test command outcome fallback (success/failure)"
     required: false
     default: ""
+  documentation-only:
+    description: "true when the trusted change scope classified the pull request as documentation only"
+    required: false
+    default: "false"
   sonar-required:
     description: "Whether SonarQube evidence is mandatory for this repository"
     required: false
@@ -181,6 +185,9 @@ runs:
         fi
         if [[ -n "${{ inputs.test-status }}" ]]; then
           ARGS+=(--test-status "${{ inputs.test-status }}")
+        fi
+        if [[ "${{ inputs.documentation-only }}" == "true" ]]; then
+          ARGS+=(--documentation-only true)
         fi
         ARGS+=(--sonar-required "${{ inputs.sonar-required }}")
         if [[ -n "${{ inputs.sonar-status }}" ]]; then

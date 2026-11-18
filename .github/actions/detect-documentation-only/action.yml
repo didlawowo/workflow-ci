@@ -1,0 +1,21 @@
+name: Detect documentation-only pull request
+description: Report whether every file changed by a pull request matches the declared documentation globs
+inputs:
+  documentation-paths:
+    description: Multiline repository-relative Git glob patterns; empty disables the detection
+    default: ""
+outputs:
+  documentation-only:
+    description: true only when the pull request changes files and all of them match documentation-paths
+    value: ${{ steps.detect.outputs.documentation-only }}
+runs:
+  using: composite
+  steps:
+    - id: detect
+      shell: bash
+      env:
+        DOCUMENTATION_PATHS: ${{ inputs.documentation-paths }}
+        EVENT_NAME: ${{ github.event_name }}
+        BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+      run: python3 "$GITHUB_ACTION_PATH/../../../documentation_scope.py"

@@ -30,7 +30,7 @@ def test_central_mutation_helpers_cannot_be_removed_as_consumer_legacy():
 
 def test_execution_and_publisher_use_gitlink_safe_checkout():
     workflow = (ROOT / ".github/workflows/quality-evidence.yml").read_text()
-    assert workflow.count("uses: $/.github/actions/checkout-source") == 2
+    assert workflow.count("uses: $/.github/actions/checkout-source") == 3
     assert "uses: actions/checkout@" not in workflow
     assert "golangci-lint-version: ${{ inputs.golangci-lint-version }}" in workflow
     assert 'upload-sarif: "false"' in workflow

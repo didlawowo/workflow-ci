@@ -545,7 +545,7 @@ def test_quality_evidence_separates_blocking_gate_from_best_effort_publication()
     assert "repository: didlawowo/workflow-ci" not in execution
 
     assert 'name: "Trusted quality gate"' in gate
-    assert "needs: [independent-verification, mutation]" in gate
+    assert "needs: [change-scope, independent-verification, mutation]" in gate
     assert "QUALITY_RESULT: ${{ needs.independent-verification.result }}" in gate
     assert "MUTATION_RESULT: ${{ needs.mutation.result }}" in gate
     assert 'echo "status=pass" >> "$GITHUB_OUTPUT"' in gate
@@ -718,12 +718,71 @@ def test_workflow_ci_main_has_self_release_caller():
     assert "runs-on: arc-runner-workflow-ci" in content
 
 
-
 def test_only_short_trusted_jobs_may_use_the_light_runner_variable():
     content = WORKFLOW.read_text()
     jobs = yaml.safe_load(content)["jobs"]
     light = "${{ vars.LIGHT_RUNNER || inputs.runner }}"
-    for name in ("trusted-gate", "publish-evidence"):
+    for name in ("change-scope", "trusted-gate", "publish-evidence"):
         assert jobs[name]["runs-on"] == light
-    assert content.count("LIGHT_RUNNER") == 4  # deux commentaires, deux runs-on
+    assert content.count("LIGHT_RUNNER") == 5  # deux commentaires, trois runs-on
     assert jobs["independent-verification"]["runs-on"] == "${{ inputs.runner }}"
+
+
+def test_documentation_only_mode_is_opt_in_and_keeps_quality_and_secret_scan():
+    workflow = yaml.safe_load(WORKFLOW.read_text())
+    inputs = workflow[True]["workflow_call"]["inputs"]
+    assert inputs["documentation-only-paths"]["default"] == ""
+    jobs = workflow["jobs"]
+
+    scope = jobs["change-scope"]
+    assert scope["if"].startswith("inputs.documentation-only-paths != ''")
+    assert scope["outputs"]["documentation-only"].endswith("|| 'false' }}")
+
+    independent = jobs["independent-verification"]
+    assert independent["needs"] == ["change-scope"]
+    assert "!cancelled()" in independent["if"]
+    assert "needs.change-scope.result == 'success'" in independent["if"]
+    assert (
+        "needs.change-scope.result == 'skipped' && inputs.documentation-only-paths == ''"
+        in independent["if"]
+    )
+    guarded = {
+        step["name"]: str(step.get("if", ""))
+        for step in independent["steps"]
+        if "name" in step
+    }
+    for name in (
+        "Verify Python tests",
+        "Verify Go tests",
+        "Verify Node tests",
+        "Verify SonarQube Quality Gate",
+    ):
+        assert (
+            "!(needs.change-scope.outputs.documentation-only == 'true')"
+            in guarded[name]
+        ), name
+    for name in (
+        "Verify Python quality and security",
+        "Verify Go quality and security",
+        "Verify Node quality and security",
+    ):
+        assert "DOCUMENTATION_ONLY" not in guarded[name], name
+    assert "change-scope" in jobs["trusted-gate"]["needs"]
+
+
+def test_documentation_only_flag_never_comes_from_the_job_environment():
+    content = WORKFLOW.read_text()
+    # Code under test can write $GITHUB_ENV: the flag must come from needs only.
+    assert "env.DOCUMENTATION_ONLY" not in content
+    assert "DOCUMENTATION_ONLY:" not in content
+    jobs = yaml.safe_load(content)["jobs"]
+    assert "env" not in jobs["independent-verification"]
+    enforce = next(
+        s
+        for s in jobs["independent-verification"]["steps"]
+        if s.get("name") == "Enforce independent verification"
+    )
+    assert (
+        "TRUSTED_DOCUMENTATION_ONLY=\"${{ needs.change-scope.outputs.documentation-only == 'true' }}\""
+        in enforce["run"]
+    )

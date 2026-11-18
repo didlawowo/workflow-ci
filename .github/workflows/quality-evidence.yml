@@ -82,6 +82,11 @@ on:
         required: false
         type: boolean
         default: true
+      documentation-only-paths:
+        description: "Optional multiline Git globs (for example docs/** and **/*.md). Empty keeps the current behaviour and starts no extra job. When every file changed by a pull request matches, Independent quality execution skips tests, coverage and SonarQube as not applicable; quality and security checks, including the secret scan, still run. Workflows, CI configuration, Sonar policy, manifests, lockfiles, symlinks and submodules always keep the full verification."
+        required: false
+        type: string
+        default: ""
     outputs:
       trusted-status:
         description: "Blocking trusted gate verdict independent from report publication"
@@ -118,15 +123,50 @@ jobs:
       pull-requests: read
     uses: $/.github/workflows/mutation-policy.yml
 
+  change-scope:
+    name: "Change scope"
+    # Opt-in: without documentation-only-paths no job starts (no new check, no
+    # new dependency for the verification).
+    if: inputs.documentation-only-paths != '' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+    runs-on: ${{ vars.LIGHT_RUNNER || inputs.runner }}
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      documentation-only: ${{ steps.scope.outputs.documentation-only || 'false' }}
+    steps:
+      # The classification runs workflow-ci code on the git graph only; it never
+      # executes repository code and the checkout never persists its token.
+      - uses: $/.github/actions/checkout-source
+        if: github.event_name == 'pull_request'
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - id: scope
+        if: github.event_name == 'pull_request'
+        uses: $/.github/actions/detect-documentation-only
+        with:
+          documentation-paths: ${{ inputs.documentation-only-paths }}
+
   independent-verification:
     name: "Independent quality execution"
-    if: inputs.enable-independent-verification && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+    needs: [change-scope]
+    # Runs when the change scope succeeded, or was not requested at all. A
+    # failed or cancelled classification skips this job and fails the gate.
+    if: >-
+      !cancelled() && inputs.enable-independent-verification
+      && (needs.change-scope.result == 'success' || (needs.change-scope.result == 'skipped' && inputs.documentation-only-paths == ''))
+      && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
     runs-on: ${{ inputs.runner }}
     timeout-minutes: 25
     permissions:
       contents: read
       actions: read
+    # The documentation-only flag is always read from the change-scope output,
+    # never from the job environment: code under test can write $GITHUB_ENV.
     outputs:
+      documentation-only: ${{ needs.change-scope.outputs.documentation-only == 'true' }}
       coverage-percentage: ${{ steps.python-tests.outputs.coverage-percentage || steps.go-tests.outputs.coverage-percentage || steps.node-tests.outputs.coverage-percentage }}
       tests-total: ${{ steps.python-tests.outputs.test-count || steps.go-tests.outputs.test-count || steps.node-tests.outputs.test-count }}
       tests-failed: ${{ steps.python-tests.outputs.tests-failed || steps.go-tests.outputs.tests-failed || steps.node-tests.outputs.tests-failed }}
@@ -165,7 +205,7 @@ jobs:
 
       - name: Verify Python tests
         id: python-tests
-        if: inputs.repo-type == 'python'
+        if: inputs.repo-type == 'python' && !(needs.change-scope.outputs.documentation-only == 'true')
         continue-on-error: true
         uses: $/.github/actions/run-python-tests
         with:
@@ -181,7 +221,7 @@ jobs:
 
       - name: Verify Go tests
         id: go-tests
-        if: inputs.repo-type == 'go'
+        if: inputs.repo-type == 'go' && !(needs.change-scope.outputs.documentation-only == 'true')
         continue-on-error: true
         uses: $/.github/actions/run-go-tests
         with:
@@ -193,7 +233,7 @@ jobs:
 
       - name: Verify Node tests
         id: node-tests
-        if: inputs.repo-type == 'node' || inputs.repo-type == 'typescript' || inputs.repo-type == 'javascript'
+        if: (inputs.repo-type == 'node' || inputs.repo-type == 'typescript' || inputs.repo-type == 'javascript') && !(needs.change-scope.outputs.documentation-only == 'true')
         continue-on-error: true
         uses: $/.github/actions/run-node-tests
         with:
@@ -254,7 +294,7 @@ jobs:
 
       - name: Verify SonarQube Quality Gate
         id: sonarqube
-        if: vars.SONAR_ENABLED == 'true'
+        if: vars.SONAR_ENABLED == 'true' && !(needs.change-scope.outputs.documentation-only == 'true')
         continue-on-error: true
         uses: $/.github/actions/sonarqube-scan
         with:
@@ -270,22 +310,24 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          # Interpolated from the change-scope output, not read from $GITHUB_ENV.
+          TRUSTED_DOCUMENTATION_ONLY="${{ needs.change-scope.outputs.documentation-only == 'true' }}"
           TYPE="${{ inputs.repo-type }}"
           FAILED=0
 
           case "$TYPE" in
             python)
-              test "${{ steps.python-tests.outcome }}" = "success" || FAILED=1
+              [[ "$TRUSTED_DOCUMENTATION_ONLY" == "true" ]] || test "${{ steps.python-tests.outcome }}" = "success" || FAILED=1
               test "${{ steps.python-quality.outputs.quality-passed }}" = "true" || FAILED=1
               test "${{ steps.python-quality.outputs.security-issues }}" = "0" || FAILED=1
               ;;
             go)
-              test "${{ steps.go-tests.outcome }}" = "success" || FAILED=1
+              [[ "$TRUSTED_DOCUMENTATION_ONLY" == "true" ]] || test "${{ steps.go-tests.outcome }}" = "success" || FAILED=1
               test "${{ steps.go-quality.outputs.quality-passed }}" = "true" || FAILED=1
               test "${{ steps.go-quality.outputs.security-issues }}" = "0" || FAILED=1
               ;;
             node|typescript|javascript)
-              test "${{ steps.node-tests.outcome }}" = "success" || FAILED=1
+              [[ "$TRUSTED_DOCUMENTATION_ONLY" == "true" ]] || test "${{ steps.node-tests.outcome }}" = "success" || FAILED=1
               test "${{ steps.node-quality.outputs.quality-passed }}" = "true" || FAILED=1
               test "${{ steps.node-quality.outputs.security-issues }}" = "0" || FAILED=1
               ;;
@@ -295,7 +337,9 @@ jobs:
               ;;
           esac
 
-          if [[ "${{ vars.SONAR_ENABLED }}" == "true" ]]; then
+          if [[ "$TRUSTED_DOCUMENTATION_ONLY" == "true" ]]; then
+            echo "Documentation-only pull request: tests, coverage and SonarQube not applicable; quality and security enforced."
+          elif [[ "${{ vars.SONAR_ENABLED }}" == "true" ]]; then
             if [[ "${{ steps.sonarqube.outcome }}" != "success" ]]; then
               echo "::error::SonarQube Quality Gate failed, is not configured, or analysis could not complete."
               FAILED=1
@@ -307,7 +351,7 @@ jobs:
   trusted-gate:
     name: "Trusted quality gate"
     if: always() && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
-    needs: [independent-verification, mutation]
+    needs: [change-scope, independent-verification, mutation]
     # Short job without Docker or caches: the repository's warm light pool when
     # its LIGHT_RUNNER variable exists (github-manager), else the main runner.
     runs-on: ${{ vars.LIGHT_RUNNER || inputs.runner }}
@@ -324,6 +368,8 @@ jobs:
         env:
           QUALITY_RESULT: ${{ needs.independent-verification.result }}
           INDEPENDENT_ENABLED: ${{ inputs.enable-independent-verification }}
+          SCOPE_RESULT: ${{ needs.change-scope.result }}
+          SCOPE_REQUESTED: ${{ inputs.documentation-only-paths != '' }}
           MUTATION_RESULT: ${{ needs.mutation.result }}
           MUTATION_REQUIRED: ${{ needs.mutation.outputs.required }}
           MUTATION_REPORT_FILE: ${{ needs.mutation.outputs.report-file }}
@@ -331,6 +377,14 @@ jobs:
         run: |
           set -euo pipefail
           FAILED=0
+
+          if [[ "$SCOPE_REQUESTED" == "true" && "$SCOPE_RESULT" != "success" ]]; then
+            echo "::error::Change scope classification did not succeed: $SCOPE_RESULT"
+            FAILED=1
+          elif [[ "$SCOPE_REQUESTED" != "true" && "$SCOPE_RESULT" != "skipped" ]]; then
+            echo "::error::Change scope ran without documentation-only-paths: $SCOPE_RESULT"
+            FAILED=1
+          fi
 
           if [[ "$INDEPENDENT_ENABLED" == "true" ]]; then
             if [[ "$QUALITY_RESULT" != "success" ]]; then
@@ -440,6 +494,7 @@ jobs:
           tests-failed: ${{ needs.independent-verification.outputs.tests-failed }}
           tests-skipped: ${{ needs.independent-verification.outputs.tests-skipped }}
           test-status: ${{ needs.independent-verification.outputs.test-status }}
+          documentation-only: ${{ needs.independent-verification.outputs.documentation-only }}
           sonar-required: ${{ vars.SONAR_ENABLED == 'true' }}
           sonar-status: ${{ needs.independent-verification.outputs.sonar-status }}
           sonar-project-url: ${{ needs.independent-verification.outputs.sonar-project-url }}

@@ -47,6 +47,8 @@ def test_trusted_gate_is_independent_from_publication(
             **os.environ,
             "QUALITY_RESULT": quality_result,
             "INDEPENDENT_ENABLED": independent,
+            "SCOPE_RESULT": "skipped",
+            "SCOPE_REQUESTED": "false",
             "MUTATION_RESULT": mutation_result,
             "MUTATION_REQUIRED": required,
             "MUTATION_REPORT_FILE": report_file,
@@ -191,3 +193,41 @@ def test_capture_preserves_trusted_runner_mutation_diagnostics(workflow):
     capture = text.split(marker, 1)[1].split("- name:", 1)[0]
     assert "[[ -s .quality/mutmut-results.txt ]]" in capture
     assert "Preserving mutation diagnostics produced by the trusted runner" in capture
+
+
+@pytest.mark.parametrize(
+    "scope_requested,scope_result,success",
+    [
+        ("true", "success", True),
+        ("true", "failure", False),
+        ("true", "cancelled", False),
+        ("true", "skipped", False),
+        ("false", "skipped", True),
+        ("false", "success", False),
+    ],
+)
+def test_trusted_gate_enforces_the_change_scope(scope_requested, scope_result, success):
+    data = yaml.safe_load((ROOT / ".github/workflows/quality-evidence.yml").read_text())
+    gate = next(
+        s
+        for s in data["jobs"]["trusted-gate"]["steps"]
+        if s.get("name") == "Enforce trusted execution verdict"
+    )
+    completed = subprocess.run(
+        ["bash", "-c", gate["run"]],
+        env={
+            **os.environ,
+            "QUALITY_RESULT": "success",
+            "INDEPENDENT_ENABLED": "true",
+            "SCOPE_RESULT": scope_result,
+            "SCOPE_REQUESTED": scope_requested,
+            "MUTATION_RESULT": "success",
+            "MUTATION_REQUIRED": "false",
+            "MUTATION_REPORT_FILE": "",
+            "MUTATION_REPORT_PRESENT": "false",
+            "GITHUB_OUTPUT": os.devnull,
+        },
+        check=False,
+        capture_output=True,
+    )
+    assert (completed.returncode == 0) is success
