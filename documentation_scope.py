@@ -30,7 +30,9 @@ def decide(environ):
     try:
         return documentation_only(base, head, patterns)
     except (subprocess.CalledProcessError, ValueError) as error:
-        print(f"::warning::Documentation scope unavailable, full verification kept: {error}")
+        print(
+            f"::warning::Documentation scope unavailable, full verification kept: {error}"
+        )
         return False
 
 

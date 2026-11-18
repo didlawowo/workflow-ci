@@ -545,7 +545,7 @@ def test_quality_evidence_separates_blocking_gate_from_best_effort_publication()
     assert "repository: didlawowo/workflow-ci" not in execution
 
     assert 'name: "Trusted quality gate"' in gate
-    assert "needs: [independent-verification, mutation]" in gate
+    assert "needs: [change-scope, independent-verification, mutation]" in gate
     assert "QUALITY_RESULT: ${{ needs.independent-verification.result }}" in gate
     assert "MUTATION_RESULT: ${{ needs.mutation.result }}" in gate
     assert 'echo "status=pass" >> "$GITHUB_OUTPUT"' in gate
@@ -723,7 +723,7 @@ def test_only_short_trusted_jobs_may_use_the_light_runner_variable():
     content = WORKFLOW.read_text()
     jobs = yaml.safe_load(content)["jobs"]
     light = "${{ vars.LIGHT_RUNNER || inputs.runner }}"
-    for name in ("trusted-gate", "publish-evidence"):
+    for name in ("change-scope", "trusted-gate", "publish-evidence"):
         assert jobs[name]["runs-on"] == light
-    assert content.count("LIGHT_RUNNER") == 4  # deux commentaires, deux runs-on
+    assert content.count("LIGHT_RUNNER") == 5  # deux commentaires, trois runs-on
     assert jobs["independent-verification"]["runs-on"] == "${{ inputs.runner }}"

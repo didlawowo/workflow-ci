@@ -27,6 +27,7 @@ ROOT = Path(__file__).resolve().parents[1]
         ("success", "success", "false", "", "false", "false", False),
     ],
 )
+@pytest.mark.parametrize("scope_result,documentation_only", [("success", "false")])
 def test_trusted_gate_is_independent_from_publication(
     quality_result,
     mutation_result,
@@ -35,6 +36,8 @@ def test_trusted_gate_is_independent_from_publication(
     report_present,
     independent,
     success,
+    scope_result,
+    documentation_only,
 ):
     data = yaml.safe_load((ROOT / ".github/workflows/quality-evidence.yml").read_text())
     steps = data["jobs"]["trusted-gate"]["steps"]
@@ -47,6 +50,8 @@ def test_trusted_gate_is_independent_from_publication(
             **os.environ,
             "QUALITY_RESULT": quality_result,
             "INDEPENDENT_ENABLED": independent,
+            "SCOPE_RESULT": scope_result,
+            "DOCUMENTATION_ONLY": documentation_only,
             "MUTATION_RESULT": mutation_result,
             "MUTATION_REQUIRED": required,
             "MUTATION_REPORT_FILE": report_file,
@@ -191,3 +196,41 @@ def test_capture_preserves_trusted_runner_mutation_diagnostics(workflow):
     capture = text.split(marker, 1)[1].split("- name:", 1)[0]
     assert "[[ -s .quality/mutmut-results.txt ]]" in capture
     assert "Preserving mutation diagnostics produced by the trusted runner" in capture
+
+
+@pytest.mark.parametrize(
+    "scope_result,documentation_only,quality_result,success",
+    [
+        ("success", "true", "skipped", True),
+        ("success", "true", "success", False),
+        ("failure", "", "skipped", False),
+        ("skipped", "", "success", False),
+    ],
+)
+def test_trusted_gate_documentation_only_scope(
+    scope_result, documentation_only, quality_result, success
+):
+    data = yaml.safe_load((ROOT / ".github/workflows/quality-evidence.yml").read_text())
+    gate = next(
+        s
+        for s in data["jobs"]["trusted-gate"]["steps"]
+        if s.get("name") == "Enforce trusted execution verdict"
+    )
+    completed = subprocess.run(
+        ["bash", "-c", gate["run"]],
+        env={
+            **os.environ,
+            "QUALITY_RESULT": quality_result,
+            "INDEPENDENT_ENABLED": "true",
+            "SCOPE_RESULT": scope_result,
+            "DOCUMENTATION_ONLY": documentation_only,
+            "MUTATION_RESULT": "success",
+            "MUTATION_REQUIRED": "false",
+            "MUTATION_REPORT_FILE": "",
+            "MUTATION_REPORT_PRESENT": "false",
+            "GITHUB_OUTPUT": os.devnull,
+        },
+        check=False,
+        capture_output=True,
+    )
+    assert (completed.returncode == 0) is success

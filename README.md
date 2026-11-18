@@ -101,6 +101,27 @@ Sinon, poser le label après le run initial ne déclenche aucun build → l'imag
 `pr-<n>` n'existe pas → `ImagePullBackOff` sur le pod preview. Les templates
 `ci-branch-pipeline.yml` incluent déjà ce type par défaut.
 
+## Documentation-only pull requests
+
+`quality-evidence.yml` accepts an opt-in `documentation-only-paths` input: multiline Git glob
+patterns (same syntax as `detect-image-changes`, no pathspec magic). Empty, the default, keeps
+the current behaviour.
+
+```yaml
+    with:
+      documentation-only-paths: |
+        docs/**
+        **/*.md
+```
+
+A `Change scope` job compares the pull request head with its merge base using workflow-ci code
+on the git graph only. When the pull request changes files and every one of them matches, the
+`Independent quality execution` job is skipped as not applicable and the trusted gate accepts
+that skip; the mutation gate still runs. Any other file (workflows, `sonar-project.properties`,
+sources, lockfiles, a file moved out of a documentation path), an empty diff, a non pull request
+event or an unavailable comparison keeps the full verification. A failed classification fails
+the trusted gate. Check names are unchanged, so branch protection needs no update.
+
 ## SonarQube Quality Gate
 
 The reusable `quality-evidence.yml` workflow runs the official SonarQube scanner against
