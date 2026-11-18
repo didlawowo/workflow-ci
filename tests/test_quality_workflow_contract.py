@@ -718,7 +718,6 @@ def test_workflow_ci_main_has_self_release_caller():
     assert "runs-on: arc-runner-workflow-ci" in content
 
 
-
 def test_only_short_trusted_jobs_may_use_the_light_runner_variable():
     content = WORKFLOW.read_text()
     jobs = yaml.safe_load(content)["jobs"]

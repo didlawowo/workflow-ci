@@ -10,7 +10,6 @@ from pathlib import Path
 
 from image_changes import app_changed, git, paths
 
-
 # Never documentation, whatever the consumer patterns say (for example `**`):
 # CI and policy configuration, dependency manifests and lockfiles.
 PROTECTED_PATHS = [

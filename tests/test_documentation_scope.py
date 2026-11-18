@@ -120,7 +120,12 @@ def test_decide_fail_closed(base, overrides):
 
 @pytest.mark.parametrize(
     "name",
-    [".github/workflows/ci.yml", "uv.lock", "web/package.json", "sonar-project.properties"],
+    [
+        ".github/workflows/ci.yml",
+        "uv.lock",
+        "web/package.json",
+        "sonar-project.properties",
+    ],
 )
 def test_protected_paths_are_never_documentation_even_with_a_catch_all(base, name):
     head = commit(name)

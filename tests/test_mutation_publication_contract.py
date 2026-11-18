@@ -195,7 +195,6 @@ def test_capture_preserves_trusted_runner_mutation_diagnostics(workflow):
     assert "Preserving mutation diagnostics produced by the trusted runner" in capture
 
 
-
 @pytest.mark.parametrize(
     "scope_requested,scope_result,success",
     [
