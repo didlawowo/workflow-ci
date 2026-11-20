@@ -76,7 +76,8 @@ Sorties : `released`, `version`, `build-number`. Elles décrivent la tête de
 branche : `released` vaut `true` quand une nouvelle version vient d'y être
 publiée, ou quand le commit de release qui s'y trouve vient d'être complété
 (`build-number` est alors vide). Une reprise sur un commit plus ancien est
-signalée dans le journal, pas dans les sorties.
+signalée dans le journal, pas dans les sorties, de même que la création
+après coup de la release d'un tag déjà poussé.
 
 La regex est lue telle quelle, espaces compris : une ligne indentée s'écrit avec
 son indentation après l'ancre (`^        clé: (.+)$`). Les fichiers aux fins de
@@ -122,7 +123,9 @@ fois.
   connu, pose le tag sur ce commit et crée sa release.
 - **Tag poussé sans sa release Forgejo.** Si le dernier tag porte sur un commit
   de release annonçant cette version, l'exécution suivante crée la release
-  manquante. Un tag posé à la main n'est jamais concerné.
+  manquante. Un tag posé à la main n'est jamais concerné. Cette vérification
+  a lieu à chaque exécution et lit l'API de la forge avec le jeton du job ; si
+  elle échoue, c'est un avertissement et non un échec.
 
 Relancer le job en échec ne suffit pas : il repart de l'ancien commit et son
 push est refusé.

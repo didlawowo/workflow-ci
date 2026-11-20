@@ -617,7 +617,9 @@ def test_unusable_release_commit_is_ignored_and_never_blocks_releases(
     assert list(forge) == ["v0.6.0"]
 
 
-def test_tag_pushed_without_its_forge_release_gets_it_at_the_next_run(repo, forge):
+def test_tag_pushed_without_its_forge_release_gets_it_at_the_next_run(
+    repo, forge, monkeypatch
+):
     commit(repo, "feat: queue", "b.txt")
     assert release.prepare() == 0
     assert release.publish() == 0
@@ -625,10 +627,32 @@ def test_tag_pushed_without_its_forge_release_gets_it_at_the_next_run(repo, forg
     commit(repo, "docs: readme", "c.txt")
     git(repo, "push", "-q", "origin", "main")
 
+    # A newer tag on another branch must not lend its notes to v0.6.0.
+    git(repo, "checkout", "-q", "-b", "other", "v0.5.1")
+    commit(repo, "feat: elsewhere", "z.txt")
+    git(repo, "tag", "v9.0.0")
+    git(repo, "checkout", "-q", "main")
+    monkeypatch.setenv("GITHUB_REF", "refs/tags/v0.6.0")
+
     assert release.prepare() == 0
     assert release.publish() == 0
-    assert list(forge) == ["v0.6.0"]
+    assert forge == {"v0.6.0": "notes for v0.5.1..v0.6.0\n"}
     assert sorted(remote_tags(repo)) == ["v0.5.1", "v0.6.0"]
+
+
+def test_unreachable_api_does_not_fail_a_run_with_nothing_to_release(
+    repo, forge, monkeypatch
+):
+    commit(repo, "feat: queue", "b.txt")
+    assert release.prepare() == 0
+    assert release.publish() == 0
+
+    def broken(method, url, token, payload=None):
+        raise release.ReleaseError("forge API unreachable")
+
+    monkeypatch.setattr(release, "api_request", broken)
+    assert release.prepare() == 0
+    assert release.publish() == 0
 
 
 def test_hand_made_tag_never_gets_a_forge_release(repo, forge, job):

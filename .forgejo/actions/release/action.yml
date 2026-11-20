@@ -41,7 +41,10 @@ inputs:
     default: "false"
 outputs:
   released:
-    description: '"true" when a release was cut or completed, or would be in dry-run.'
+    description: >
+      "true" when the branch tip was just released (or would be in dry-run):
+      a new version, or a release commit at the tip that only lacked its tag.
+      A forge release created afterwards for an existing tag is not announced.
     value: ${{ steps.prepare.outputs.released }}
   version:
     description: Released tag (for example v1.4.0). Empty when released is false.

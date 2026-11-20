@@ -563,7 +563,22 @@ def prepare_plan(workspace: Path, created: list[str]) -> int:
 
     # A tag pushed by an earlier run may still lack its forge release.
     previous = last_tag(workspace, prefix)
-    verify = previous if last_release_cut_here(workspace, previous, prefix) else ""
+    verify: dict[str, str] | None = None
+    if last_release_cut_here(workspace, previous, prefix):
+        before = git(
+            workspace,
+            "describe",
+            "--tags",
+            "--abbrev=0",
+            "--match",
+            tag_pattern(prefix),
+            f"refs/tags/{previous}^",
+            check=False,
+        )
+        verify = {
+            "version": previous,
+            "previous": before.stdout.strip() if before.returncode == 0 else "",
+        }
 
     recovered = recover_orphans(workspace, config, prefix, created)
     last = last_tag(workspace, prefix)
@@ -648,7 +663,7 @@ def prepare_plan(workspace: Path, created: list[str]) -> int:
         (item["version"] for item in recovered if item["commit"] == head), ""
     )
     announced = version or completed_at_head
-    pending = bool(verify) or bool(recovered) or release is not None
+    pending = verify is not None or bool(recovered) or release is not None
     write_outputs(
         {
             "released": "true" if announced else "false",
@@ -811,6 +826,37 @@ def load_plan() -> dict:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+def complete_last_release(
+    workspace: Path, plan: dict, api_url: str, repository: str, token: str
+) -> None:
+    """Create the forge release of the last tag when an earlier run left it out.
+
+    Best effort: nothing new depends on it and the next run tries again, so a
+    failure here is a warning, never a failed run.
+    """
+    verify = plan["verify"]
+    if verify is None:
+        return
+    version, previous = verify["version"], verify["previous"]
+    try:
+        if release_exists(api_url, repository, version, token):
+            return
+        notice(f"Tag {version} has no forge release yet: creating it")
+        # Explicit range: git-cliff --latest would pick the newest tag of the
+        # whole repository, whatever its branch or prefix.
+        revision_range = f"{previous}..{version}" if previous else version
+        try:
+            notes = git_cliff(
+                workspace, Path(plan["config"]), "--strip", "header", revision_range
+            )
+        except ReleaseError as error:
+            warning(f"release notes unavailable for {version}: {error}")
+            notes = ""
+        ensure_release(api_url, repository, version, notes, token)
+    except ReleaseError as error:
+        warning(f"could not complete the forge release of {version}: {error}")
+
+
 def publish() -> int:
     workspace = Path(os.environ.get("GITHUB_WORKSPACE") or os.getcwd())
     if parse_bool(os.environ.get("RELEASE_DRY_RUN", "false"), "dry-run"):
@@ -821,32 +867,25 @@ def publish() -> int:
     server_url = required_env("GITHUB_SERVER_URL")
     api_url = required_env("GITHUB_API_URL").rstrip("/")
     repository = required_env("GITHUB_REPOSITORY")
-    ref = required_env("GITHUB_REF")
-    if not ref.startswith("refs/heads/"):
-        raise ReleaseError(f"a release is only cut from a branch, not from {ref}")
     if api_url.startswith("http://") and not server_url.startswith("http://"):
         raise ReleaseError("the forge API URL must use https like the forge itself")
     if git(workspace, "rev-parse", "HEAD").stdout.strip() != plan["head"]:
         raise ReleaseError("the release plan was computed for another commit")
-    auth = git_auth_env(server_url, token)
 
-    verify = plan["verify"]
-    if verify and not release_exists(api_url, repository, verify, token):
-        notice(f"Tag {verify} has no forge release yet: creating it")
-        try:
-            notes = git_cliff(
-                workspace, Path(plan["config"]), "--latest", "--strip", "header"
-            )
-        except ReleaseError as error:
-            warning(f"release notes unavailable for {verify}: {error}")
-            notes = ""
-        ensure_release(api_url, repository, verify, notes, token)
+    complete_last_release(workspace, plan, api_url, repository, token)
+    release = plan["release"]
+    if not plan["recovered"] and release is None:
+        return 0
+
+    ref = required_env("GITHUB_REF")
+    if not ref.startswith("refs/heads/"):
+        raise ReleaseError(f"a release is only cut from a branch, not from {ref}")
+    auth = git_auth_env(server_url, token)
 
     for item in plan["recovered"]:
         publish_tag(workspace, item["version"], item["commit"], auth)
         ensure_release(api_url, repository, item["version"], item["notes"], token)
 
-    release = plan["release"]
     if release is None:
         return 0
     version = release["version"]
