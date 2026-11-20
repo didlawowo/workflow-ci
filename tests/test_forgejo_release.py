@@ -1,10 +1,12 @@
 """Behaviour of the Forgejo release engine and of its action contract."""
 
+import http.server
 import importlib
 from pathlib import Path
 import shutil
 import subprocess
 import sys
+import threading
 
 import pytest
 import yaml
@@ -75,7 +77,11 @@ def repo(tmp_path):
 
 @pytest.fixture
 def job(repo, tmp_path, monkeypatch):
-    """Job environment of the action, with git-cliff replaced by a stub."""
+    """Job environment of the action, with git-cliff replaced by a stub.
+
+    ``outputs.calls`` records every stubbed call with the last tag git saw at
+    that moment, so a test can check what a computation started from.
+    """
     output = tmp_path / "output.txt"
     output.write_text("")
     monkeypatch.setenv("GITHUB_WORKSPACE", str(repo))
@@ -83,14 +89,16 @@ def job(repo, tmp_path, monkeypatch):
     monkeypatch.setenv("GITHUB_OUTPUT", str(output))
     for name in RELEASE_INPUTS:
         monkeypatch.delenv(name, raising=False)
+    calls = []
 
     def fake_git_cliff(workspace, config, *args):
+        calls.append((args, release.last_tag(workspace, "v")))
         if "--bumped-version" in args:
             return "v0.6.0\n"
         if "--output" in args or "--prepend" in args:
             (workspace / "CHANGELOG.md").write_text("# Changelog\n")
             return ""
-        return "notes\n"
+        return "notes for " + args[-1] + "\n"
 
     monkeypatch.setattr(release, "git_cliff", fake_git_cliff)
 
@@ -98,6 +106,7 @@ def job(repo, tmp_path, monkeypatch):
         lines = output.read_text().splitlines()
         return dict(line.split("=", 1) for line in lines if "=" in line)
 
+    outputs.calls = calls
     return outputs
 
 
@@ -438,7 +447,7 @@ def test_publication_commits_only_declared_files_and_tags_the_release(
     assert sorted(committed) == ["CHANGELOG.md", "project.yml"]
     assert git(repo, "ls-remote", "origin", "refs/heads/main").split()[0] == head
     assert remote_tags(repo)["v0.6.0"] == head
-    assert forge == {"v0.6.0": "notes\n"}
+    assert forge == {"v0.6.0": "notes for header\n"}
 
 
 def test_second_run_on_a_published_release_changes_nothing(repo, forge):
@@ -521,14 +530,7 @@ def test_a_branch_that_moved_since_checkout_publishes_nothing(repo, forge, tmp_p
 
 
 def test_real_git_cliff_computes_the_next_version(repo, tmp_path, monkeypatch):
-    found = shutil.which("git-cliff")
-    if not found:
-        pytest.skip("git-cliff is not installed")
-    probe = subprocess.run(
-        [found, "--version"], capture_output=True, text=True, check=False
-    )
-    if probe.stdout.split()[-1:] != [release.GIT_CLIFF_VERSION]:
-        pytest.skip("git-cliff is not at the pinned version")
+    real_git_cliff_or_skip()
     output = tmp_path / "real-output.txt"
     monkeypatch.setenv("GITHUB_WORKSPACE", str(repo))
     monkeypatch.setenv("RUNNER_TEMP", str(tmp_path / "real-temp"))
@@ -542,6 +544,216 @@ def test_real_git_cliff_computes_the_next_version(repo, tmp_path, monkeypatch):
     assert release.prepare() == 0
     assert "version=v0.6.0" in output.read_text().splitlines()
     assert (repo / "CHANGELOG.md").read_text().count("## [0.6.0]") == 1
+
+
+def test_two_release_commits_without_tag_are_both_completed_in_order(repo, forge, job):
+    commit(repo, "fix: crash", "b.txt")
+    commit(repo, "chore(release): v0.5.2 [skip ci]", "c.txt")
+    first = head_of(repo)
+    commit(repo, "fix: leak", "d.txt")
+    commit(repo, "chore(release): v0.5.3 [skip ci]", "e.txt")
+    second = head_of(repo)
+    commit(repo, "feat: search", "f.txt")
+    git(repo, "push", "-q", "origin", "main")
+
+    assert release.prepare() == 0
+    assert release.publish() == 0
+
+    tags = remote_tags(repo)
+    assert (tags["v0.5.2"], tags["v0.5.3"]) == (first, second)
+    assert tags["v0.6.0"] == head_of(repo)
+    assert forge["v0.5.2"] == f"notes for v0.5.1..{first}\n"
+    assert forge["v0.5.3"] == f"notes for v0.5.2..{second}\n"
+    bumped_from = [last for args, last in job.calls if "--bumped-version" in args]
+    assert bumped_from == ["v0.5.3"]
+
+
+def test_prepare_leaves_no_local_tag_behind(repo, job, monkeypatch):
+    commit(repo, "fix: crash", "b.txt")
+    commit(repo, "chore(release): v0.5.2 [skip ci]", "c.txt")
+    commit(repo, "feat: search", "d.txt")
+    monkeypatch.setenv("RELEASE_DRY_RUN", "true")
+    assert release.prepare() == 0
+    assert git(repo, "tag", "--list").split() == ["v0.5.1"]
+    assert job()["publish"] == "false"
+
+
+def test_recovery_behind_head_does_not_announce_a_release_of_head(repo, forge, job):
+    commit(repo, "fix: crash", "b.txt")
+    commit(repo, "chore(release): v0.5.2 [skip ci]", "c.txt")
+    orphan = head_of(repo)
+    commit(repo, "docs: readme", "d.txt")
+    git(repo, "push", "-q", "origin", "main")
+
+    assert release.prepare() == 0
+    outputs = job()
+    assert (outputs["released"], outputs["version"]) == ("false", "")
+    assert outputs["publish"] == "true"
+    assert release.publish() == 0
+    assert remote_tags(repo)["v0.5.2"] == orphan
+    assert list(forge) == ["v0.5.2"]
+
+
+@pytest.mark.parametrize(
+    "subject",
+    [
+        "chore(release): v0.5.1 [skip ci]",
+        "chore(release): v0.4.0 [skip ci]",
+        "chore(release): v0.9.0-a..b [skip ci]",
+    ],
+    ids=["tag-used-elsewhere", "not-above-last-tag", "invalid-tag-name"],
+)
+def test_unusable_release_commit_is_ignored_and_never_blocks_releases(
+    repo, forge, subject
+):
+    commit(repo, subject, "b.txt")
+    commit(repo, "feat: search", "c.txt")
+    git(repo, "push", "-q", "origin", "main")
+
+    assert release.orphan_release_commits(repo, "v0.5.1", "v") == []
+    assert release.prepare() == 0
+    assert release.publish() == 0
+    assert sorted(remote_tags(repo)) == ["v0.5.1", "v0.6.0"]
+    assert list(forge) == ["v0.6.0"]
+
+
+def test_tag_pushed_without_its_forge_release_gets_it_at_the_next_run(repo, forge):
+    commit(repo, "feat: queue", "b.txt")
+    assert release.prepare() == 0
+    assert release.publish() == 0
+    forge.clear()
+    commit(repo, "docs: readme", "c.txt")
+    git(repo, "push", "-q", "origin", "main")
+
+    assert release.prepare() == 0
+    assert release.publish() == 0
+    assert list(forge) == ["v0.6.0"]
+    assert sorted(remote_tags(repo)) == ["v0.5.1", "v0.6.0"]
+
+
+def test_hand_made_tag_never_gets_a_forge_release(repo, forge, job):
+    commit(repo, "docs: readme", "b.txt")
+    assert release.prepare() == 0
+    assert job()["publish"] == "false"
+    assert forge == {}
+
+
+def test_ignored_declared_file_fails_before_anything_is_written(repo, job, monkeypatch):
+    commit(repo, "chore: ignore", ".gitignore", "generated.txt\n")
+    (repo / "generated.txt").write_text("version = 0.5.1\n")
+    commit(repo, "feat: queue", "b.txt")
+    monkeypatch.setenv("RELEASE_VERSION_FILES", "generated.txt:^version = (.+)$")
+    with pytest.raises(release.ReleaseError):
+        release.prepare()
+    assert (repo / "generated.txt").read_text() == "version = 0.5.1\n"
+    assert not (repo / "CHANGELOG.md").exists()
+
+
+def test_plan_computed_for_another_commit_is_refused(repo, forge):
+    commit(repo, "feat: queue", "b.txt")
+    assert release.prepare() == 0
+    commit(repo, "feat: later", "c.txt")
+    with pytest.raises(release.ReleaseError):
+        release.publish()
+    assert forge == {}
+
+
+def test_plain_http_api_is_refused_when_the_forge_uses_https(repo, forge, monkeypatch):
+    commit(repo, "feat: queue", "b.txt")
+    monkeypatch.setenv("GITHUB_API_URL", "http://forge.example/api/v1")
+    assert release.prepare() == 0
+    with pytest.raises(release.ReleaseError):
+        release.publish()
+    assert forge == {}
+
+
+def test_api_request_never_follows_a_redirect():
+    seen = []
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def log_message(self, *args):
+            pass
+
+        def do_GET(self):
+            seen.append((self.path, self.headers.get("Authorization")))
+            self.send_response(302 if self.path == "/start" else 200)
+            self.send_header("Location", "/elsewhere")
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+
+    server = http.server.HTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        url = f"http://127.0.0.1:{server.server_port}/start"
+        status, _ = release.api_request("GET", url, "secret")
+    finally:
+        server.shutdown()
+        server.server_close()
+    assert status == 302
+    assert seen == [("/start", "token secret")]
+
+
+def test_mixed_line_endings_are_restored_line_by_line(tmp_path):
+    target = tmp_path / "mixed.txt"
+    target.write_bytes(b"name=app\nversion=1.0.0\r\nbuild=8\n")
+    release.patch_version_files(tmp_path, [("mixed.txt", "^version=(.+)$")], "2.0.0")
+    assert target.read_bytes() == b"name=app\nversion=2.0.0\r\nbuild=8\n"
+
+
+def real_git_cliff_or_skip():
+    found = shutil.which("git-cliff")
+    if not found:
+        pytest.skip("git-cliff is not installed")
+    probe = subprocess.run(
+        [found, "--version"], capture_output=True, text=True, check=False
+    )
+    if probe.stdout.split()[-1:] != [release.GIT_CLIFF_VERSION]:
+        pytest.skip("git-cliff is not at the pinned version")
+
+
+def test_real_git_cliff_recovery_cuts_each_version_once(repo, forge, monkeypatch):
+    real_git_cliff_or_skip()
+    monkeypatch.undo()
+    monkeypatch.setenv("GITHUB_WORKSPACE", str(repo))
+    monkeypatch.setenv("RUNNER_TEMP", str(repo.parent / "real-recovery-temp"))
+    monkeypatch.setenv("GITHUB_OUTPUT", str(repo.parent / "real-recovery-output.txt"))
+    monkeypatch.setenv("GITHUB_SERVER_URL", "https://forge.example")
+    monkeypatch.setenv("GITHUB_API_URL", "https://forge.example/api/v1")
+    monkeypatch.setenv("GITHUB_REPOSITORY", "owner/app")
+    monkeypatch.setenv("GITHUB_REF", "refs/heads/main")
+    monkeypatch.setenv("RELEASE_TOKEN", "dummy")
+    for name in RELEASE_INPUTS[:-1]:
+        monkeypatch.delenv(name, raising=False)
+    created = {}
+
+    def fake_api(method, url, token, payload=None):
+        if method == "GET":
+            return (200 if url.rsplit("/", 1)[-1] in created else 404), b""
+        created[payload["tag_name"]] = payload["body"]
+        return 201, b""
+
+    monkeypatch.setattr(release, "api_request", fake_api)
+
+    # First run interrupted after the branch push: release commit, no tag.
+    commit(repo, "fix: crash", "b.txt")
+    assert release.prepare() == 0
+    git(repo, "add", "--", "CHANGELOG.md")
+    git(repo, "commit", "-q", "-m", "chore(release): v0.5.2 [skip ci]")
+    orphan = head_of(repo)
+    commit(repo, "feat: search", "c.txt")
+    git(repo, "push", "-q", "origin", "main")
+
+    assert release.prepare() == 0
+    assert release.publish() == 0
+    tags = remote_tags(repo)
+    assert tags["v0.5.2"] == orphan
+    assert tags["v0.6.0"] == head_of(repo)
+    changelog = (repo / "CHANGELOG.md").read_text()
+    assert changelog.count("## [0.5.2]") == 1
+    assert changelog.count("## [0.6.0]") == 1
+    assert "Crash" in created["v0.5.2"]
+    assert "Search" in created["v0.6.0"]
 
 
 # --- action contract ---------------------------------------------------------

@@ -27,6 +27,7 @@ concurrency:
 
 jobs:
   release:
+    if: github.ref == 'refs/heads/main'
     runs-on: <label du runner Forgejo interne>
     steps:
       - uses: https://data.forgejo.org/actions/checkout@v4
@@ -48,14 +49,17 @@ historique tronqué, qui fausserait le calcul depuis le dernier tag.
 Le groupe `concurrency` fait attendre deux releases rapprochées au lieu de les
 laisser se doubler ; une action ne peut pas le déclarer elle-même, il appartient
 au workflow appelant. `workflow_dispatch` sert à relancer depuis la tête de
-branche (voir « Reprise »).
+branche (voir « Reprise »). La condition `if` réserve la release à la branche
+publiée : l'action accepte toute branche, c'est au workflow appelant de
+restreindre laquelle.
 
 L'image du job doit fournir `git`, `bash` et Node (l'action `setup-uv` est en
 JavaScript). `uv` télécharge Python 3.12 s'il n'est pas déjà présent.
 
 Seuls `CHANGELOG.md` et les fichiers déclarés entrent dans le commit de
 release : ce que les étapes précédentes du job ont laissé dans le dépôt n'est
-jamais commité.
+jamais commité. Un de ces fichiers ignoré par `.gitignore` fait échouer la
+release avant toute écriture.
 
 ## Entrées
 
@@ -68,13 +72,16 @@ jamais commité.
 | `cliff-config` | vide | `cliff.toml` du dépôt appelant ; sinon la configuration commune de `workflow-ci`. |
 | `dry-run` | `false` | `true` : calcule et affiche tout, sans commit, tag, push ni release. |
 
-Sorties : `released`, `version`, `build-number`. `released` vaut `true` quand
-une version a été publiée ou complétée par une reprise ; dans ce second cas
-`build-number` est vide.
+Sorties : `released`, `version`, `build-number`. Elles décrivent la tête de
+branche : `released` vaut `true` quand une nouvelle version vient d'y être
+publiée, ou quand le commit de release qui s'y trouve vient d'être complété
+(`build-number` est alors vide). Une reprise sur un commit plus ancien est
+signalée dans le journal, pas dans les sorties.
 
 La regex est lue telle quelle, espaces compris : une ligne indentée s'écrit avec
 son indentation après l'ancre (`^        clé: (.+)$`). Les fichiers aux fins de
-ligne Windows sont lus comme les autres et gardent leurs fins de ligne. Pour
+ligne Windows, même mélangées, sont lus comme les autres et chaque ligne garde
+sa fin de ligne. Pour
 viser une occurrence précise de la version dans un fichier qui en compte
 plusieurs, donner une regex plus précise (une regex peut s'étendre sur
 plusieurs lignes avec `[\s\S]*?`).
@@ -106,22 +113,34 @@ GitHub.
 
 ## Reprise
 
-Si une exécution s'arrête après avoir poussé le commit de release mais avant
-son tag, l'exécution suivante (prochain push, ou `workflow_dispatch` sur la
-branche) trouve ce commit sans tag après le dernier tag connu. Elle pose le tag
-sur ce commit et crée sa release, puis calcule la version suivante s'il y a des
-commits publiables après lui. La même version n'est jamais publiée deux fois.
+Chaque exécution vérifie d'abord ce que la précédente a pu laisser inachevé,
+puis calcule la version suivante. La même version n'est jamais publiée deux
+fois.
+
+- **Commit de release poussé sans son tag.** L'exécution suivante (prochain
+  push, ou `workflow_dispatch` sur la branche) le trouve après le dernier tag
+  connu, pose le tag sur ce commit et crée sa release.
+- **Tag poussé sans sa release Forgejo.** Si le dernier tag porte sur un commit
+  de release annonçant cette version, l'exécution suivante crée la release
+  manquante. Un tag posé à la main n'est jamais concerné.
+
 Relancer le job en échec ne suffit pas : il repart de l'ancien commit et son
 push est refusé.
 
 Seul un commit dont le sujet annonce une version sémantique au bon préfixe est
-repris. Sans aucun tag dans le dépôt, seul le commit en tête de branche peut
-l'être : un historique importé n'est pas re-tagué en masse.
+repris. Un commit de release inutilisable (nom de tag refusé par git, tag déjà
+porté par un autre commit, version qui n'est pas supérieure à la précédente)
+est ignoré avec un avertissement et ne bloque pas les releases suivantes. Sans
+aucun tag dans le dépôt, seul le commit en tête de branche peut être repris :
+un historique importé n'est pas re-tagué en masse.
 
-Un tag n'est jamais déplacé : si le tag attendu existe déjà sur un autre
-commit, l'exécution échoue et demande une correction manuelle. Si la branche a
-avancé depuis le checkout, le push est refusé et rien n'est publié ;
+Un tag n'est jamais déplacé : si le tag de la nouvelle version existe déjà sur
+un autre commit, l'exécution échoue et demande une correction manuelle. Si la
+branche a avancé depuis le checkout, le push est refusé et rien n'est publié ;
 l'exécution suivante couvre tous les commits depuis le dernier tag.
+
+L'étape de calcul ne laisse aucun tag dans le dépôt local, en `dry-run` comme
+en exécution réelle : seule l'étape de publication crée des tags.
 
 ## Écarts avec le workflow GitHub
 

@@ -6,11 +6,11 @@ since the last tag decide the next version (``release_commit_gate.py`` then
 git-cliff), ``CHANGELOG.md`` and the declared version files are rewritten, and
 a release commit, a tag and a forge release are published.
 
-``prepare`` never needs a token: it computes everything and records a plan.
-``publish`` executes the plan and is idempotent. A release commit that reached
-the branch without its tag (a run that failed between the two pushes) is
-tagged and released by the next run before any new version is computed, so
-the same version is never cut twice.
+``prepare`` never needs a token: it computes everything, records a plan and
+leaves no tag behind. ``publish`` executes the plan; every step first checks
+what already exists, so a later run completes what an interrupted one left:
+a release commit pushed without its tag is tagged and released before any new
+version is computed, and a tag pushed without its forge release gets it.
 """
 
 from __future__ import annotations
@@ -249,21 +249,24 @@ def compile_rule(regex: str, path: str) -> re.Pattern[str]:
     return pattern
 
 
-def load_text(path: Path) -> tuple[str, bool]:
-    """Return the text with LF line endings and whether the file uses CRLF.
+def load_text(path: Path) -> tuple[str, list[str]]:
+    """Return the text with LF line endings and the original ending of each line.
 
-    Line-anchored regexes must behave the same on a CRLF file; the original
-    line endings are restored on write.
+    Line-anchored regexes must behave the same whatever the line endings; the
+    original endings are restored line by line on write.
     """
     with open(path, encoding="utf-8", newline="") as handle:
-        raw = handle.read()
-    crlf = "\r\n" in raw and raw.count("\r\n") == raw.count("\n")
-    return (raw.replace("\r\n", "\n") if crlf else raw), crlf
+        parts = re.split(r"(\r\n|\n)", handle.read())
+    return "\n".join(parts[0::2]), parts[1::2]
 
 
-def store_text(path: Path, content: str, crlf: bool) -> None:
+def store_text(path: Path, content: str, endings: list[str]) -> None:
+    lines = content.split("\n")
+    if len(lines) != len(endings) + 1:
+        raise ReleaseError(f"a replacement changed the number of lines of {path.name}")
+    restored = "".join(line + ending for line, ending in zip(lines, endings))
     with open(path, "w", encoding="utf-8", newline="") as handle:
-        handle.write(content.replace("\n", "\r\n") if crlf else content)
+        handle.write(restored + lines[-1])
 
 
 def replace_groups(source: str, matches: list[re.Match[str]], value: str) -> str:
@@ -397,14 +400,28 @@ def announced_version(subject: str, prefix: str) -> str | None:
     return version
 
 
+def version_key(version: str, prefix: str) -> tuple[int, int, int] | None:
+    match = re.fullmatch(re.escape(prefix) + r"([0-9]+)\.([0-9]+)\.([0-9]+).*", version)
+    if match is None:
+        return None
+    return int(match.group(1)), int(match.group(2)), int(match.group(3))
+
+
+def valid_tag_name(workspace: Path, version: str) -> bool:
+    result = git(workspace, "check-ref-format", f"refs/tags/{version}", check=False)
+    return result.returncode == 0 and not version.startswith("-")
+
+
 def orphan_release_commits(
     workspace: Path, last: str, prefix: str
 ) -> list[tuple[str, str]]:
     """Release commits that reached the branch without their tag, oldest first.
 
-    With a previous tag, every release commit after it is an orphan. Without
-    any tag, only HEAD is considered: an imported history must not be
-    re-tagged wholesale.
+    With a previous tag, release commits after it are candidates. Without any
+    tag, only HEAD is: an imported history must not be re-tagged wholesale.
+    A candidate that cannot be tagged safely (name refused by git, tag already
+    used by another commit, version not above the previous one) is ignored
+    with a warning: it must never block the following releases.
     """
     if last:
         listing = git(
@@ -412,13 +429,50 @@ def orphan_release_commits(
         ).stdout
     else:
         listing = git(workspace, "log", "-1", "--format=%H%x1f%s").stdout
+    floor = version_key(last, prefix) if last else None
     orphans: list[tuple[str, str]] = []
     for line in listing.splitlines():
         sha, _, subject = line.partition("\x1f")
         version = announced_version(subject, prefix)
-        if version is not None:
-            orphans.append((sha, version))
+        if version is None:
+            continue
+        if not valid_tag_name(workspace, version):
+            warning(f"release commit {sha[:12]} ignored: {version!r} is not a tag name")
+            continue
+        existing = tag_commit(workspace, version)
+        if existing == sha:
+            continue
+        if existing:
+            warning(
+                f"release commit {sha[:12]} ignored: tag {version} already "
+                f"points to {existing[:12]}"
+            )
+            continue
+        key = version_key(version, prefix)
+        if floor is not None and key is not None and key <= floor:
+            warning(
+                f"release commit {sha[:12]} ignored: {version} is not above "
+                "the previous version"
+            )
+            continue
+        orphans.append((sha, version))
+        floor = key or floor
     return orphans
+
+
+def last_release_cut_here(workspace: Path, last: str, prefix: str) -> bool:
+    """Whether the last tag sits on a release commit announcing that version.
+
+    Such a tag was pushed by this action; its forge release may still be
+    missing if the run stopped between the two. A hand-made tag never
+    qualifies.
+    """
+    if not last:
+        return False
+    subject = git(
+        workspace, "log", "-1", "--format=%s", f"refs/tags/{last}^{{commit}}"
+    ).stdout
+    return announced_version(subject, prefix) == last
 
 
 def create_local_tag(workspace: Path, version: str, commit: str) -> None:
@@ -442,13 +496,20 @@ def create_local_tag(workspace: Path, version: str, commit: str) -> None:
         )
 
 
-def recover_orphans(workspace: Path, config: Path, prefix: str) -> list[dict[str, str]]:
-    """Tag locally every orphan release commit and return what to publish."""
+def recover_orphans(
+    workspace: Path, config: Path, prefix: str, created: list[str]
+) -> list[dict[str, str]]:
+    """Tag locally every orphan release commit and return what to publish.
+
+    The local tags only serve the computation: ``created`` lists them so the
+    caller removes them, and ``publish`` creates the real ones.
+    """
     previous = last_tag(workspace, prefix)
     recovered: list[dict[str, str]] = []
     for commit, version in orphan_release_commits(workspace, previous, prefix):
         notice(f"Release commit without tag found: {version} at {commit[:12]}")
         create_local_tag(workspace, version, commit)
+        created.append(version)
         revision_range = f"{previous}..{commit}" if previous else commit
         try:
             notes = git_cliff(workspace, config, "--strip", "header", revision_range)
@@ -460,12 +521,32 @@ def recover_orphans(workspace: Path, config: Path, prefix: str) -> list[dict[str
     return recovered
 
 
+def ensure_not_ignored(workspace: Path, files: list[str]) -> None:
+    """Fail before any write when a file of the release commit is git-ignored."""
+    for relative in files:
+        ignored = git(workspace, "check-ignore", "-q", "--", relative, check=False)
+        if ignored.returncode == 0:
+            raise ReleaseError(
+                f"{relative} is ignored by git and cannot enter the release commit"
+            )
+
+
 def unique(items: list[str]) -> list[str]:
     return list(dict.fromkeys(items))
 
 
 def prepare() -> int:
     workspace = Path(os.environ.get("GITHUB_WORKSPACE") or os.getcwd())
+    created: list[str] = []
+    try:
+        return prepare_plan(workspace, created)
+    finally:
+        # prepare leaves no tag behind, dry-run or not: publish creates them.
+        for version in created:
+            git(workspace, "tag", "-d", version, check=False)
+
+
+def prepare_plan(workspace: Path, created: list[str]) -> int:
     prefix = os.environ.get("RELEASE_TAG_PREFIX", "v")
     dry_run = parse_bool(os.environ.get("RELEASE_DRY_RUN", "false"), "dry-run")
     version_rules = parse_file_rules(
@@ -478,8 +559,13 @@ def prepare() -> int:
         workspace, os.environ.get("RELEASE_CLIFF_CONFIG", "")
     )
     ensure_full_history(workspace)
+    head = git(workspace, "rev-parse", "HEAD").stdout.strip()
 
-    recovered = recover_orphans(workspace, config, prefix)
+    # A tag pushed by an earlier run may still lack its forge release.
+    previous = last_tag(workspace, prefix)
+    verify = previous if last_release_cut_here(workspace, previous, prefix) else ""
+
+    recovered = recover_orphans(workspace, config, prefix, created)
     last = last_tag(workspace, prefix)
     release: dict[str, object] | None = None
     build_number: int | None = None
@@ -496,12 +582,18 @@ def prepare() -> int:
             f"No releasable commit since {last or 'repository start'}: no new release."
         )
     else:
-        git(workspace, "check-ref-format", f"refs/tags/{version}")
+        if not valid_tag_name(workspace, version):
+            raise ReleaseError(f"computed version {version!r} is not a tag name")
         if tag_commit(workspace, version):
             raise ReleaseError(f"tag {version} already exists")
         # Validate every declared file before anything is written.
         version_plan = plan_version_files(workspace, version_rules)
         build_plan = plan_build_number(workspace, build_rules)
+        files = [CHANGELOG, *(relative for _, _, relative in version_plan)]
+        if build_plan is not None:
+            files.extend(relative for _, _, relative in build_plan[0])
+        files = unique(files)
+        ensure_not_ignored(workspace, files)
 
         if (workspace / CHANGELOG).is_file():
             git_cliff(
@@ -519,12 +611,10 @@ def prepare() -> int:
             workspace, config, "--tag", version, "--unreleased", "--strip", "header"
         )
         apply_version_files(version_plan, bare_version(version, prefix))
-        files = [CHANGELOG, *(relative for _, _, relative in version_plan)]
         if build_plan is not None:
             build_files, build_number = build_plan
             apply_build_number(build_files, build_number)
-            files.extend(relative for _, _, relative in build_files)
-        release = {"version": version, "notes": notes, "files": unique(files)}
+        release = {"version": version, "notes": notes, "files": files}
 
         print(f"Next version: {version}")
         if build_number is not None:
@@ -543,16 +633,27 @@ def prepare() -> int:
         names = ", ".join(item["version"] for item in recovered)
         notice(f"DRY RUN: would have tagged and released {names}")
 
-    state_path().write_text(
-        json.dumps({"recovered": recovered, "release": release}), encoding="utf-8"
+    plan = {
+        "head": head,
+        "config": str(config),
+        "verify": verify,
+        "recovered": recovered,
+        "release": release,
+    }
+    state_path().write_text(json.dumps(plan), encoding="utf-8")
+
+    # ``released`` and ``version`` describe the checked-out branch tip: a new
+    # version, or the version of a release commit completed at HEAD itself.
+    completed_at_head = next(
+        (item["version"] for item in recovered if item["commit"] == head), ""
     )
-    handled = bool(recovered) or release is not None
-    latest = version or (recovered[-1]["version"] if recovered else "")
+    announced = version or completed_at_head
+    pending = bool(verify) or bool(recovered) or release is not None
     write_outputs(
         {
-            "released": "true" if handled else "false",
-            "publish": "true" if handled and not dry_run else "false",
-            "version": latest,
+            "released": "true" if announced else "false",
+            "publish": "true" if pending and not dry_run else "false",
+            "version": announced,
             "build-number": "" if build_number is None else str(build_number),
         }
     )
@@ -720,9 +821,26 @@ def publish() -> int:
     server_url = required_env("GITHUB_SERVER_URL")
     api_url = required_env("GITHUB_API_URL").rstrip("/")
     repository = required_env("GITHUB_REPOSITORY")
+    ref = required_env("GITHUB_REF")
+    if not ref.startswith("refs/heads/"):
+        raise ReleaseError(f"a release is only cut from a branch, not from {ref}")
     if api_url.startswith("http://") and not server_url.startswith("http://"):
         raise ReleaseError("the forge API URL must use https like the forge itself")
+    if git(workspace, "rev-parse", "HEAD").stdout.strip() != plan["head"]:
+        raise ReleaseError("the release plan was computed for another commit")
     auth = git_auth_env(server_url, token)
+
+    verify = plan["verify"]
+    if verify and not release_exists(api_url, repository, verify, token):
+        notice(f"Tag {verify} has no forge release yet: creating it")
+        try:
+            notes = git_cliff(
+                workspace, Path(plan["config"]), "--latest", "--strip", "header"
+            )
+        except ReleaseError as error:
+            warning(f"release notes unavailable for {verify}: {error}")
+            notes = ""
+        ensure_release(api_url, repository, verify, notes, token)
 
     for item in plan["recovered"]:
         publish_tag(workspace, item["version"], item["commit"], auth)
@@ -732,9 +850,6 @@ def publish() -> int:
     if release is None:
         return 0
     version = release["version"]
-    ref = required_env("GITHUB_REF")
-    if not ref.startswith("refs/heads/"):
-        raise ReleaseError(f"a release is only cut from a branch, not from {ref}")
 
     # Only the changelog and the declared files: whatever else the calling
     # job left in the workspace never reaches the released branch.
