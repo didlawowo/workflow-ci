@@ -228,6 +228,10 @@ run on the consumer's internal Forgejo runner, not on GitHub-hosted runners.
 See [Forgejo V1 setup](docs/forgejo-ci-v1.md) and the
 [moto-tracker example](templates/forgejo/moto-tracker-ci.yaml).
 
+Releases on Forgejo use the `.forgejo/actions/release` action: same version
+policy as `release.yml`, plus an optional integer build number written to the
+declared files. See [Forgejo release](docs/forgejo-release.md).
+
 ## Release follow-up
 
 After every new workflow-ci release, update the version used by
