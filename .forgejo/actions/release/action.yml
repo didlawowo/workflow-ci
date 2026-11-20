@@ -12,18 +12,19 @@ inputs:
   version-files:
     description: |
       Multiline list of files to bump, format `path:regex`. The regex must
-      contain one capture group around the current version string.
-      A missing file is skipped with a warning; a regex that does not match
-      fails the release.
+      contain one capture group around the current version string. Only
+      the first match of each file is rewritten. A missing file is skipped
+      with a warning; a regex that does not match fails the release.
     required: false
     default: ""
   build-number-files:
     description: |
       Multiline list of files holding an integer build number, format
       `path:regex` with one capture group around the integer. Each release
-      increments it by one. When files disagree, every file receives the
-      highest value plus one. A missing file, a regex that does not match or
-      a non-integer value fails the release before anything is written.
+      increments it by one. Every match in every file is updated; when
+      values disagree, all of them receive the highest value plus one. A
+      missing file, a regex that does not match or a non-integer value fails
+      the release before anything is written.
     required: false
     default: ""
   tag-prefix:
@@ -40,7 +41,7 @@ inputs:
     default: "false"
 outputs:
   released:
-    description: '"true" when a release was cut, or would be cut in dry-run.'
+    description: '"true" when a release was cut or completed, or would be in dry-run.'
     value: ${{ steps.prepare.outputs.released }}
   version:
     description: Released tag (for example v1.4.0). Empty when released is false.
@@ -71,7 +72,5 @@ runs:
       shell: bash
       env:
         RELEASE_TOKEN: ${{ inputs.token }}
-        RELEASE_VERSION: ${{ steps.prepare.outputs.version }}
-        RELEASE_PENDING: ${{ steps.prepare.outputs.pending }}
         RELEASE_DRY_RUN: ${{ inputs.dry-run }}
       run: uv run --no-project --python 3.12 python "$GITHUB_ACTION_PATH/../../../.ci/forgejo_release.py" publish

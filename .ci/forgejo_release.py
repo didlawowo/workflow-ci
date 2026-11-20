@@ -1,14 +1,16 @@
 #!/usr/bin/env python3
 """Release engine behind the Forgejo release action.
 
-Same policy as ``.github/workflows/release.yml``: conventional commits since
-the last tag decide the next version (``release_commit_gate.py`` then
+Same version policy as ``.github/workflows/release.yml``: conventional commits
+since the last tag decide the next version (``release_commit_gate.py`` then
 git-cliff), ``CHANGELOG.md`` and the declared version files are rewritten, and
 a release commit, a tag and a forge release are published.
 
-``prepare`` never needs a token. ``publish`` is idempotent: a run started
-between the branch push and the tag push converges on the same tag and the
-same release instead of cutting a second one.
+``prepare`` never needs a token: it computes everything and records a plan.
+``publish`` executes the plan and is idempotent. A release commit that reached
+the branch without its tag (a run that failed between the two pushes) is
+tagged and released by the next run before any new version is computed, so
+the same version is never cut twice.
 """
 
 from __future__ import annotations
@@ -37,7 +39,9 @@ GIT_CLIFF_VERSION = "2.14.2"
 BUNDLED_CLIFF_CONFIG = ROOT / "templates" / "common" / "cliff.toml"
 SKIP_MARKER = "[skip ci]"
 RELEASE_SUBJECT = re.compile(r"^chore\(release\):\s+(.+)\s+\[skip\sci\]$")
+SEMVER = r"[0-9]+\.[0-9]+\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?"
 BOT_NAME = "forgejo-actions"
+CHANGELOG = "CHANGELOG.md"
 DRY_RUN_CHANGELOG_LINES = 80
 
 
@@ -71,9 +75,21 @@ def git(
         check=False,
     )
     if check and result.returncode != 0:
+        command = next((arg for arg in args if not arg.startswith("-")), "command")
         detail = (result.stderr or result.stdout).strip()
-        raise ReleaseError(f"git {args[0]} failed: {detail}")
+        raise ReleaseError(f"git {command} failed: {detail}")
     return result
+
+
+def identity_args() -> tuple[str, ...]:
+    server = os.environ.get("GITHUB_SERVER_URL", "")
+    host = urllib.parse.urlsplit(server).hostname or "localhost"
+    return (
+        "-c",
+        f"user.name={BOT_NAME}",
+        "-c",
+        f"user.email={BOT_NAME}@noreply.{host}",
+    )
 
 
 def write_outputs(values: dict[str, str]) -> None:
@@ -89,15 +105,11 @@ def write_outputs(values: dict[str, str]) -> None:
         sys.stdout.write(lines)
 
 
-def state_dir() -> Path:
+def state_path() -> Path:
     base = os.environ.get("RUNNER_TEMP") or tempfile.gettempdir()
-    path = Path(base) / "forgejo-release"
-    path.mkdir(parents=True, exist_ok=True)
-    return path
-
-
-def notes_path() -> Path:
-    return state_dir() / "release-notes.md"
+    directory = Path(base) / "forgejo-release"
+    directory.mkdir(parents=True, exist_ok=True)
+    return directory / "plan.json"
 
 
 def parse_bool(raw: str, name: str) -> bool:
@@ -201,13 +213,15 @@ def resolve_cliff_config(workspace: Path, requested: str) -> tuple[Path, bool]:
 
 # --- files -------------------------------------------------------------------
 
+FilePlan = list[tuple[Path, "re.Pattern[str]", str]]
+
 
 def parse_file_rules(raw: str, name: str) -> list[tuple[str, str]]:
     """Parse ``path:regex`` lines. The regex is kept verbatim: leading spaces
     after an anchor are significant."""
     rules: list[tuple[str, str]] = []
-    for line in raw.splitlines():
-        line = line.rstrip("\r")
+    for raw_line in raw.splitlines():
+        line = raw_line.rstrip("\r")
         if not line.strip():
             continue
         path, separator, regex = line.partition(":")
@@ -235,90 +249,115 @@ def compile_rule(regex: str, path: str) -> re.Pattern[str]:
     return pattern
 
 
-def read_text(path: Path) -> str:
+def load_text(path: Path) -> tuple[str, bool]:
+    """Return the text with LF line endings and whether the file uses CRLF.
+
+    Line-anchored regexes must behave the same on a CRLF file; the original
+    line endings are restored on write.
+    """
     with open(path, encoding="utf-8", newline="") as handle:
-        return handle.read()
+        raw = handle.read()
+    crlf = "\r\n" in raw and raw.count("\r\n") == raw.count("\n")
+    return (raw.replace("\r\n", "\n") if crlf else raw), crlf
 
 
-def write_text(path: Path, content: str) -> None:
+def store_text(path: Path, content: str, crlf: bool) -> None:
     with open(path, "w", encoding="utf-8", newline="") as handle:
-        handle.write(content)
+        handle.write(content.replace("\n", "\r\n") if crlf else content)
 
 
-def replace_group(source: str, match: re.Match[str], value: str) -> str:
-    start, end = match.span(1)
-    return source[:start] + value + source[end:]
+def replace_groups(source: str, matches: list[re.Match[str]], value: str) -> str:
+    result = source
+    for match in sorted(matches, key=lambda item: item.start(1), reverse=True):
+        start, end = match.span(1)
+        result = result[:start] + value + result[end:]
+    return result
 
 
-def patch_version_files(
-    workspace: Path, rules: list[tuple[str, str]], version: str
-) -> list[str]:
-    """Write ``version`` into every declared file. A missing file is skipped
-    with a warning, as in release.yml; a regex that does not match fails."""
-    planned: list[tuple[Path, re.Pattern[str], str]] = []
+def plan_version_files(workspace: Path, rules: list[tuple[str, str]]) -> FilePlan:
+    """Validate the version files. A missing file is skipped with a warning,
+    as in release.yml; a regex that does not match fails."""
+    planned: FilePlan = []
     for relative, regex in rules:
         target = resolve_in_workspace(workspace, relative)
         pattern = compile_rule(regex, relative)
         if not target.is_file():
             warning(f"version-file '{relative}' not found, skipping")
             continue
-        if not pattern.search(read_text(target)):
+        if not pattern.search(load_text(target)[0]):
             raise ReleaseError(f"regex did not match in {relative}")
         planned.append((target, pattern, relative))
+    return planned
+
+
+def apply_version_files(planned: FilePlan, version: str) -> None:
+    """Write ``version`` into the first match of each file, as release.yml does."""
     for target, pattern, relative in planned:
-        source = read_text(target)
+        source, crlf = load_text(target)
         match = pattern.search(source)
         if match is None:
             raise ReleaseError(f"regex did not match in {relative}")
-        write_text(target, replace_group(source, match, version))
+        store_text(target, replace_groups(source, [match], version), crlf)
+
+
+def patch_version_files(
+    workspace: Path, rules: list[tuple[str, str]], version: str
+) -> list[str]:
+    planned = plan_version_files(workspace, rules)
+    apply_version_files(planned, version)
     return [relative for _, _, relative in planned]
 
 
-def bump_build_number(workspace: Path, rules: list[tuple[str, str]]) -> int | None:
-    """Increment the build number by one and write it into every file.
+def plan_build_number(
+    workspace: Path, rules: list[tuple[str, str]]
+) -> tuple[FilePlan, int] | None:
+    """Validate the build-number files and compute the next build number.
 
-    When files disagree, the highest value wins: every file receives
-    ``highest + 1`` so the number never goes backwards anywhere. A missing
-    file, a regex that does not match or a non-integer capture fails before
-    anything is written.
+    Every match in every file must be an integer. The highest value wins:
+    all of them become ``highest + 1`` so the number never goes backwards
+    anywhere. A missing file, a regex that does not match or a non-integer
+    capture fails.
     """
     if not rules:
         return None
-    planned: list[tuple[Path, re.Pattern[str], str]] = []
+    planned: FilePlan = []
     current: list[int] = []
     for relative, regex in rules:
         target = resolve_in_workspace(workspace, relative)
         pattern = compile_rule(regex, relative)
         if not target.is_file():
             raise ReleaseError(f"build-number file '{relative}' not found")
-        match = pattern.search(read_text(target))
-        if match is None:
+        matches = list(pattern.finditer(load_text(target)[0]))
+        if not matches:
             raise ReleaseError(f"build-number regex did not match in {relative}")
-        captured = match.group(1)
-        if not re.fullmatch(r"[0-9]+", captured or ""):
-            raise ReleaseError(
-                f"build number in {relative} is not an integer: {captured!r}"
-            )
-        current.append(int(captured))
+        for match in matches:
+            captured = match.group(1) or ""
+            if not re.fullmatch(r"[0-9]+", captured):
+                raise ReleaseError(
+                    f"build number in {relative} is not an integer: {captured!r}"
+                )
+            current.append(int(captured))
         planned.append((target, pattern, relative))
-    following = max(current) + 1
-    for target, pattern, relative in planned:
-        source = read_text(target)
-        match = pattern.search(source)
-        if match is None:
-            raise ReleaseError(f"build-number regex did not match in {relative}")
-        write_text(target, replace_group(source, match, str(following)))
+    return planned, max(current) + 1
+
+
+def apply_build_number(planned: FilePlan, following: int) -> None:
+    for target, pattern, _ in planned:
+        source, crlf = load_text(target)
+        matches = list(pattern.finditer(source))
+        store_text(target, replace_groups(source, matches, str(following)), crlf)
+
+
+def bump_build_number(workspace: Path, rules: list[tuple[str, str]]) -> int | None:
+    plan = plan_build_number(workspace, rules)
+    if plan is None:
+        return None
+    planned, following = plan
+    apply_build_number(planned, following)
     return following
 
 
 # --- prepare -----------------------------------------------------------------
-
-
-def pending_release(workspace: Path) -> str | None:
-    """Version of a release commit already sitting at HEAD, if any."""
-    subject = git(workspace, "log", "-1", "--pretty=%s").stdout.strip()
-    match = RELEASE_SUBJECT.match(subject)
-    return match.group(1) if match else None
 
 
 def ensure_full_history(workspace: Path) -> None:
@@ -330,29 +369,99 @@ def ensure_full_history(workspace: Path) -> None:
         )
 
 
-def tag_exists(workspace: Path, version: str) -> bool:
+def tag_commit(workspace: Path, version: str) -> str:
+    """Commit a local tag points to; empty when the tag does not exist."""
     result = git(
         workspace,
         "rev-parse",
         "--verify",
         "--quiet",
-        f"refs/tags/{version}",
+        f"refs/tags/{version}^{{commit}}",
         check=False,
     )
-    return result.returncode == 0
+    return result.stdout.strip() if result.returncode == 0 else ""
 
 
-def recovery_notes(workspace: Path, config: Path, version: str) -> str:
-    """Best-effort notes for a release commit found at HEAD."""
-    try:
-        if tag_exists(workspace, version):
-            return git_cliff(workspace, config, "--latest", "--strip", "header")
-        return git_cliff(
-            workspace, config, "--tag", version, "--unreleased", "--strip", "header"
+def announced_version(subject: str, prefix: str) -> str | None:
+    """Version announced by a release commit subject, if it is one of ours.
+
+    The value comes from a commit message: only a semantic version carrying
+    the requested prefix is accepted as a tag name.
+    """
+    match = RELEASE_SUBJECT.match(subject.strip())
+    if match is None:
+        return None
+    version = match.group(1)
+    if re.fullmatch(re.escape(prefix) + SEMVER, version) is None:
+        return None
+    return version
+
+
+def orphan_release_commits(
+    workspace: Path, last: str, prefix: str
+) -> list[tuple[str, str]]:
+    """Release commits that reached the branch without their tag, oldest first.
+
+    With a previous tag, every release commit after it is an orphan. Without
+    any tag, only HEAD is considered: an imported history must not be
+    re-tagged wholesale.
+    """
+    if last:
+        listing = git(
+            workspace, "log", "--reverse", "--format=%H%x1f%s", f"{last}..HEAD"
+        ).stdout
+    else:
+        listing = git(workspace, "log", "-1", "--format=%H%x1f%s").stdout
+    orphans: list[tuple[str, str]] = []
+    for line in listing.splitlines():
+        sha, _, subject = line.partition("\x1f")
+        version = announced_version(subject, prefix)
+        if version is not None:
+            orphans.append((sha, version))
+    return orphans
+
+
+def create_local_tag(workspace: Path, version: str, commit: str) -> None:
+    git(workspace, "check-ref-format", f"refs/tags/{version}")
+    existing = tag_commit(workspace, version)
+    if existing and existing != commit:
+        raise ReleaseError(
+            f"tag {version} points to {existing}, expected {commit}: "
+            "resolve by hand before releasing"
         )
-    except ReleaseError as error:
-        warning(f"release notes unavailable for {version}: {error}")
-        return ""
+    if not existing:
+        git(
+            workspace,
+            *identity_args(),
+            "tag",
+            "-a",
+            version,
+            commit,
+            "-m",
+            f"Release {version}",
+        )
+
+
+def recover_orphans(workspace: Path, config: Path, prefix: str) -> list[dict[str, str]]:
+    """Tag locally every orphan release commit and return what to publish."""
+    previous = last_tag(workspace, prefix)
+    recovered: list[dict[str, str]] = []
+    for commit, version in orphan_release_commits(workspace, previous, prefix):
+        notice(f"Release commit without tag found: {version} at {commit[:12]}")
+        create_local_tag(workspace, version, commit)
+        revision_range = f"{previous}..{commit}" if previous else commit
+        try:
+            notes = git_cliff(workspace, config, "--strip", "header", revision_range)
+        except ReleaseError as error:
+            warning(f"release notes unavailable for {version}: {error}")
+            notes = ""
+        recovered.append({"version": version, "commit": commit, "notes": notes})
+        previous = version
+    return recovered
+
+
+def unique(items: list[str]) -> list[str]:
+    return list(dict.fromkeys(items))
 
 
 def prepare() -> int:
@@ -370,85 +479,80 @@ def prepare() -> int:
     )
     ensure_full_history(workspace)
 
-    pending = pending_release(workspace)
-    if pending is not None:
-        notice(f"Recoverable release commit detected at HEAD: {pending}")
-        write_text(notes_path(), recovery_notes(workspace, config, pending))
-        write_outputs(
-            {
-                "released": "true",
-                "pending": "true",
-                "publish": "false" if dry_run else "true",
-                "version": pending,
-                "build-number": "",
-            }
-        )
-        return 0
-
-    nothing = {
-        "released": "false",
-        "pending": "false",
-        "publish": "false",
-        "version": "",
-        "build-number": "",
-    }
+    recovered = recover_orphans(workspace, config, prefix)
     last = last_tag(workspace, prefix)
+    release: dict[str, object] | None = None
+    build_number: int | None = None
+
     # A caller-provided cliff config may define another release policy: leave
     # the decision to git-cliff, as git-cliff-bump does.
-    if bundled and not commits_require_release(workspace, last):
-        notice(
-            f"Only non-releasing commits since {last or 'repository start'}: no release."
+    version = None
+    if not bundled or commits_require_release(workspace, last):
+        version = normalise_version(
+            git_cliff(workspace, config, "--bumped-version"), last, prefix
         )
-        write_outputs(nothing)
-        return 0
-
-    version = normalise_version(
-        git_cliff(workspace, config, "--bumped-version"), last, prefix
-    )
     if version is None:
-        notice("No version bump computed: no release.")
-        write_outputs(nothing)
-        return 0
-    git(workspace, "check-ref-format", f"refs/tags/{version}")
-
-    changelog = workspace / "CHANGELOG.md"
-    if changelog.is_file():
-        git_cliff(
-            workspace,
-            config,
-            "--tag",
-            version,
-            "--unreleased",
-            "--prepend",
-            "CHANGELOG.md",
+        notice(
+            f"No releasable commit since {last or 'repository start'}: no new release."
         )
     else:
-        git_cliff(workspace, config, "--tag", version, "--output", "CHANGELOG.md")
-    notes = git_cliff(
-        workspace, config, "--tag", version, "--unreleased", "--strip", "header"
+        git(workspace, "check-ref-format", f"refs/tags/{version}")
+        if tag_commit(workspace, version):
+            raise ReleaseError(f"tag {version} already exists")
+        # Validate every declared file before anything is written.
+        version_plan = plan_version_files(workspace, version_rules)
+        build_plan = plan_build_number(workspace, build_rules)
+
+        if (workspace / CHANGELOG).is_file():
+            git_cliff(
+                workspace,
+                config,
+                "--tag",
+                version,
+                "--unreleased",
+                "--prepend",
+                CHANGELOG,
+            )
+        else:
+            git_cliff(workspace, config, "--tag", version, "--output", CHANGELOG)
+        notes = git_cliff(
+            workspace, config, "--tag", version, "--unreleased", "--strip", "header"
+        )
+        apply_version_files(version_plan, bare_version(version, prefix))
+        files = [CHANGELOG, *(relative for _, _, relative in version_plan)]
+        if build_plan is not None:
+            build_files, build_number = build_plan
+            apply_build_number(build_files, build_number)
+            files.extend(relative for _, _, relative in build_files)
+        release = {"version": version, "notes": notes, "files": unique(files)}
+
+        print(f"Next version: {version}")
+        if build_number is not None:
+            print(f"Next build number: {build_number}")
+        print("Files changed by the release:")
+        print(git(workspace, "status", "--short").stdout.rstrip() or "(none)")
+        if dry_run:
+            notice(f"DRY RUN: would have released {version}")
+            print("----- CHANGELOG.md (first lines) -----")
+            changelog = load_text(workspace / CHANGELOG)[0].splitlines()
+            print("\n".join(changelog[:DRY_RUN_CHANGELOG_LINES]))
+            print("----- release notes -----")
+            print(notes)
+
+    if dry_run and recovered:
+        names = ", ".join(item["version"] for item in recovered)
+        notice(f"DRY RUN: would have tagged and released {names}")
+
+    state_path().write_text(
+        json.dumps({"recovered": recovered, "release": release}), encoding="utf-8"
     )
-    write_text(notes_path(), notes)
-
-    patch_version_files(workspace, version_rules, bare_version(version, prefix))
-    build_number = bump_build_number(workspace, build_rules)
-
-    print(f"Next version: {version}")
-    if build_number is not None:
-        print(f"Next build number: {build_number}")
-    print("Files changed by the release:")
-    print(git(workspace, "status", "--short").stdout.rstrip() or "(none)")
-    if dry_run:
-        notice(f"DRY RUN: would have released {version}")
-        print("----- CHANGELOG.md (first lines) -----")
-        print("\n".join(read_text(changelog).splitlines()[:DRY_RUN_CHANGELOG_LINES]))
-        print("----- release notes -----")
-        print(notes)
+    handled = bool(recovered) or release is not None
+    latest = version or (recovered[-1]["version"] if recovered else "")
     write_outputs(
         {
-            "released": "true",
-            "pending": "false",
-            "publish": "false" if dry_run else "true",
-            "version": version,
+            "released": "true" if handled else "false",
+            "publish": "true" if handled and not dry_run else "false",
+            "version": latest,
             "build-number": "" if build_number is None else str(build_number),
         }
     )
@@ -459,7 +563,7 @@ def prepare() -> int:
 
 
 def git_auth_env(server_url: str, token: str) -> dict[str, str]:
-    """Authenticate git over HTTPS with the job token only for this process.
+    """Authenticate git over HTTP(S) with the job token for this process only.
 
     The empty first value resets any header persisted by the checkout, so the
     forge never receives two Authorization headers.
@@ -496,6 +600,36 @@ def remote_tag_commit(workspace: Path, version: str, auth: dict[str, str]) -> st
     return direct
 
 
+def publish_tag(
+    workspace: Path, version: str, commit: str, auth: dict[str, str]
+) -> None:
+    """Make sure the remote tag exists at ``commit``; never move a tag."""
+    create_local_tag(workspace, version, commit)
+    remote = remote_tag_commit(workspace, version, auth)
+    if not remote:
+        pushed = git(
+            workspace, "push", "origin", f"refs/tags/{version}", env=auth, check=False
+        )
+        if pushed.returncode == 0:
+            return
+        # A concurrent run may have pushed the same tag first.
+        remote = remote_tag_commit(workspace, version, auth)
+        if not remote:
+            raise ReleaseError(f"could not push tag {version}")
+    if remote != commit:
+        raise ReleaseError(
+            f"remote tag {version} points to {remote}, expected {commit}"
+        )
+    notice(f"Remote tag {version} already exists at the expected commit")
+
+
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    """Never follow a redirect: the Authorization header must stay on the forge."""
+
+    def redirect_request(self, *args, **kwargs):
+        return None
+
+
 def api_request(
     method: str, url: str, token: str, payload: dict | None = None
 ) -> tuple[int, bytes]:
@@ -512,8 +646,9 @@ def api_request(
             "Content-Type": "application/json",
         },
     )
+    opener = urllib.request.build_opener(_NoRedirect)
     try:
-        with urllib.request.urlopen(request, timeout=30) as response:  # nosec B310
+        with opener.open(request, timeout=30) as response:  # nosec B310
             return response.status, response.read()
     except urllib.error.HTTPError as error:
         return error.code, error.read()
@@ -568,80 +703,62 @@ def required_env(name: str) -> str:
     return value
 
 
+def load_plan() -> dict:
+    path = state_path()
+    if not path.is_file():
+        raise ReleaseError("no release plan found: the prepare step must run first")
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
 def publish() -> int:
     workspace = Path(os.environ.get("GITHUB_WORKSPACE") or os.getcwd())
     if parse_bool(os.environ.get("RELEASE_DRY_RUN", "false"), "dry-run"):
         notice("DRY RUN: nothing is published")
         return 0
+    plan = load_plan()
     token = required_env("RELEASE_TOKEN")
-    version = required_env("RELEASE_VERSION")
-    pending = parse_bool(os.environ.get("RELEASE_PENDING", "false"), "pending")
     server_url = required_env("GITHUB_SERVER_URL")
     api_url = required_env("GITHUB_API_URL").rstrip("/")
     repository = required_env("GITHUB_REPOSITORY")
+    if api_url.startswith("http://") and not server_url.startswith("http://"):
+        raise ReleaseError("the forge API URL must use https like the forge itself")
+    auth = git_auth_env(server_url, token)
+
+    for item in plan["recovered"]:
+        publish_tag(workspace, item["version"], item["commit"], auth)
+        ensure_release(api_url, repository, item["version"], item["notes"], token)
+
+    release = plan["release"]
+    if release is None:
+        return 0
+    version = release["version"]
     ref = required_env("GITHUB_REF")
     if not ref.startswith("refs/heads/"):
         raise ReleaseError(f"a release is only cut from a branch, not from {ref}")
-    git(workspace, "check-ref-format", f"refs/tags/{version}")
-    if version.startswith("-"):
-        raise ReleaseError(f"invalid version {version!r}")
-    auth = git_auth_env(server_url, token)
-    host = urllib.parse.urlsplit(server_url).hostname or "localhost"
-    identity = (
-        "-c",
-        f"user.name={BOT_NAME}",
-        "-c",
-        f"user.email={BOT_NAME}@noreply.{host}",
-    )
 
-    if not pending:
-        git(workspace, "add", "-A")
-        if git(workspace, "diff", "--cached", "--quiet", check=False).returncode == 0:
-            warning("no changes staged: releasing the current HEAD")
-        else:
-            git(
-                workspace,
-                *identity,
-                "commit",
-                "-m",
-                f"chore(release): {version} {SKIP_MARKER}",
-            )
-        pushed = git(workspace, "push", "origin", f"HEAD:{ref}", env=auth, check=False)
-        if pushed.returncode != 0:
-            raise ReleaseError(
-                f"push refused: {ref} moved since checkout or the token cannot "
-                "write; no tag or release was created"
-            )
-
-    head = git(workspace, "rev-parse", "HEAD").stdout.strip()
-    if tag_exists(workspace, version):
-        local = git(
-            workspace, "rev-list", "-n", "1", f"refs/tags/{version}"
-        ).stdout.strip()
-        if local != head:
-            raise ReleaseError(
-                f"local tag {version} points to {local}, expected {head}"
-            )
+    # Only the changelog and the declared files: whatever else the calling
+    # job left in the workspace never reaches the released branch.
+    git(workspace, "add", "--", *release["files"])
+    if git(workspace, "diff", "--cached", "--quiet", check=False).returncode == 0:
+        warning("no changes staged: releasing the current HEAD")
     else:
-        git(workspace, *identity, "tag", "-a", version, "-m", f"Release {version}")
-
-    remote = remote_tag_commit(workspace, version, auth)
-    if not remote:
-        pushed = git(
-            workspace, "push", "origin", f"refs/tags/{version}", env=auth, check=False
+        git(
+            workspace,
+            *identity_args(),
+            "commit",
+            "-m",
+            f"chore(release): {version} {SKIP_MARKER}",
         )
-        if pushed.returncode != 0:
-            # A concurrent run may have pushed the same tag first.
-            remote = remote_tag_commit(workspace, version, auth)
-            if not remote:
-                raise ReleaseError(f"could not push tag {version}")
-    if remote and remote != head:
-        raise ReleaseError(f"remote tag {version} points to {remote}, expected {head}")
-    if remote:
-        notice(f"Remote tag {version} already exists at the expected commit")
-
-    notes = read_text(notes_path()) if notes_path().is_file() else ""
-    ensure_release(api_url, repository, version, notes, token)
+    pushed = git(workspace, "push", "origin", f"HEAD:{ref}", env=auth, check=False)
+    if pushed.returncode != 0:
+        raise ReleaseError(
+            f"push refused: {ref} moved since checkout or the token cannot write; "
+            "no tag or release was created. Run the workflow again from the "
+            "branch tip rather than re-running this job."
+        )
+    head = git(workspace, "rev-parse", "HEAD").stdout.strip()
+    publish_tag(workspace, version, head, auth)
+    ensure_release(api_url, repository, version, release["notes"], token)
     return 0
 
 

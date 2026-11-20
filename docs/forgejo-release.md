@@ -19,6 +19,11 @@ name: Release
 on:
   push:
     branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: release-${{ github.repository }}
+  cancel-in-progress: false
 
 jobs:
   release:
@@ -38,31 +43,49 @@ jobs:
 ```
 
 Le checkout complet (`fetch-depth: 0`) est obligatoire : l'action refuse un
-historique tronqué, qui fausserait le calcul depuis le dernier tag. L'image du
-job doit fournir `git`, `bash` et `curl`.
+historique tronqué, qui fausserait le calcul depuis le dernier tag.
+
+Le groupe `concurrency` fait attendre deux releases rapprochées au lieu de les
+laisser se doubler ; une action ne peut pas le déclarer elle-même, il appartient
+au workflow appelant. `workflow_dispatch` sert à relancer depuis la tête de
+branche (voir « Reprise »).
+
+L'image du job doit fournir `git`, `bash` et Node (l'action `setup-uv` est en
+JavaScript). `uv` télécharge Python 3.12 s'il n'est pas déjà présent.
+
+Seuls `CHANGELOG.md` et les fichiers déclarés entrent dans le commit de
+release : ce que les étapes précédentes du job ont laissé dans le dépôt n'est
+jamais commité.
 
 ## Entrées
 
 | Entrée | Défaut | Rôle |
 | --- | --- | --- |
 | `token` | obligatoire | Jeton du job, autorisé à pousser sur la branche et à créer une release. Seule l'étape de publication le reçoit. |
-| `version-files` | vide | Lignes `chemin:regex` ; le groupe capturé reçoit la version sans préfixe. Fichier absent : avertissement. Regex sans correspondance : échec. |
-| `build-number-files` | vide | Lignes `chemin:regex` ; le groupe capturé est un entier, augmenté de 1 à chaque release. |
+| `version-files` | vide | Lignes `chemin:regex` ; le groupe capturé reçoit la version sans préfixe. Seule la première correspondance du fichier est réécrite, comme sur GitHub. Fichier absent : avertissement. Regex sans correspondance : échec. |
+| `build-number-files` | vide | Lignes `chemin:regex` ; le groupe capturé est un entier, augmenté de 1 à chaque release. Toutes les correspondances du fichier sont réécrites. |
 | `tag-prefix` | `v` | Préfixe des tags. |
 | `cliff-config` | vide | `cliff.toml` du dépôt appelant ; sinon la configuration commune de `workflow-ci`. |
 | `dry-run` | `false` | `true` : calcule et affiche tout, sans commit, tag, push ni release. |
 
-Sorties : `released`, `version`, `build-number`.
+Sorties : `released`, `version`, `build-number`. `released` vaut `true` quand
+une version a été publiée ou complétée par une reprise ; dans ce second cas
+`build-number` est vide.
 
 La regex est lue telle quelle, espaces compris : une ligne indentée s'écrit avec
-son indentation après l'ancre (`^        clé: (.+)$`).
+son indentation après l'ancre (`^        clé: (.+)$`). Les fichiers aux fins de
+ligne Windows sont lus comme les autres et gardent leurs fins de ligne. Pour
+viser une occurrence précise de la version dans un fichier qui en compte
+plusieurs, donner une regex plus précise (une regex peut s'étendre sur
+plusieurs lignes avec `[\s\S]*?`).
 
 ## Numéro de build
 
-Chaque release augmente le numéro de 1. Si les fichiers déclarés ne portent pas
-la même valeur, tous reçoivent la plus haute plus 1 : le numéro ne recule dans
-aucun fichier. Un fichier absent, une regex sans correspondance ou une valeur
-non entière font échouer la release avant toute écriture.
+Chaque release augmente le numéro de 1. Toutes les correspondances de tous les
+fichiers déclarés sont lues : si elles ne portent pas la même valeur, toutes
+reçoivent la plus haute plus 1, et le numéro ne recule nulle part. Un fichier
+absent, une regex sans correspondance ou une valeur non entière font échouer la
+release avant toute écriture dans le dépôt.
 
 ## Règles de version
 
@@ -74,18 +97,38 @@ non entière font échouer la release avant toute écriture.
   tag sur la branche avant d'activer l'action évite une première version et un
   changelog calculés depuis l'origine du dépôt.
 
-## Boucle et reprise
+## Boucle
 
 Le commit de release est de type `chore` : il ne déclenche jamais lui-même une
 nouvelle version, quelle que soit la façon dont Forgejo traite les pushs faits
 avec le jeton du job. Son message porte aussi la balise de saut de CI, comme sur
 GitHub.
 
-La publication est idempotente. Une exécution qui trouve le commit de release
-en tête de branche reprend là où la précédente s'est arrêtée : elle pose le tag
-et la release s'ils manquent, et ne fait rien s'ils existent déjà au bon commit.
-Si la branche a avancé depuis le checkout, le push est refusé et rien n'est
-publié ; l'exécution suivante couvre tous les commits depuis le dernier tag.
+## Reprise
+
+Si une exécution s'arrête après avoir poussé le commit de release mais avant
+son tag, l'exécution suivante (prochain push, ou `workflow_dispatch` sur la
+branche) trouve ce commit sans tag après le dernier tag connu. Elle pose le tag
+sur ce commit et crée sa release, puis calcule la version suivante s'il y a des
+commits publiables après lui. La même version n'est jamais publiée deux fois.
+Relancer le job en échec ne suffit pas : il repart de l'ancien commit et son
+push est refusé.
+
+Seul un commit dont le sujet annonce une version sémantique au bon préfixe est
+repris. Sans aucun tag dans le dépôt, seul le commit en tête de branche peut
+l'être : un historique importé n'est pas re-tagué en masse.
+
+Un tag n'est jamais déplacé : si le tag attendu existe déjà sur un autre
+commit, l'exécution échoue et demande une correction manuelle. Si la branche a
+avancé depuis le checkout, le push est refusé et rien n'est publié ;
+l'exécution suivante couvre tous les commits depuis le dernier tag.
+
+## Écarts avec le workflow GitHub
+
+Non repris de `release.yml` : `post-bump-command` (fichiers dérivés comme
+`uv.lock`), `validated-sha`, `trigger-cd-workflow` et les notes générées par la
+forge quand git-cliff n'en produit pas (la release est alors créée avec un
+texte vide).
 
 ## Outils
 

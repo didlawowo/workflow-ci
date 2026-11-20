@@ -2,6 +2,7 @@
 
 import importlib
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 
@@ -14,6 +15,14 @@ release = importlib.import_module("forgejo_release")
 
 ACTION = ROOT / ".forgejo/actions/release/action.yml"
 GITHUB_BUMP_ACTION = ROOT / ".github/actions/git-cliff-bump/action.yml"
+RELEASE_INPUTS = (
+    "RELEASE_VERSION_FILES",
+    "RELEASE_BUILD_NUMBER_FILES",
+    "RELEASE_TAG_PREFIX",
+    "RELEASE_CLIFF_CONFIG",
+    "RELEASE_DRY_RUN",
+    "RELEASE_TOKEN",
+)
 
 
 def git(repo, *args):
@@ -26,19 +35,41 @@ def git(repo, *args):
     ).stdout
 
 
-def commit(repo, subject, filename):
-    (repo / filename).write_text(subject)
-    git(repo, "add", "-A")
+def commit(repo, subject, filename, content=None):
+    (repo / filename).write_text(subject if content is None else content)
+    git(repo, "add", "--", filename)
     git(repo, "commit", "-q", "-m", subject)
+
+
+def head_of(repo):
+    return git(repo, "rev-parse", "HEAD").strip()
+
+
+def remote_tags(repo):
+    """Remote tag name -> commit it points to (annotated tags peeled)."""
+    tags = {}
+    for line in git(repo, "ls-remote", "--tags", "origin").splitlines():
+        sha, _, ref = line.partition("\t")
+        name = ref.removeprefix("refs/tags/")
+        if name.endswith("^{}"):
+            tags[name.removesuffix("^{}")] = sha
+        else:
+            tags.setdefault(name, sha)
+    return tags
 
 
 @pytest.fixture
 def repo(tmp_path):
+    """A clone tagged v0.5.1 whose origin is a local bare repository."""
+    origin = tmp_path / "origin.git"
+    subprocess.run(["git", "init", "-q", "--bare", str(origin)], check=True)
     path = tmp_path / "repo"
     path.mkdir()
     git(path, "init", "-q", "-b", "main")
+    git(path, "remote", "add", "origin", str(origin))
     commit(path, "feat: initial", "a.txt")
     git(path, "tag", "v0.5.1")
+    git(path, "push", "-q", "origin", "main", "v0.5.1")
     return path
 
 
@@ -50,14 +81,7 @@ def job(repo, tmp_path, monkeypatch):
     monkeypatch.setenv("GITHUB_WORKSPACE", str(repo))
     monkeypatch.setenv("RUNNER_TEMP", str(tmp_path / "runner-temp"))
     monkeypatch.setenv("GITHUB_OUTPUT", str(output))
-    for name in (
-        "RELEASE_VERSION_FILES",
-        "RELEASE_BUILD_NUMBER_FILES",
-        "RELEASE_TAG_PREFIX",
-        "RELEASE_CLIFF_CONFIG",
-        "RELEASE_DRY_RUN",
-        "RELEASE_TOKEN",
-    ):
+    for name in RELEASE_INPUTS:
         monkeypatch.delenv(name, raising=False)
 
     def fake_git_cliff(workspace, config, *args):
@@ -71,13 +95,33 @@ def job(repo, tmp_path, monkeypatch):
     monkeypatch.setattr(release, "git_cliff", fake_git_cliff)
 
     def outputs():
-        return dict(
-            line.split("=", 1)
-            for line in output.read_text().splitlines()
-            if "=" in line
-        )
+        lines = output.read_text().splitlines()
+        return dict(line.split("=", 1) for line in lines if "=" in line)
 
     return outputs
+
+
+@pytest.fixture
+def forge(job, monkeypatch):
+    """Publishing environment: the bare origin and an in-memory release API."""
+    monkeypatch.setenv("GITHUB_SERVER_URL", "https://forge.example")
+    monkeypatch.setenv("GITHUB_API_URL", "https://forge.example/api/v1")
+    monkeypatch.setenv("GITHUB_REPOSITORY", "owner/app")
+    monkeypatch.setenv("GITHUB_REF", "refs/heads/main")
+    monkeypatch.setenv("RELEASE_TOKEN", "dummy")
+    releases = {}
+
+    def fake_api(method, url, token, payload=None):
+        if method == "GET":
+            return (200 if url.rsplit("/", 1)[-1] in releases else 404), b""
+        releases[payload["tag_name"]] = payload["body"]
+        return 201, b""
+
+    monkeypatch.setattr(release, "api_request", fake_api)
+    return releases
+
+
+# --- version -----------------------------------------------------------------
 
 
 @pytest.mark.parametrize(
@@ -95,6 +139,17 @@ def test_version_gets_the_tag_prefix_exactly_once(bumped, last, prefix, expected
     assert release.normalise_version(bumped, last, prefix) == expected
 
 
+def test_non_releasing_commits_do_not_require_a_release(repo):
+    commit(repo, "docs: readme", "b.txt")
+    commit(repo, "chore: tidy", "c.txt")
+    assert release.commits_require_release(repo, "v0.5.1") is False
+    commit(repo, "fix: real bug", "d.txt")
+    assert release.commits_require_release(repo, "v0.5.1") is True
+
+
+# --- declared files ----------------------------------------------------------
+
+
 def test_file_rules_keep_the_regex_verbatim_and_skip_blank_lines():
     raw = "a.yml:^        KEY: (.+)$\n\n   \nb/c.gradle:^  code (\\d+)$\r\n"
     assert release.parse_file_rules(raw, "version-files") == [
@@ -108,7 +163,7 @@ def test_file_rule_without_separator_is_rejected():
         release.parse_file_rules("no-separator-here", "version-files")
 
 
-def test_version_file_only_replaces_the_captured_group(tmp_path):
+def test_version_file_only_replaces_the_first_captured_group(tmp_path):
     target = tmp_path / "project.yml"
     target.write_text("name: app\n        VERSION: 0.5.1\nother: 0.5.1\n")
     changed = release.patch_version_files(
@@ -133,8 +188,7 @@ def test_missing_version_file_is_skipped_like_the_github_workflow(tmp_path):
 def test_unmatched_version_regex_fails_before_any_file_is_written(tmp_path):
     first = tmp_path / "a.txt"
     first.write_text("version = 1.0.0\n")
-    second = tmp_path / "b.txt"
-    second.write_text("nothing to see\n")
+    (tmp_path / "b.txt").write_text("nothing to see\n")
     with pytest.raises(release.ReleaseError):
         release.patch_version_files(
             tmp_path,
@@ -173,6 +227,25 @@ def test_build_number_converges_on_the_highest_value_plus_one(tmp_path):
     assert android.read_text() == "        versionCode 9\n"
 
 
+def test_build_number_updates_every_occurrence_in_a_file(tmp_path):
+    target = tmp_path / "project.yml"
+    target.write_text("app:\n  BUILD: 8\nwidget:\n  BUILD: 5\n")
+    rules = [("project.yml", "^  BUILD: (\\d+)$")]
+    assert release.bump_build_number(tmp_path, rules) == 9
+    assert target.read_text() == "app:\n  BUILD: 9\nwidget:\n  BUILD: 9\n"
+
+
+def test_crlf_files_match_line_anchors_and_keep_their_line_endings(tmp_path):
+    target = tmp_path / "win.properties"
+    target.write_bytes(b"name=app\r\nversion=1.0.0\r\nbuild=8\r\n")
+    release.patch_version_files(
+        tmp_path, [("win.properties", "^version=(.+)$")], "1.1.0"
+    )
+    rules = [("win.properties", "^build=(\\d+)$")]
+    assert release.bump_build_number(tmp_path, rules) == 9
+    assert target.read_bytes() == b"name=app\r\nversion=1.1.0\r\nbuild=9\r\n"
+
+
 @pytest.mark.parametrize(
     ("second_content", "second_regex"),
     [
@@ -196,18 +269,48 @@ def test_invalid_build_number_file_fails_without_writing(
     assert valid.read_text() == "code 8\n"
 
 
-def test_non_releasing_commits_do_not_require_a_release(repo):
-    commit(repo, "docs: readme", "b.txt")
-    commit(repo, "chore: tidy", "c.txt")
-    assert release.commits_require_release(repo, "v0.5.1") is False
-    commit(repo, "fix: real bug", "d.txt")
-    assert release.commits_require_release(repo, "v0.5.1") is True
+# --- recovery detection ------------------------------------------------------
 
 
-def test_release_commit_at_head_is_detected_for_recovery(repo):
-    assert release.pending_release(repo) is None
-    commit(repo, "chore(release): v1.2.3 [skip ci]", "b.txt")
-    assert release.pending_release(repo) == "v1.2.3"
+@pytest.mark.parametrize(
+    ("subject", "prefix", "expected"),
+    [
+        ("chore(release): v1.2.3 [skip ci]", "v", "v1.2.3"),
+        ("chore(release): chart-v1.2.3 [skip ci]", "chart-v", "chart-v1.2.3"),
+        ("chore(release): 1.2.3 [skip ci]", "", "1.2.3"),
+        ("chore(release): main [skip ci]", "v", None),
+        ("chore(release): 1.2.3 [skip ci]", "v", None),
+        ("chore(release): v1.2.3", "v", None),
+        ("feat: v1.2.3 [skip ci]", "v", None),
+    ],
+)
+def test_only_a_prefixed_semantic_version_is_accepted_from_a_commit_subject(
+    subject, prefix, expected
+):
+    assert release.announced_version(subject, prefix) == expected
+
+
+def test_release_commits_without_tag_are_found_after_the_last_tag(repo):
+    assert release.orphan_release_commits(repo, "v0.5.1", "v") == []
+    commit(repo, "fix: crash", "b.txt")
+    commit(repo, "chore(release): v0.5.2 [skip ci]", "c.txt")
+    orphan = head_of(repo)
+    commit(repo, "feat: search", "d.txt")
+    assert release.orphan_release_commits(repo, "v0.5.1", "v") == [(orphan, "v0.5.2")]
+
+
+def test_without_any_tag_only_head_can_be_recovered(tmp_path):
+    path = tmp_path / "imported"
+    path.mkdir()
+    git(path, "init", "-q", "-b", "main")
+    commit(path, "chore(release): v0.1.0 [skip ci]", "a.txt")
+    commit(path, "feat: more", "b.txt")
+    assert release.orphan_release_commits(path, "", "v") == []
+    commit(path, "chore(release): v0.2.0 [skip ci]", "c.txt")
+    assert release.orphan_release_commits(path, "", "v") == [(head_of(path), "v0.2.0")]
+
+
+# --- forge release -----------------------------------------------------------
 
 
 def stub_api(monkeypatch, responses):
@@ -245,9 +348,7 @@ def test_failed_release_creation_is_an_error(monkeypatch):
         release.ensure_release("https://forge/api/v1", "o/r", "v1.0.0", "notes", "t")
 
 
-def test_publish_does_nothing_in_dry_run_even_without_a_token(job, monkeypatch):
-    monkeypatch.setenv("RELEASE_DRY_RUN", "true")
-    assert release.publish() == 0
+# --- prepare -----------------------------------------------------------------
 
 
 @pytest.mark.parametrize(
@@ -266,7 +367,12 @@ def test_prepare_only_asks_for_publication_outside_dry_run(
 
 
 def test_prepare_writes_version_and_build_number_into_the_files(repo, job, monkeypatch):
-    (repo / "project.yml").write_text("        VERSION: 0.5.1\n        BUILD: 8\n")
+    commit(
+        repo,
+        "chore: project file",
+        "project.yml",
+        "        VERSION: 0.5.1\n        BUILD: 8\n",
+    )
     commit(repo, "feat: queue", "b.txt")
     monkeypatch.setenv("RELEASE_VERSION_FILES", "project.yml:^        VERSION: (.+)$")
     monkeypatch.setenv(
@@ -277,6 +383,16 @@ def test_prepare_writes_version_and_build_number_into_the_files(repo, job, monke
         "        VERSION: 0.6.0\n        BUILD: 9\n"
     )
     assert job()["build-number"] == "9"
+
+
+def test_invalid_build_number_leaves_the_checkout_untouched(repo, job, monkeypatch):
+    commit(repo, "chore: project file", "project.yml", "VERSION: 0.5.1\nBUILD: next\n")
+    commit(repo, "feat: queue", "b.txt")
+    monkeypatch.setenv("RELEASE_VERSION_FILES", "project.yml:^VERSION: (.+)$")
+    monkeypatch.setenv("RELEASE_BUILD_NUMBER_FILES", "project.yml:^BUILD: (.+)$")
+    with pytest.raises(release.ReleaseError):
+        release.prepare()
+    assert git(repo, "status", "--short") == ""
 
 
 def test_prepare_releases_nothing_for_non_releasing_commits(repo, job):
@@ -293,6 +409,142 @@ def test_invalid_dry_run_value_fails_closed(repo, job, monkeypatch):
     monkeypatch.setenv("RELEASE_DRY_RUN", "yes")
     with pytest.raises(release.ReleaseError):
         release.prepare()
+
+
+# --- publish -----------------------------------------------------------------
+
+
+def test_publish_does_nothing_in_dry_run_even_without_a_token(job, monkeypatch):
+    monkeypatch.setenv("RELEASE_DRY_RUN", "true")
+    assert release.publish() == 0
+
+
+def test_publication_commits_only_declared_files_and_tags_the_release(
+    repo, forge, monkeypatch
+):
+    commit(repo, "chore: project file", "project.yml", "VERSION: 0.5.1\nBUILD: 8\n")
+    commit(repo, "feat: queue", "b.txt")
+    (repo / "secret.env").write_text("left behind by an earlier step\n")
+    monkeypatch.setenv("RELEASE_VERSION_FILES", "project.yml:^VERSION: (.+)$")
+    monkeypatch.setenv("RELEASE_BUILD_NUMBER_FILES", "project.yml:^BUILD: (\\d+)$")
+
+    assert release.prepare() == 0
+    assert release.publish() == 0
+
+    head = head_of(repo)
+    subject = git(repo, "log", "-1", "--pretty=%s").strip()
+    assert subject == "chore(release): v0.6.0 [skip ci]"
+    committed = git(repo, "show", "--name-only", "--pretty=", "HEAD").split()
+    assert sorted(committed) == ["CHANGELOG.md", "project.yml"]
+    assert git(repo, "ls-remote", "origin", "refs/heads/main").split()[0] == head
+    assert remote_tags(repo)["v0.6.0"] == head
+    assert forge == {"v0.6.0": "notes\n"}
+
+
+def test_second_run_on_a_published_release_changes_nothing(repo, forge):
+    commit(repo, "feat: queue", "b.txt")
+    assert release.prepare() == 0
+    assert release.publish() == 0
+    head = head_of(repo)
+    tags = remote_tags(repo)
+
+    assert release.prepare() == 0
+    assert release.publish() == 0
+    assert head_of(repo) == head
+    assert remote_tags(repo) == tags
+    assert list(forge) == ["v0.6.0"]
+
+
+def test_release_commit_pushed_without_tag_is_completed_not_cut_again(repo, forge, job):
+    commit(repo, "fix: crash", "b.txt")
+    commit(repo, "chore(release): v0.5.2 [skip ci]", "CHANGELOG.md")
+    orphan = head_of(repo)
+    commit(repo, "feat: search", "c.txt")
+    git(repo, "push", "-q", "origin", "main")
+
+    assert release.prepare() == 0
+    assert job()["version"] == "v0.6.0"
+    assert release.publish() == 0
+
+    tags = remote_tags(repo)
+    assert tags["v0.5.2"] == orphan
+    assert tags["v0.6.0"] == head_of(repo)
+    assert sorted(forge) == ["v0.5.2", "v0.6.0"]
+    subjects = git(repo, "log", "--pretty=%s", "v0.5.1..HEAD").splitlines()
+    assert subjects.count("chore(release): v0.5.2 [skip ci]") == 1
+
+
+def test_release_commit_at_head_only_gets_its_missing_tag_and_release(repo, forge, job):
+    commit(repo, "fix: crash", "b.txt")
+    commit(repo, "chore(release): v0.5.2 [skip ci]", "CHANGELOG.md")
+    git(repo, "push", "-q", "origin", "main")
+    head = head_of(repo)
+
+    assert release.prepare() == 0
+    outputs = job()
+    assert (outputs["released"], outputs["version"]) == ("true", "v0.5.2")
+    assert release.publish() == 0
+    assert head_of(repo) == head
+    assert remote_tags(repo)["v0.5.2"] == head
+    assert list(forge) == ["v0.5.2"]
+
+
+def test_a_remote_tag_on_another_commit_is_never_moved(repo, forge):
+    commit(repo, "feat: queue", "b.txt")
+    git(repo, "push", "-q", "origin", "main")
+    git(repo, "push", "-q", "origin", "v0.5.1^{commit}:refs/tags/v0.6.0")
+    before = remote_tags(repo)["v0.6.0"]
+
+    assert release.prepare() == 0
+    with pytest.raises(release.ReleaseError):
+        release.publish()
+    assert remote_tags(repo)["v0.6.0"] == before
+    assert forge == {}
+
+
+def test_a_branch_that_moved_since_checkout_publishes_nothing(repo, forge, tmp_path):
+    commit(repo, "feat: queue", "b.txt")
+    git(repo, "push", "-q", "origin", "main")
+    other = tmp_path / "other"
+    subprocess.run(
+        ["git", "clone", "-q", "-b", "main", str(tmp_path / "origin.git"), str(other)],
+        check=True,
+    )
+    commit(other, "fix: concurrent merge", "z.txt")
+    git(other, "push", "-q", "origin", "main")
+
+    assert release.prepare() == 0
+    with pytest.raises(release.ReleaseError):
+        release.publish()
+    assert "v0.6.0" not in remote_tags(repo)
+    assert forge == {}
+
+
+def test_real_git_cliff_computes_the_next_version(repo, tmp_path, monkeypatch):
+    found = shutil.which("git-cliff")
+    if not found:
+        pytest.skip("git-cliff is not installed")
+    probe = subprocess.run(
+        [found, "--version"], capture_output=True, text=True, check=False
+    )
+    if probe.stdout.split()[-1:] != [release.GIT_CLIFF_VERSION]:
+        pytest.skip("git-cliff is not at the pinned version")
+    output = tmp_path / "real-output.txt"
+    monkeypatch.setenv("GITHUB_WORKSPACE", str(repo))
+    monkeypatch.setenv("RUNNER_TEMP", str(tmp_path / "real-temp"))
+    monkeypatch.setenv("GITHUB_OUTPUT", str(output))
+    for name in RELEASE_INPUTS:
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("RELEASE_DRY_RUN", "true")
+    commit(repo, "fix: crash", "b.txt")
+    commit(repo, "feat: queue", "c.txt")
+
+    assert release.prepare() == 0
+    assert "version=v0.6.0" in output.read_text().splitlines()
+    assert (repo / "CHANGELOG.md").read_text().count("## [0.6.0]") == 1
+
+
+# --- action contract ---------------------------------------------------------
 
 
 def action_steps():
