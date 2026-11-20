@@ -1,0 +1,79 @@
+name: Release for Forgejo
+description: >
+  Compute the next semantic version from conventional commits, rewrite the
+  changelog and the declared version files, then publish the release commit,
+  the tag and the Forgejo release. Same policy as the GitHub release workflow.
+inputs:
+  token:
+    description: >
+      Job token allowed to push to the released branch and to create a
+      release. Only the publish step receives it.
+    required: true
+  version-files:
+    description: |
+      Multiline list of files to bump, format `path:regex`. The regex must
+      contain one capture group around the current version string. Only
+      the first match of each file is rewritten. A missing file is skipped
+      with a warning; a regex that does not match fails the release.
+    required: false
+    default: ""
+  build-number-files:
+    description: |
+      Multiline list of files holding an integer build number, format
+      `path:regex` with one capture group around the integer. Each release
+      increments it by one. Every match in every file is updated; when
+      values disagree, all of them receive the highest value plus one. A
+      missing file, a regex that does not match or a non-integer value fails
+      the release before anything is written.
+    required: false
+    default: ""
+  tag-prefix:
+    description: Tag prefix. Default "v".
+    required: false
+    default: "v"
+  cliff-config:
+    description: Path to a cliff.toml in the calling repository. Falls back to the workflow-ci default.
+    required: false
+    default: ""
+  dry-run:
+    description: When "true", compute and print everything but skip commit, tag, push and release.
+    required: false
+    default: "false"
+outputs:
+  released:
+    description: >
+      "true" when the branch tip was just released (or would be in dry-run):
+      a new version, or a release commit at the tip that only lacked its tag.
+      A forge release created afterwards for an existing tag is not announced.
+    value: ${{ steps.prepare.outputs.released }}
+  version:
+    description: Released tag (for example v1.4.0). Empty when released is false.
+    value: ${{ steps.prepare.outputs.version }}
+  build-number:
+    description: New build number. Empty when no build-number file is declared.
+    value: ${{ steps.prepare.outputs.build-number }}
+runs:
+  using: composite
+  steps:
+    - uses: https://github.com/astral-sh/setup-uv@v10.1.0
+      with:
+        enable-cache: false
+        prune-cache: false
+        github-token: ""
+    - name: Compute version, changelog and version files
+      id: prepare
+      shell: bash
+      env:
+        RELEASE_VERSION_FILES: ${{ inputs.version-files }}
+        RELEASE_BUILD_NUMBER_FILES: ${{ inputs.build-number-files }}
+        RELEASE_TAG_PREFIX: ${{ inputs.tag-prefix }}
+        RELEASE_CLIFF_CONFIG: ${{ inputs.cliff-config }}
+        RELEASE_DRY_RUN: ${{ inputs.dry-run }}
+      run: uv run --no-project --python 3.12 python "$GITHUB_ACTION_PATH/../../../.ci/forgejo_release.py" prepare
+    - name: Publish release commit, tag and Forgejo release
+      if: steps.prepare.outputs.publish == 'true'
+      shell: bash
+      env:
+        RELEASE_TOKEN: ${{ inputs.token }}
+        RELEASE_DRY_RUN: ${{ inputs.dry-run }}
+      run: uv run --no-project --python 3.12 python "$GITHUB_ACTION_PATH/../../../.ci/forgejo_release.py" publish
