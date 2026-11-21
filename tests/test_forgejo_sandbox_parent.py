@@ -122,3 +122,8 @@ def test_scratch_owned_by_the_sandbox_uid_is_refused(public):
 def test_no_usable_scratch_fails_closed(public):
     with pytest.raises(RuntimeError, match="scratch directory"):
         adapter.sandbox_parent({"RUNNER_TEMP": str(public / "missing")}, SANDBOX)
+
+
+def test_world_writable_ancestor_without_sticky_bit_is_refused(public, system_temp):
+    scratch = make(make(public, "loose-parent", 0o777), "runner-temp", 0o755)
+    assert adapter.sandbox_parent({"RUNNER_TEMP": str(scratch)}, SANDBOX) == system_temp

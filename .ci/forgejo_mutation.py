@@ -150,11 +150,14 @@ def reachable_by(directory: Path, uid: int) -> bool:
 
 
 def replaceable_by(directory: Path, uid: int) -> bool:
-    """Whether uid could rename or replace entries that root creates in directory."""
-    status = directory.stat()
-    if status.st_uid == uid:
-        return True
-    return bool(permissions_for(status, uid) & 2) and not status.st_mode & stat.S_ISVTX
+    """Whether uid could rename or replace directory or what root creates in it."""
+    for ancestor in (directory, *directory.parents):
+        status = ancestor.stat()
+        if status.st_uid == uid:
+            return True
+        if permissions_for(status, uid) & 2 and not status.st_mode & stat.S_ISVTX:
+            return True
+    return False
 
 
 def sandbox_parent(environ: Mapping[str, str], uid: int = UID) -> Path:

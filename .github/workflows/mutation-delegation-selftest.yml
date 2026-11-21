@@ -53,6 +53,8 @@ jobs:
           ROOT_UV_CACHE="${RUNNER_TEMP:-/tmp}/forgejo-root-uv-cache"
           rm -rf "$ROOT_UV_CACHE"
           mkdir -p "$ROOT_UV_CACHE"
+          # Under sudo the cache receives root-owned files: remove it as root.
+          trap 'sudo -n rm -rf "$ROOT_UV_CACHE" 2>/dev/null || rm -rf "$ROOT_UV_CACHE"' EXIT
           if [[ "$(id -u)" == "0" ]]; then
             env \
               "PATH=$PATH" \
