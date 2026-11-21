@@ -43,9 +43,9 @@ jobs:
           test ! -e .workflow-ci-selftest/.git
           test -f .workflow-ci-selftest/.github/scripts/policy_integrity.py
           test -f .workflow-ci-selftest/hidden-evaluators/run.py
-          diff -r "$CENTRAL_SOURCE" .workflow-ci-selftest
+          diff -rq "$CENTRAL_SOURCE" .workflow-ci-selftest
           echo "# modified" >> .workflow-ci-selftest/.github/scripts/policy_integrity.py
-          if diff -r "$CENTRAL_SOURCE" .workflow-ci-selftest >/dev/null; then
+          if diff -rq "$CENTRAL_SOURCE" .workflow-ci-selftest >/dev/null; then
             echo "::error::A modified copy was not detected."
             exit 1
           fi

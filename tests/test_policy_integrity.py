@@ -330,7 +330,7 @@ def test_policy_integrity_workflow_resolves_annotated_release_tags() -> None:
     # verbatim by the action, then the copy is compared to what was loaded.
     assert "uses: $/.github/actions/central-implementation" in workflow
     assert "workflow-sha: ${{ job.workflow_sha }}" in workflow
-    assert 'diff -r "$CENTRAL_SOURCE" .workflow-ci-policy' in workflow
+    assert 'diff -rq "$CENTRAL_SOURCE" .workflow-ci-policy' in workflow
 
 
 def hidden_wrapper(version: str, evaluator: str, runner: str, extra: str = "") -> str:

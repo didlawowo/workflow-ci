@@ -73,7 +73,7 @@ jobs:
           CENTRAL_SOURCE: ${{ steps.central.outputs.source }}
         run: |
           set -euo pipefail
-          diff -r "$CENTRAL_SOURCE" .workflow-ci-policy
+          diff -rq "$CENTRAL_SOURCE" .workflow-ci-policy
           test "$(git -C .policy-base rev-parse HEAD)" = "${{ github.event.pull_request.base.sha }}"
           test "$(git -C .policy-candidate rev-parse HEAD)" = "${{ github.event.pull_request.head.sha }}"
 

@@ -21,6 +21,7 @@ fail() {
 
 action_path="${GITHUB_ACTION_PATH:?GITHUB_ACTION_PATH is required}"
 workspace="${GITHUB_WORKSPACE:?GITHUB_WORKSPACE is required}"
+output="${GITHUB_OUTPUT:?GITHUB_OUTPUT is required}"
 repository="${CENTRAL_WORKFLOW_REPOSITORY:-}"
 sha="${CENTRAL_WORKFLOW_SHA:-}"
 destination="${CENTRAL_DESTINATION:-}"
@@ -60,24 +61,39 @@ case "$destination" in
 esac
 
 source_root="$(cd "$loaded_root" && pwd -P)"
+workspace_root="$(cd "$workspace" && pwd -P)"
+# A checkout of the job is not what the runner loaded for the called workflow.
+case "$source_root" in
+  "$workspace_root"|"$workspace_root"/*)
+    fail "the implementation must not be read from the workspace."
+    ;;
+esac
+
+inside_workspace() {
+  local resolved
+  resolved="$(cd "$1" && pwd -P)"
+  case "$resolved" in
+    "$workspace_root"|"$workspace_root"/*) return 0 ;;
+  esac
+  return 1
+}
+
 target="$workspace/$destination"
 parent="$(dirname "$target")"
+# The copy must land inside the workspace even when a parent is a symlink:
+# checked on the closest existing parent before anything is created.
+existing="$parent"
+while [[ ! -d "$existing" ]]; do
+  existing="$(dirname "$existing")"
+done
+inside_workspace "$existing" || fail "the destination escapes the workspace."
 mkdir -p "$parent"
-# The copy must land inside the workspace even when a parent is a symlink.
-workspace_root="$(cd "$workspace" && pwd -P)"
-parent_root="$(cd "$parent" && pwd -P)"
-case "$parent_root" in
-  "$workspace_root"|"$workspace_root"/*) ;;
-  *) fail "the destination escapes the workspace." ;;
-esac
 
 rm -rf "$target"
 mkdir "$target"
 cp -R "$source_root/." "$target/"
-diff -r "$source_root" "$target" >/dev/null ||
+diff -rq "$source_root" "$target" >/dev/null ||
   fail "the copy differs from the implementation loaded by the runner."
 
 echo "Central implementation $repository@$sha copied to $destination"
-if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
-  echo "source=$source_root" >> "$GITHUB_OUTPUT"
-fi
+echo "source=$source_root" >> "$output"

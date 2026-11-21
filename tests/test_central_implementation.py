@@ -35,6 +35,7 @@ def loaded(tmp_path: Path, owner: str = "owner", reference: str = SHA) -> Path:
     (root / ".hidden").write_text("hidden\n")
     (root / ".ci").mkdir()
     (root / ".ci" / "helper.sh").write_text("#!/usr/bin/env bash\necho helper\n")
+    (root / ".ci" / "helper.sh").chmod(0o755)
     return root
 
 
@@ -46,20 +47,25 @@ def materialize(
     sha: str = SHA,
     destination: str = ".workflow-ci",
     action_path: Path | None = None,
+    workspace: Path | None = None,
+    output: bool = True,
 ) -> subprocess.CompletedProcess[str]:
-    workspace = tmp_path / "workspace"
+    workspace = workspace or tmp_path / "workspace"
     workspace.mkdir(exist_ok=True)
+    environment = {
+        **os.environ,
+        "GITHUB_ACTION_PATH": str(action_path or root / ACTION),
+        "GITHUB_WORKSPACE": str(workspace),
+        "GITHUB_OUTPUT": str(tmp_path / "output"),
+        "CENTRAL_WORKFLOW_REPOSITORY": repository,
+        "CENTRAL_WORKFLOW_SHA": sha,
+        "CENTRAL_DESTINATION": destination,
+    }
+    if not output:
+        del environment["GITHUB_OUTPUT"]
     return subprocess.run(
         ["bash", str(root / ACTION / "materialize.sh")],
-        env={
-            **os.environ,
-            "GITHUB_ACTION_PATH": str(action_path or root / ACTION),
-            "GITHUB_WORKSPACE": str(workspace),
-            "GITHUB_OUTPUT": str(tmp_path / "output"),
-            "CENTRAL_WORKFLOW_REPOSITORY": repository,
-            "CENTRAL_WORKFLOW_SHA": sha,
-            "CENTRAL_DESTINATION": destination,
-        },
+        env=environment,
         capture_output=True,
         text=True,
         check=False,
@@ -83,6 +89,7 @@ def test_copies_the_loaded_repository_and_reports_its_location(tmp_path: Path) -
     copy = tmp_path / "workspace" / ".workflow-ci"
     assert files(copy) == files(root)
     assert {".hidden", ".ci/helper.sh", "top.py"} <= set(files(copy))
+    assert os.access(copy / ".ci" / "helper.sh", os.X_OK)
     assert f"source={root.resolve()}" in (tmp_path / "output").read_text().splitlines()
 
 
@@ -182,6 +189,45 @@ def test_refuses_a_destination_that_leaves_the_workspace_through_a_link(
 
     assert completed.returncode != 0
     assert list(outside.iterdir()) == []
+
+
+def test_creates_nothing_outside_before_refusing_a_linked_destination(
+    tmp_path: Path,
+) -> None:
+    root = loaded(tmp_path)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / "link").symlink_to(outside, target_is_directory=True)
+
+    completed = materialize(tmp_path, root, destination="link/sub/copy")
+
+    assert completed.returncode != 0
+    assert list(outside.iterdir()) == []
+
+
+def test_refuses_an_implementation_that_lives_in_the_workspace(
+    tmp_path: Path,
+) -> None:
+    # Same layout as a runner copy, but inside what the job checked out.
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    root = loaded(workspace)
+
+    completed = materialize(tmp_path, root, workspace=workspace)
+
+    assert completed.returncode != 0
+    assert not (workspace / ".workflow-ci").exists()
+
+
+def test_fails_when_the_loaded_location_cannot_be_reported(tmp_path: Path) -> None:
+    root = loaded(tmp_path)
+
+    completed = materialize(tmp_path, root, output=False)
+
+    assert completed.returncode != 0
+    assert not (tmp_path / "workspace" / ".workflow-ci").exists()
 
 
 def test_replaces_a_destination_that_already_exists(tmp_path: Path) -> None:
@@ -287,7 +333,10 @@ def test_trusted_copy_is_compared_again_before_it_is_used(
     assert steps[central]["with"]["path"] == copy
     assert central < names.index(verification)
     assert verify["env"]["CENTRAL_SOURCE"] == "${{ steps.central.outputs.source }}"
-    assert f'diff -r "$CENTRAL_SOURCE" {copy}' in verify["run"]
+    commands = [line.strip() for line in verify["run"].splitlines()]
+    # A whole command under `set -e`: a difference fails the step.
+    assert commands[0] == "set -euo pipefail"
+    assert f'diff -rq "$CENTRAL_SOURCE" {copy}' in commands
 
 
 def test_trusted_policy_is_loaded_before_the_protected_base_checkout() -> None:

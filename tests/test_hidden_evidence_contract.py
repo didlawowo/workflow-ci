@@ -98,7 +98,7 @@ def test_hidden_workflow_checks_out_trusted_base_and_exact_candidate() -> None:
     assert "ref: refs/pull/${{ github.event.pull_request.number }}/head" in workflow
     assert "path: candidate" in workflow
     assert workflow.count("persist-credentials: false") >= 2
-    assert 'diff -r "$CENTRAL_SOURCE" .workflow-ci-hidden' in workflow
+    assert 'diff -rq "$CENTRAL_SOURCE" .workflow-ci-hidden' in workflow
     assert (
         'test "$(git -C base rev-parse HEAD)" = "${{ github.event.pull_request.base.sha }}"'
         in workflow

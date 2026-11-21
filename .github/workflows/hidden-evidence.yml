@@ -97,7 +97,7 @@ jobs:
           CENTRAL_SOURCE: ${{ steps.central.outputs.source }}
         run: |
           set -euo pipefail
-          diff -r "$CENTRAL_SOURCE" .workflow-ci-hidden
+          diff -rq "$CENTRAL_SOURCE" .workflow-ci-hidden
           test "$(git -C base rev-parse HEAD)" = "${{ github.event.pull_request.base.sha }}"
           test "$(git -C candidate rev-parse HEAD)" = "${{ github.event.pull_request.head.sha }}"
 
