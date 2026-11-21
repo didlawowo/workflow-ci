@@ -11,8 +11,45 @@ on:
       - ".github/workflows/consumer-integration-selftest.yml"
       - "tests/fixtures/consumers/**"
       - "tests/test_issue_55_portability.py"
+      - ".github/workflows/policy-integrity.yml"
+      - ".github/workflows/hidden-evidence.yml"
+      - ".github/workflows/node-mutation-evidence.yml"
+      - ".github/workflows/mutation-issue-policy.yml"
 
 jobs:
+  # policy-integrity.yml and hidden-evidence.yml only run from consumer events:
+  # this job runs, on a real runner, the load and the late comparison they use.
+  central-implementation:
+    name: Central implementation without network access
+    permissions:
+      contents: read
+    runs-on: ${{ vars.RUNNER || format('arc-runner-{0}', github.event.repository.name) }}
+    timeout-minutes: 5
+    steps:
+      - name: Load the implementation the runner already holds
+        id: central
+        uses: $/.github/actions/central-implementation
+        with:
+          workflow-repository: ${{ job.workflow_repository }}
+          workflow-sha: ${{ job.workflow_sha }}
+          path: .workflow-ci-selftest
+      - name: Compare the copy, then detect a modified copy
+        shell: bash
+        env:
+          CENTRAL_SOURCE: ${{ steps.central.outputs.source }}
+        run: |
+          set -euo pipefail
+          test -d "$CENTRAL_SOURCE"
+          test ! -e .workflow-ci-selftest/.git
+          test -f .workflow-ci-selftest/.github/scripts/policy_integrity.py
+          test -f .workflow-ci-selftest/hidden-evaluators/run.py
+          diff -r "$CENTRAL_SOURCE" .workflow-ci-selftest
+          echo "# modified" >> .workflow-ci-selftest/.github/scripts/policy_integrity.py
+          if diff -r "$CENTRAL_SOURCE" .workflow-ci-selftest >/dev/null; then
+            echo "::error::A modified copy was not detected."
+            exit 1
+          fi
+
   python-consumer:
     permissions:
       contents: read
