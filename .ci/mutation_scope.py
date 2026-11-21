@@ -449,13 +449,18 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--base", required=True)
     parser.add_argument("--head", required=True)
     parser.add_argument("--depth", choices=("medium", "high"), default="medium")
+    parser.add_argument("--source-root", type=Path)
     return parser.parse_args()
 
 
 def main() -> int:
     args = parse_args()
     for target in mutation_targets(
-        args.repo.resolve(), args.base, args.head, depth=args.depth
+        args.repo.resolve(),
+        args.base,
+        args.head,
+        depth=args.depth,
+        source_root=args.source_root.resolve() if args.source_root else None,
     ):
         print(target)
     return 0

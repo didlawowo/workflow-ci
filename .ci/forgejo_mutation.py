@@ -20,6 +20,7 @@ import subprocess
 import sys
 import tempfile
 
+from analysis_python import analysis_python, running_python
 from mutation_environment import proxy_environment
 
 from mutation_contract import (
@@ -130,6 +131,39 @@ def fetch(directory: Path, server: str, repository: str, sha: str, token: str) -
         raise ValueError("Checkout did not materialize the requested SHA")
 
 
+def python_targets(proposed: Path, trusted: Path, base: str, head: str) -> list[str]:
+    """Changed Python functions, parsed with the Python version of the project."""
+    version = analysis_python(proposed)
+    if version == running_python():
+        from mutation_scope import mutation_targets
+
+        return list(mutation_targets(proposed, base, head, source_root=trusted))
+    # Trusted script, untrusted data: the sources are parsed, never executed.
+    completed = subprocess.run(
+        [
+            "uv",
+            "run",
+            "--no-project",
+            "--python",
+            version,
+            "python",
+            str(ROOT / ".ci" / "mutation_scope.py"),
+            "--repo",
+            str(proposed),
+            "--base",
+            base,
+            "--head",
+            head,
+            "--source-root",
+            str(trusted),
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return completed.stdout.splitlines()
+
+
 def prepare(event: dict) -> None:
     required = classify(event)
     output("required", str(required).lower())
@@ -154,13 +188,9 @@ def prepare(event: dict) -> None:
         protect_config(trusted, proposed, base, head)
         engine = select_engine(trusted)
         if engine == "python":
-            from mutation_scope import mutation_targets
-
             # The scope default depends on the directory layout: read it from
             # the trusted base, never from the proposed tree.
-            targets = list(
-                mutation_targets(proposed, base, head, source_root=trusted)
-            )
+            targets = python_targets(proposed, trusted, base, head)
         else:
             changed = git(
                 proposed, "diff", "--name-only", f"{base}...{head}", "--", "*.go"

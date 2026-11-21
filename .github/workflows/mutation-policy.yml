@@ -848,7 +848,9 @@ jobs:
           POLICY_ROOT="${WORKFLOW_CI_ROOT:-$GITHUB_WORKSPACE/.workflow-ci}"
           REPORT="$(find .mutation-evidence -type f -name '*.json' -print -quit)"
           test -n "$REPORT"
-          uv run --no-project --python 3.12 python "$POLICY_ROOT/.ci/mutation_evidence.py" \
+          # Sources are parsed with the project's Python, like the mutation environment.
+          ANALYSIS_PYTHON="$(uv run --no-project --python 3.12 python "$POLICY_ROOT/.ci/analysis_python.py" "$GITHUB_WORKSPACE/pr/${PROJECT_DIRECTORY:-.}")"
+          uv run --no-project --python "$ANALYSIS_PYTHON" python "$POLICY_ROOT/.ci/mutation_evidence.py" \
             --repo "$GITHUB_WORKSPACE/pr" --trusted "$GITHUB_WORKSPACE/.policy" \
             --base "$BASE_SHA" --head "$HEAD_SHA" \
             --directory "${PROJECT_DIRECTORY:-.}" --depth "${DEPTH:-medium}" \
