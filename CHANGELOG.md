@@ -4,6 +4,13 @@ All notable changes to this project are documented here.
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 and follows the [Conventional Commits](https://www.conventionalcommits.org) spec.
 
+## [1.24.0] - 2026-11-21
+
+### Features
+
+- *(forgejo)* Action de release réutilisable (version et numéro de build) (#290)
+
+
 ## [1.23.0] - 2026-11-18
 
 ### Features
