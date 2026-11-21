@@ -357,5 +357,50 @@ class QualityReportTests(unittest.TestCase):
         self.assertIn("https://sonarqube.dc-tech.work/dashboard?id=example", markdown)
 
 
+class DocumentationOnlyReportTests(unittest.TestCase):
+    """Documentation-only verdict passed by the trusted change scope (#284)."""
+
+    SIGNALS = {
+        "quality": {"required": True, "available": True, "status": "success"},
+        "security": {"required": True, "available": True, "status": "success"},
+        "sonar": {"required": True, "available": False, "status": "disabled"},
+    }
+
+    def test_flag_requires_the_exact_variable_and_value(self):
+        requested = quality_report.documentation_only_requested
+        self.assertIs(requested({"QUALITY_DOCUMENTATION_ONLY": "true"}), True)
+        self.assertIs(requested({"QUALITY_DOCUMENTATION_ONLY": "false"}), False)
+        self.assertIs(requested({"QUALITY_DOCUMENTATION_ONLY": "TRUE"}), False)
+        self.assertIs(requested({"quality_documentation_only": "true"}), False)
+        self.assertIs(requested({}), False)
+
+    def test_finalize_marks_documentation_only_and_passes_the_gate(self):
+        with patch.dict("os.environ", {"QUALITY_DOCUMENTATION_ONLY": "true"}):
+            finalized = quality_report.finalize_report(dict(self.SIGNALS))
+        self.assertIs(finalized["documentation_only"], True)
+        self.assertEqual(
+            finalized["gate"], {"status": "PASS", "failures": [], "missing": []}
+        )
+
+    def test_finalize_without_flag_keeps_tests_coverage_and_sonar_required(self):
+        with patch.dict("os.environ", {}, clear=True):
+            finalized = quality_report.finalize_report(dict(self.SIGNALS))
+        self.assertNotIn("documentation_only", finalized)
+        self.assertEqual(finalized["gate"]["status"], "INCOMPLETE")
+        self.assertEqual(finalized["gate"]["missing"], ["coverage", "sonar", "tests"])
+
+    def test_documentation_only_still_requires_quality_and_security(self):
+        report = {
+            **self.SIGNALS,
+            "quality": {"required": True, "available": True, "status": "failure"},
+            "security": {"required": True, "available": False},
+        }
+        with patch.dict("os.environ", {"QUALITY_DOCUMENTATION_ONLY": "true"}):
+            gate = quality_report.finalize_report(report)["gate"]
+        self.assertEqual(gate["status"], "FAIL")
+        self.assertEqual(gate["failures"], ["quality"])
+        self.assertEqual(gate["missing"], ["security"])
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -13,6 +13,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import xml.etree.ElementTree as ET
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
@@ -657,8 +658,15 @@ def aggregate_gate(report: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def documentation_only_requested(environ: Mapping[str, str]) -> bool:
+    """Trusted change-scope verdict passed by the quality-report action."""
+    return environ.get("QUALITY_DOCUMENTATION_ONLY") == "true"
+
+
 def finalize_report(report: dict[str, Any]) -> dict[str, Any]:
     finalized = dict(report)
+    if documentation_only_requested(os.environ):
+        finalized["documentation_only"] = True
     finalized["gate"] = aggregate_gate(finalized)
     return finalized
 

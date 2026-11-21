@@ -135,6 +135,7 @@ runs:
         GITHUB_TOKEN: ${{ inputs.github-token }}
         QUALITY_PR_NUMBER: ${{ github.event.pull_request.number }}
         QUALITY_HEAD_REF: ${{ github.event.pull_request.head.ref }}
+        QUALITY_DOCUMENTATION_ONLY: ${{ inputs.documentation-only }}
       run: |
         set -euo pipefail
         SCRIPT="$GITHUB_ACTION_PATH/../../../quality_report.py"
@@ -185,9 +186,6 @@ runs:
         fi
         if [[ -n "${{ inputs.test-status }}" ]]; then
           ARGS+=(--test-status "${{ inputs.test-status }}")
-        fi
-        if [[ "${{ inputs.documentation-only }}" == "true" ]]; then
-          ARGS+=(--documentation-only true)
         fi
         ARGS+=(--sonar-required "${{ inputs.sonar-required }}")
         if [[ -n "${{ inputs.sonar-status }}" ]]; then

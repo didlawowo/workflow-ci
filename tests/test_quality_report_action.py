@@ -139,3 +139,16 @@ def test_quality_report_uses_uv_without_managed_dependency_cache():
     )
     assert installer["with"]["enable-cache"] is False
     assert installer["with"]["prune-cache"] is False
+
+
+def test_documentation_scope_reaches_the_reporter_through_its_environment():
+    action = yaml.safe_load(
+        (ROOT / ".github/actions/quality-report/action.yml").read_text()
+    )
+    step = next(
+        s for s in action["runs"]["steps"] if s["name"] == "Build quality evidence"
+    )
+    assert step["env"]["QUALITY_DOCUMENTATION_ONLY"] == (
+        "${{ inputs.documentation-only }}"
+    )
+    assert action["inputs"]["documentation-only"]["default"] == "false"
