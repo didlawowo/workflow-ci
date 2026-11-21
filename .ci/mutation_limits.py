@@ -119,5 +119,10 @@ if __name__ == "__main__":
         environment = bounded_environment(dict(os.environ))
     except RuntimeError as error:
         sys.exit(f"::error::{error}")
+    print(
+        f"Mutation bounds: {bounded[3]} concurrent mutants, "
+        f"{MEMORY_LIMIT_BYTES // 1024**2} MiB of data per process",
+        file=sys.stderr,
+    )
     limit_memory()
     os.execvpe(bounded[0], bounded, environment)
