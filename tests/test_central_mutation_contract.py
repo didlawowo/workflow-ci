@@ -407,7 +407,12 @@ def test_standalone_pytest_ini_is_staged_so_mutmut_hits_instrumented_sources(
 ):
     repo = tmp_path / "consumer"
     (repo / ".ci").mkdir(parents=True)
-    for name in ("mutation.sh", "mutation_scope.py", "mutation_contract.py"):
+    for name in (
+        "mutation.sh",
+        "mutation_scope.py",
+        "mutation_contract.py",
+        "mutation_limits.py",
+    ):
         shutil.copy2(ROOT / ".ci" / name, repo / ".ci" / name)
     subprocess.run(["git", "init", "-q", repo], check=True)
     subprocess.run(

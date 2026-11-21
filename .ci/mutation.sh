@@ -170,10 +170,11 @@ for pytest_config in pytest.ini .pytest.ini tox.ini setup.cfg pyproject.toml con
     cp "$pytest_config" "mutants/$pytest_config"
   fi
 done
+# Hard memory limit per mutant process and bounded children: see mutation_limits.py.
 if [[ "${#MUTATION_TARGETS[@]}" -gt 0 ]]; then
-  mutmut run "${MUTATION_TARGETS[@]}"
+  "$PYTHON" "$SCRIPT_DIR/mutation_limits.py" mutmut run "${MUTATION_TARGETS[@]}"
 else
-  mutmut run
+  "$PYTHON" "$SCRIPT_DIR/mutation_limits.py" mutmut run
 fi
 
 mutmut export-cicd-stats

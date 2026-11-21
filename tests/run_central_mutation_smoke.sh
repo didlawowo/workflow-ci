@@ -25,14 +25,21 @@ pytest_add_cli_args_test_selection = ["tests/"]
 TOML
 printf 'def add(a, b):\n    return a + b\n' > src/calc.py
 cat > tests/test_calc.py <<'PY'
+import resource
 import sys
 from pathlib import Path
+import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from calc import add
 from packaging.version import Version
 
 
 def test_add():
+    # Central resource bounds: hard data limit, refused allocation above it.
+    limit = 4 * 1024**3
+    assert resource.getrlimit(resource.RLIMIT_DATA) == (limit, limit)
+    with pytest.raises(MemoryError):
+        bytearray(limit + limit // 2)
     assert Version("1.0") < Version("2.0")
     assert add(1, 1) == 3
     assert add(0, 0) == 1

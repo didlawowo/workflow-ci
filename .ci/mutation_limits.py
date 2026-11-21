@@ -1,0 +1,88 @@
+"""Resource bounds of a central Mutmut run.
+
+Mutmut only bounds a mutant by CPU time. A mutant that allocates in an endless
+loop can exhaust the memory of the node within seconds, and Mutmut starts one
+child per core of the node, whatever CPU budget the job really has.
+
+The central engine therefore starts Mutmut under a hard data limit, inherited
+by every mutant process, and with a number of children derived from the CPU
+budget of the job. Neither bound is configurable: unprivileged code cannot
+raise a hard limit, and there is deliberately no option to lift them.
+"""
+
+from __future__ import annotations
+
+import math
+import os
+from pathlib import Path
+import resource
+import sys
+
+# Private writable memory (heap, anonymous mappings, thread stacks) of ONE
+# process. Reserved address space and file mappings of large libraries do not
+# count, unlike with an address-space limit.
+MEMORY_LIMIT_BYTES = 4 * 1024**3
+MAX_CHILDREN = 4
+CGROUP_ROOT = Path("/sys/fs/cgroup")
+
+
+def _cgroup_cpu_quota(root: Path) -> float | None:
+    """CPU quota of the job in cores, None when the cgroup sets none."""
+    try:
+        quota, period = (root / "cpu.max").read_text().split()  # cgroup v2
+    except (OSError, ValueError):
+        try:
+            quota = (root / "cpu" / "cpu.cfs_quota_us").read_text().strip()
+            period = (root / "cpu" / "cpu.cfs_period_us").read_text().strip()
+        except OSError:
+            return None
+    try:
+        quota_us, period_us = int(quota), int(period)
+    except ValueError:
+        return None  # "max": no quota
+    if quota_us <= 0 or period_us <= 0:
+        return None
+    return quota_us / period_us
+
+
+def max_children(root: Path = CGROUP_ROOT, usable_cpus: int | None = None) -> int:
+    """Concurrent mutants: CPU budget of the job, never above MAX_CHILDREN."""
+    if usable_cpus is None:
+        if hasattr(os, "sched_getaffinity"):
+            usable_cpus = len(os.sched_getaffinity(0))
+        else:
+            usable_cpus = os.cpu_count() or 1
+    budget = usable_cpus
+    quota = _cgroup_cpu_quota(root)
+    if quota is not None:
+        budget = min(budget, math.ceil(quota))
+    return max(1, min(MAX_CHILDREN, budget))
+
+
+def limit_memory(limit: int = MEMORY_LIMIT_BYTES) -> None:
+    """Cap the data size of this process and of every process it starts."""
+    if not sys.platform.startswith("linux"):
+        # Only Linux enforces a data limit on anonymous mappings; CI runners
+        # are Linux. A local run elsewhere keeps its previous behaviour.
+        print("WARN: no per-mutant memory limit outside Linux", file=sys.stderr)
+        return
+    hard = resource.getrlimit(resource.RLIMIT_DATA)[1]
+    if hard != resource.RLIM_INFINITY:
+        limit = min(limit, hard)  # never loosen a stricter limit of the runner
+    resource.setrlimit(resource.RLIMIT_DATA, (limit, limit))
+
+
+def bounded_command(command: list[str]) -> list[str]:
+    """Insert the children bound into a `mutmut run [mutants...]` command."""
+    if command[:2] != ["mutmut", "run"] or "--max-children" in command:
+        raise ValueError("Expected a plain `mutmut run [mutants...]` command")
+    return [*command[:2], "--max-children", str(max_children()), *command[2:]]
+
+
+if __name__ == "__main__":
+    try:
+        bounded = bounded_command(sys.argv[1:])
+    except ValueError as error:
+        sys.exit(str(error))
+    limit_memory()
+    os.execvp(bounded[0], bounded)
