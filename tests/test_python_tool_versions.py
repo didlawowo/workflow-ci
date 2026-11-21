@@ -6,6 +6,7 @@ import re
 import subprocess
 
 import pytest
+import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
 SELECTOR = ROOT / ".github/actions/setup-python-env/sync-python-args.sh"
@@ -15,20 +16,47 @@ INCOMPATIBLE = (
 )
 
 
-def test_every_uv_installation_is_pinned_to_one_exact_version():
-    versions = {}
-    for path in sorted(ROOT.glob(".github/**/*.yml")) + sorted(
-        ROOT.glob(".forgejo/**/*.yml")
-    ):
-        steps = re.split(r"\n\s*- ", path.read_text())
-        for step in steps:
-            if "astral-sh/setup-uv@" not in step:
-                continue
-            match = re.search(r'^\s+version: "([^"]+)"$', step, re.M)
-            versions[f"{path.relative_to(ROOT)}"] = match.group(1) if match else None
-    assert len(versions) >= 12
-    assert set(versions.values()) == {next(iter(versions.values()))}, versions
-    assert re.fullmatch(r"\d+\.\d+\.\d+", next(iter(versions.values()))), versions
+# setup-uv runs there at the root of the consumer checkout: the uv version the
+# project requires (`required-version`) keeps precedence over a central pin.
+CONSUMER_ROOT = {
+    ".github/actions/precommit-contract/action.yml",
+    ".forgejo/actions/mutation-policy/action.yml",
+    ".forgejo/actions/release/action.yml",
+}
+
+
+def uv_installations():
+    """(file, version or None) for every setup-uv step of actions and workflows."""
+    found = []
+
+    def visit(node, path):
+        if isinstance(node, dict):
+            if "astral-sh/setup-uv@" in str(node.get("uses", "")):
+                found.append((path, (node.get("with") or {}).get("version")))
+            for value in node.values():
+                visit(value, path)
+        elif isinstance(node, list):
+            for value in node:
+                visit(value, path)
+
+    for root in (".github", ".forgejo"):
+        for path in sorted((ROOT / root).rglob("*.y*ml")):
+            visit(yaml.safe_load(path.read_text()), str(path.relative_to(ROOT)))
+    return found
+
+
+def test_every_central_uv_installation_is_pinned_to_one_exact_version():
+    central = [item for item in uv_installations() if item[0] not in CONSUMER_ROOT]
+    assert len(central) == 16, central
+    versions = {version for _, version in central}
+    assert len(versions) == 1, central
+    assert re.fullmatch(r"\d+\.\d+\.\d+", versions.pop() or ""), central
+
+
+def test_consumer_root_installations_keep_the_project_requirement():
+    consumer = [item for item in uv_installations() if item[0] in CONSUMER_ROOT]
+    assert sorted(path for path, _ in consumer) == sorted(CONSUMER_ROOT)
+    assert all(version is None for _, version in consumer), consumer
 
 
 def select(tmp_path, pin_status, find_stderr):
@@ -84,8 +112,13 @@ def test_selector_requires_a_version():
     assert result.stdout == ""
 
 
-@pytest.mark.parametrize("sync", ['uv sync "${PYTHON_ARGS[@]}"\n', '"${SYNC_ARGS[@]}"'])
-def test_both_sync_commands_receive_the_selection(sync):
-    action = (ROOT / ".github/actions/setup-python-env/action.yml").read_text()
-    assert sync in action
-    assert len(re.findall(r"uv sync(?! \"\$\{PYTHON_ARGS\[@\]\}\")", action)) == 0
+@pytest.mark.parametrize("action", ["setup-python-env", "run-python-tests"])
+def test_every_sync_of_the_python_actions_receives_the_selection(action):
+    content = (ROOT / ".github/actions" / action / "action.yml").read_text()
+    syncs = re.findall(r"^\s+uv sync.*$", content, re.M)
+    assert len(syncs) == 2, syncs
+    assert all('"${PYTHON_ARGS[@]}"' in sync for sync in syncs), syncs
+    assert "setup-python-env/sync-python-args.sh" in content.replace(
+        "$GITHUB_ACTION_PATH/sync-python-args.sh",
+        "setup-python-env/sync-python-args.sh",
+    )
