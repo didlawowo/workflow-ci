@@ -5,6 +5,9 @@ on:
     paths:
       - ".github/actions/**"
       - ".github/workflows/quality-evidence.yml"
+      - ".github/workflows/mutation-policy.yml"
+      - ".github/workflows/mutation-campaign.yml"
+      - ".ci/**"
       - ".github/workflows/consumer-integration-selftest.yml"
       - "tests/fixtures/consumers/**"
       - "tests/test_issue_55_portability.py"

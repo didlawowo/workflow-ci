@@ -34,16 +34,15 @@ def test_supported_pin_is_followed(tmp_path, version):
     "content",
     ["3.11\n", "3.15\n", "3.14.2\n", "", "\n3.14\n", " 3.14\n", "3.14\r\n", "$(id)\n"],
 )
-def test_any_other_pin_is_refused(tmp_path, content):
-    with pytest.raises(ValueError, match="Unsupported consumer .python-version"):
-        resolver.analysis_python(project(tmp_path, content))
+def test_any_other_pin_keeps_the_default(tmp_path, content):
+    """Other languages and other pin forms must not fail the trusted analysis."""
+    assert resolver.analysis_python(project(tmp_path, content)) == "3.12"
 
 
-def test_symlinked_pin_is_refused(tmp_path):
+def test_symlinked_pin_is_ignored(tmp_path):
     (tmp_path / "elsewhere").write_text("3.14\n")
     (tmp_path / ".python-version").symlink_to(tmp_path / "elsewhere")
-    with pytest.raises(ValueError, match="regular file"):
-        resolver.analysis_python(tmp_path)
+    assert resolver.analysis_python(tmp_path) == "3.12"
 
 
 def command_line(*arguments):
@@ -60,9 +59,8 @@ def test_command_line_prints_the_version_or_fails(tmp_path):
     good = command_line(tmp_path, "app")
     assert (good.returncode, good.stdout) == (0, "3.14\n")
     (tmp_path / "app" / ".python-version").write_text("2.7\n")
-    bad = command_line(tmp_path, "app")
-    assert bad.returncode != 0
-    assert bad.stdout == ""
+    other = command_line(tmp_path, "app")
+    assert (other.returncode, other.stdout) == (0, "3.12\n")
 
 
 @pytest.mark.parametrize("directory", ["..", "missing", "/etc", "link"])
