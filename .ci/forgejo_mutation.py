@@ -156,7 +156,11 @@ def prepare(event: dict) -> None:
         if engine == "python":
             from mutation_scope import mutation_targets
 
-            targets = list(mutation_targets(proposed, base, head))
+            # The scope default depends on the directory layout: read it from
+            # the trusted base, never from the proposed tree.
+            targets = list(
+                mutation_targets(proposed, base, head, source_root=trusted)
+            )
         else:
             changed = git(
                 proposed, "diff", "--name-only", f"{base}...{head}", "--", "*.go"
