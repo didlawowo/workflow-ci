@@ -4,6 +4,19 @@ All notable changes to this project are documented here.
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 and follows the [Conventional Commits](https://www.conventionalcommits.org) spec.
 
+## [1.24.3] - 2026-11-21
+
+### Bug Fixes
+
+- *(mutation)* Forgejo, bac à sable sans cache et pagination des fichiers de PR (#294)
+
+- *(mutation)* Plafond mémoire par mutant et nombre d'enfants borné (moteur Python) (#295)
+
+- *(mutation)* Analyser les sources avec la version Python du projet (#297)
+
+- *(python)* Uv épinglé partout et uv sync fidèle à la version Python demandée (#296)
+
+
 ## [1.24.2] - 2026-11-21
 
 ### Bug Fixes
