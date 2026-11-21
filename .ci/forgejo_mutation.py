@@ -17,6 +17,7 @@ from pathlib import Path
 import re
 import shutil
 import signal
+import stat
 import subprocess
 import sys
 import tempfile
@@ -131,36 +132,51 @@ def fetch(directory: Path, server: str, repository: str, sha: str, token: str) -
         raise ValueError("Checkout did not materialize the requested SHA")
 
 
+def permissions_for(status: os.stat_result, uid: int) -> int:
+    """rwx bits that apply to a process running as uid:uid without extra groups."""
+    if status.st_uid == uid:
+        return status.st_mode >> 6 & 7
+    if status.st_gid == uid:
+        return status.st_mode >> 3 & 7
+    return status.st_mode & 7
+
+
 def reachable_by(directory: Path, uid: int) -> bool:
-    """Whether a process running as uid:uid without extra groups can traverse to directory."""
-    for ancestor in (directory, *directory.parents):
-        status = ancestor.stat()
-        if status.st_uid == uid:
-            search = 0o100
-        elif status.st_gid == uid:
-            search = 0o010
-        else:
-            search = 0o001
-        if not status.st_mode & search:
-            return False
-    return True
+    """Whether uid can traverse every ancestor down to directory."""
+    return all(
+        permissions_for(ancestor.stat(), uid) & 1
+        for ancestor in (directory, *directory.parents)
+    )
+
+
+def replaceable_by(directory: Path, uid: int) -> bool:
+    """Whether uid could rename or replace entries that root creates in directory."""
+    status = directory.stat()
+    if status.st_uid == uid:
+        return True
+    return bool(permissions_for(status, uid) & 2) and not status.st_mode & stat.S_ISVTX
 
 
 def sandbox_parent(environ: Mapping[str, str], uid: int = UID) -> Path:
     """Disposable scratch directory that will hold the sandbox root.
 
     Job scratch first, system temporary directory otherwise. Never a dependency
-    cache: the whole sandbox is removed after the run.
+    cache: the whole sandbox is removed after the run. The directory holds the
+    engine and the test environment, so its filesystem must allow execution.
     """
     for candidate in (environ.get("RUNNER_TEMP"), tempfile.gettempdir()):
         if not candidate or not os.path.isabs(candidate):
             continue
         directory = Path(candidate).resolve()
-        if directory.is_dir() and reachable_by(directory, uid):
+        if (
+            directory.is_dir()
+            and reachable_by(directory, uid)
+            and not replaceable_by(directory, uid)
+        ):
             return directory
     raise RuntimeError(
-        "Mutation requires a scratch directory reachable by the sandbox UID "
-        "(RUNNER_TEMP or the system temporary directory)"
+        "Mutation requires a scratch directory that the sandbox UID can reach "
+        "but not rearrange (RUNNER_TEMP or the system temporary directory)"
     )
 
 

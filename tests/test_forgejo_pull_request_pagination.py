@@ -81,3 +81,21 @@ def test_github_short_page_still_ends_the_listing(listing):
     seen = listing("github", [30])
     assert mutation_policy._pull_request_file_entries(event(45)) is None
     assert seen == ["pulls/7/files?per_page=100"]
+
+
+def test_forgejo_without_counter_reads_until_an_empty_page(listing):
+    seen = listing("forgejo", [30, 30, 0])
+    assert len(mutation_policy._pull_request_file_entries(event(None))) == 60
+    assert seen[-1] == "pulls/7/files?limit=100&page=3"
+
+
+def test_forgejo_zero_counter_contradicted_by_the_listing_is_ignored(listing):
+    seen = listing("forgejo", [30, 5, 0])
+    assert len(mutation_policy._pull_request_file_entries(event(0))) == 35
+    assert len(seen) == 3
+
+
+def test_listing_beyond_the_page_ceiling_fails_closed(listing):
+    seen = listing("github", [100] * 101)
+    assert mutation_policy._pull_request_file_entries(event(None)) is None
+    assert len(seen) == 100
