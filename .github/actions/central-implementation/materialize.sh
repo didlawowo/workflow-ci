@@ -55,7 +55,7 @@ if [[ "$loaded_reference" != "$sha" ]] ||
 fi
 
 case "$destination" in
-  ""|/*|.|..|./*|../*|*/.|*/..|*/./*|*/../*|*//*)
+  ""|/*|.|..|./*|../*|*/|*/.|*/..|*/./*|*/../*|*//*)
     fail "the destination must be a plain path relative to the workspace."
     ;;
 esac

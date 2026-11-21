@@ -175,6 +175,23 @@ def test_refuses_a_destination_outside_a_plain_relative_path(
     assert list((tmp_path / "workspace").iterdir()) == []
 
 
+def test_never_follows_a_linked_destination_written_with_a_trailing_slash(
+    tmp_path: Path,
+) -> None:
+    root = loaded(tmp_path)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "kept.txt").write_text("not ours\n")
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / "link").symlink_to(outside, target_is_directory=True)
+
+    completed = materialize(tmp_path, root, destination="link/")
+
+    assert completed.returncode != 0
+    assert [path.name for path in outside.iterdir()] == ["kept.txt"]
+
+
 def test_refuses_a_destination_that_leaves_the_workspace_through_a_link(
     tmp_path: Path,
 ) -> None:
