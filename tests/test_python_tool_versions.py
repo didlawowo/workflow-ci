@@ -16,15 +16,6 @@ INCOMPATIBLE = (
 )
 
 
-# setup-uv runs there at the root of the consumer checkout: the uv version the
-# project requires (`required-version`) keeps precedence over a central pin.
-CONSUMER_ROOT = {
-    ".github/actions/precommit-contract/action.yml",
-    ".forgejo/actions/mutation-policy/action.yml",
-    ".forgejo/actions/release/action.yml",
-}
-
-
 def uv_installations():
     """(file, version or None) for every setup-uv step of actions and workflows."""
     found = []
@@ -45,18 +36,23 @@ def uv_installations():
     return found
 
 
-def test_every_central_uv_installation_is_pinned_to_one_exact_version():
-    central = [item for item in uv_installations() if item[0] not in CONSUMER_ROOT]
-    assert len(central) == 16, central
-    versions = {version for _, version in central}
-    assert len(versions) == 1, central
-    assert re.fullmatch(r"\d+\.\d+\.\d+", versions.pop() or ""), central
+def test_no_uv_installation_follows_the_latest_release_explicitly():
+    """An explicit version is the exact one of the runner images, never `latest`.
 
-
-def test_consumer_root_installations_keep_the_project_requirement():
-    consumer = [item for item in uv_installations() if item[0] in CONSUMER_ROOT]
-    assert sorted(path for path, _ in consumer) == sorted(CONSUMER_ROOT)
-    assert all(version is None for _, version in consumer), consumer
+    Steps without a version keep setup-uv's own rule (the version required by
+    the project, else the newest): pinning those is a separate decision.
+    """
+    explicit = [item for item in uv_installations() if item[1] is not None]
+    assert len(explicit) == 6, explicit
+    versions = {version for _, version in explicit}
+    assert len(versions) == 1, explicit
+    assert re.fullmatch(r"\d+\.\d+\.\d+", versions.pop()), explicit
+    assert {path for path, _ in explicit} == {
+        ".github/actions/quality-report/action.yml",
+        ".github/actions/run-python-tests/action.yml",
+        ".github/actions/setup-python-env/action.yml",
+        ".github/workflows/bench-uv-cache.yml",
+    }
 
 
 def select(tmp_path, pin_status, find_stderr):
