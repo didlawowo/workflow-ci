@@ -171,7 +171,7 @@ def test_mutmut_environment_loads_the_memory_verdict_plugin(monkeypatch):
     assert environment["PYTEST_ADDOPTS"] == "-q -p mutation_memory_guard"
     assert environment["PYTHONPATH"] == f"{limits.PLUGINS}{os.pathsep}/consumer"
     assert (limits.PLUGINS / "mutation_memory_guard.py").is_file()
-    assert environment["OMP_NUM_THREADS"] == environment["OPENBLAS_NUM_THREADS"] == "2"
+    assert environment["OMP_NUM_THREADS"] == environment["OPENBLAS_NUM_THREADS"] == "1"
     kept = limits.bounded_environment({"OMP_NUM_THREADS": "8"})
     assert kept["OMP_NUM_THREADS"] == "8"
     assert kept["PYTEST_ADDOPTS"] == "-p mutation_memory_guard"
@@ -233,3 +233,28 @@ def test_memory_error_is_never_reported_as_a_killed_mutant(
         env=limits.bounded_environment({"PATH": os.environ["PATH"]}),
     )
     assert result.returncode == expected, result.stdout + result.stderr
+
+
+def run_verdict(tmp_path, *options):
+    return subprocess.run(
+        [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider", *options],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        timeout=120,
+        env=limits.bounded_environment({"PATH": os.environ["PATH"]}),
+    )
+
+
+def test_memory_error_while_importing_a_test_module_is_not_a_kill(tmp_path):
+    (tmp_path / "test_import.py").write_text("raise MemoryError('limit reached')\n")
+    (tmp_path / "test_other.py").write_text("def test_success():\n    assert True\n")
+    result = run_verdict(tmp_path, "--continue-on-collection-errors")
+    assert result.returncode not in (0, 1), result.stdout + result.stderr
+
+
+def test_memory_error_in_a_distributed_run_reaches_the_main_session(tmp_path):
+    pytest.importorskip("xdist")
+    (tmp_path / "test_verdict.py").write_text(VERDICT_TESTS)
+    result = run_verdict(tmp_path, "-n", "2", "-k", "test_out_of_memory")
+    assert result.returncode == 35, result.stdout + result.stderr

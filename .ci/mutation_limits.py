@@ -99,7 +99,7 @@ def bounded_environment(environ: dict[str, str]) -> dict[str, str]:
         if part
     )
     for name in THREAD_VARIABLES:
-        result.setdefault(name, str(max_children()))
+        result.setdefault(name, "1")  # each mutant already is a process
     return result
 
 
