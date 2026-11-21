@@ -37,6 +37,43 @@ on:
   workflow_call:
 
 jobs:
+  # release.yml only runs for real on main. This job loads its bump action the
+  # same way, on a pull request, and checks what the action leaves behind.
+  release-bump:
+    name: Release bump action loaded by the runner
+    if: github.event_name == 'pull_request'
+    runs-on: ${{ vars.RUNNER || format('arc-runner-{0}', github.event.repository.name) }}
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Compute bump + write CHANGELOG
+        id: bump
+        uses: $/.github/actions/git-cliff-bump
+      - name: Only the changelog changes in the caller checkout
+        shell: bash
+        env:
+          RELEASED: ${{ steps.bump.outputs.released }}
+          VERSION: ${{ steps.bump.outputs.version }}
+        run: |
+          set -euo pipefail
+          echo "released=$RELEASED version=$VERSION"
+          case "$RELEASED" in
+            true) [[ "$VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] ;;
+            false) [[ -z "$VERSION" ]] ;;
+            *) echo "::error::Unexpected released output: '$RELEASED'"; exit 1 ;;
+          esac
+          changed="$(git status --porcelain --untracked-files=all)"
+          echo "$changed"
+          if [[ -n "$(printf '%s\n' "$changed" | grep -v -x ' M CHANGELOG.md' || true)" ]]; then
+            echo "::error::The release action left more than CHANGELOG.md behind."
+            exit 1
+          fi
+
   test:
     runs-on: ${{ vars.RUNNER || format('arc-runner-{0}', github.event.repository.name) }}
     permissions:

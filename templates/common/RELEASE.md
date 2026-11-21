@@ -137,9 +137,11 @@ jobs:
   release:
     uses: didlawowo/workflow-ci/.github/workflows/release.yml@v1.8.0
     with:
-      workflow-ci-ref: v1.6.0
       runs-on: ${{ vars.RUNNER || 'arc-runner-<repo>' }}
 ```
+
+L'entrée `workflow-ci-ref` est ignorée : l'action de release et son `cliff.toml` par défaut
+viennent toujours de la version épinglée dans `uses:`.
 
 Le runner doit fournir `git`, `python3` et `gh`.
 

@@ -626,6 +626,12 @@ def test_release_workflow_never_commits_workflow_ci_checkout():
     assert "uses: $/.github/actions/git-cliff-bump" in content
     assert ".workflow-ci/" not in content
     assert "repository: didlawowo/workflow-ci" not in content
+    # The action reads these through paths relative to its own directory.
+    action = root / ".github" / "actions" / "git-cliff-bump"
+    assert (action / "../../../templates/common/cliff.toml").is_file()
+    assert (action / "../../scripts/release_commit_gate.py").is_file()
+    selftest = (root / ".github/workflows/quality-report-selftest.yml").read_text()
+    assert "uses: $/.github/actions/git-cliff-bump" in selftest
 
 
 def test_mutation_jobs_use_proxy_first_setup_without_nfs_cache_preflight():
