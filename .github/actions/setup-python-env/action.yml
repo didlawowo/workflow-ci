@@ -38,7 +38,7 @@ runs:
       if: steps.uv-runtime.outputs.preinstalled != 'true'
       uses: astral-sh/setup-uv@v10.1.0
       with:
-        version: "latest"
+        version: "0.13.7"
         enable-cache: false
         prune-cache: false
 
@@ -52,10 +52,15 @@ runs:
     - name: Install dependencies
       shell: bash
       working-directory: ${{ inputs.working-directory }}
+      env:
+        REQUESTED_PYTHON: ${{ inputs.python-version }}
       run: |
         set -euo pipefail
+        SELECTION="$("$GITHUB_ACTION_PATH/sync-python-args.sh" "$REQUESTED_PYTHON")"
+        PYTHON_ARGS=()
+        [ -z "$SELECTION" ] || mapfile -t PYTHON_ARGS <<<"$SELECTION"
         if [ "${{ inputs.install-dev }}" != "true" ]; then
-          uv sync
+          uv sync "${PYTHON_ARGS[@]}"
           exit 0
         fi
 
@@ -81,4 +86,4 @@ runs:
         case " ${DEV_MODES} " in
           *" group "*) SYNC_ARGS+=(--group dev) ;;
         esac
-        uv sync "${SYNC_ARGS[@]}"
+        uv sync "${PYTHON_ARGS[@]}" "${SYNC_ARGS[@]}"

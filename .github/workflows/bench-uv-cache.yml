@@ -53,7 +53,7 @@ jobs:
       - name: Setup uv (default — cache enabled)
         uses: astral-sh/setup-uv@v10.1.0
         with:
-          version: latest
+          version: "0.13.7"
 
       - name: GHA cache (cold key — forces miss)
         uses: actions/cache@v4
@@ -118,7 +118,7 @@ jobs:
       - name: Setup uv (default)
         uses: astral-sh/setup-uv@v10.1.0
         with:
-          version: latest
+          version: "0.13.7"
 
       - name: GHA cache (skipped when UV_CACHE_DIR set)
         if: env.UV_CACHE_DIR == ''
@@ -183,7 +183,7 @@ jobs:
       - name: Setup uv (cache disabled, explicit path)
         uses: astral-sh/setup-uv@v10.1.0
         with:
-          version: latest
+          version: "0.13.7"
           enable-cache: false
           cache-local-path: /home/runner/.cache/uv/bench-C
 

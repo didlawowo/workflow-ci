@@ -94,16 +94,21 @@ runs:
       if: inputs.use-docker-compose != 'true' && steps.uv-runtime.outputs.preinstalled != 'true'
       uses: astral-sh/setup-uv@v10.1.0
       with:
-        version: "latest"
+        version: "0.13.7"
         enable-cache: false
 
     - name: Setup Python environment
       if: inputs.use-docker-compose != 'true'
       shell: bash
       working-directory: ${{ inputs.working-directory }}
+      env:
+        REQUESTED_PYTHON: ${{ inputs.python-version }}
       run: |
         set -euo pipefail
         uv python install "${{ inputs.python-version }}"
+        SELECTION="$("$GITHUB_ACTION_PATH/../setup-python-env/sync-python-args.sh" "$REQUESTED_PYTHON")"
+        PYTHON_ARGS=()
+        [ -z "$SELECTION" ] || mapfile -t PYTHON_ARGS <<<"$SELECTION"
 
         DEV_MODES="$(
           uv run --no-project --python "${{ inputs.python-version }}" python - <<'PY'
@@ -128,9 +133,9 @@ runs:
           *" group "*) SYNC_ARGS+=(--group dev) ;;
         esac
         if [[ -f uv.lock ]]; then
-          uv sync --frozen "${SYNC_ARGS[@]}"
+          uv sync --frozen "${PYTHON_ARGS[@]}" "${SYNC_ARGS[@]}"
         else
-          uv sync "${SYNC_ARGS[@]}"
+          uv sync "${PYTHON_ARGS[@]}" "${SYNC_ARGS[@]}"
         fi
 
     # --- Docker Compose mode ---
