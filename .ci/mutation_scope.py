@@ -15,16 +15,21 @@ from pathlib import Path
 
 
 def mutation_source_paths(root: Path) -> tuple[str, ...]:
-    """Read trusted mutmut source paths from pyproject.toml or setup.cfg."""
+    """Read mutmut source paths from pyproject.toml or setup.cfg under ``root``.
+
+    ``root`` must be the trusted base checkout whenever the result gates a
+    pull request: with no configuration the answer depends on which directories
+    exist, and a proposed tree could add one to shrink its own scope.
+    """
     pyproject = root / "pyproject.toml"
     if pyproject.is_file():
         import tomllib
 
         data = tomllib.loads(pyproject.read_text(encoding="utf-8"))
         configured = data.get("tool", {}).get("mutmut", {}).get("source_paths", ())
-        if isinstance(configured, str):
+        if isinstance(configured, str) and configured:
             return (configured,)
-        if isinstance(configured, list):
+        if isinstance(configured, list) and configured:
             return tuple(str(value) for value in configured)
 
     setup_cfg = root / "setup.cfg"
@@ -33,16 +38,19 @@ def mutation_source_paths(root: Path) -> tuple[str, ...]:
         parser.read(setup_cfg, encoding="utf-8")
         if parser.has_option("mutmut", "source_paths"):
             raw = parser.get("mutmut", "source_paths")
-            return tuple(
+            paths = tuple(
                 item.strip() for item in re.split(r"[\n,]", raw) if item.strip()
             )
+            if paths:
+                return paths
 
-    # Nothing configured: follow the same convention as mutmut and as the
-    # campaign inventory, which only generate mutants under ``src/`` when that
-    # directory exists. Requiring evidence for Python outside it would demand
-    # mutants that no campaign can ever produce.
-    if (root / "src").is_dir():
-        return ("src",)
+    # Nothing configured: mutmut then mutates ``lib/`` if it exists, else
+    # ``src/``. Requiring evidence for Python outside that directory would
+    # demand mutants that no campaign can produce. Without either directory the
+    # scope stays the whole project, which is the strictest reading.
+    for candidate in ("lib", "src"):
+        if (root / candidate).is_dir():
+            return (candidate,)
     return ()
 
 
@@ -55,8 +63,8 @@ def _is_in_source_path(relative: str, source_paths: tuple[str, ...]) -> bool:
     if "tests" in parts or name.startswith("test_") or name.endswith("_test.py"):
         return False
     if not source_paths:
-        # No configuration and no ``src/`` directory: mutmut and the inventory
-        # fall back to the whole project, so does the scope.
+        # No configuration and neither ``lib/`` nor ``src/``: keep the whole
+        # project in scope.
         return True
 
     for raw in source_paths:

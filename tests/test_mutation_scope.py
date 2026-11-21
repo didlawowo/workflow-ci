@@ -239,21 +239,35 @@ def test_bootstrap_scope_ignores_tests_without_mutmut_config(tmp_path: Path):
     )
 
 
-def test_unconfigured_scope_follows_the_inventory_default(tmp_path: Path):
+def _unconfigured(tmp_path: Path, *files: str) -> tuple[Path, str, str]:
     repo = _init_repo(tmp_path)
     (repo / "pyproject.toml").write_text('[project]\nname = "x"\n', encoding="utf-8")
-    (repo / "scripts").mkdir()
-    for relative in ("src/service.py", "scripts/tool.py"):
-        (repo / relative).write_text("def run():\n    return 1\n", encoding="utf-8")
-    base = _commit(repo, "initial")
-    for relative in ("src/service.py", "scripts/tool.py"):
-        (repo / relative).write_text("def run():\n    return 2\n", encoding="utf-8")
-    head = _commit(repo, "change")
+    for value in (1, 2):
+        for relative in files:
+            (repo / relative).parent.mkdir(exist_ok=True)
+            (repo / relative).write_text(f"def run():\n    return {value}\n")
+        commit = _commit(repo, f"v{value}")
+        base = base if value == 2 else commit
+    return repo, base, commit
+
+
+def test_unconfigured_scope_follows_mutmut_default_directories(tmp_path: Path):
+    repo, base, head = _unconfigured(tmp_path, "src/service.py", "scripts/tool.py")
     assert mutation_scope.mutation_targets(repo, base, head) == ("service.*run__mutmut_*",)
-    (repo / "src" / "service.py").rename(repo / "service.py")
+    (repo / "lib").mkdir()
+    assert mutation_scope.mutation_source_paths(repo) == ("lib",)
+    (repo / "pyproject.toml").write_text("[tool.mutmut]\nsource_paths = []\n")
+    assert mutation_scope.mutation_source_paths(repo) == ("lib",)
+
+
+def test_unconfigured_scope_reads_layout_from_the_trusted_root(tmp_path: Path):
+    repo, base, head = _unconfigured(tmp_path, "pkg/core.py")
     (repo / "src").rmdir()
-    flat = _commit(repo, "flat layout")
-    assert "scripts.tool.*run__mutmut_*" in mutation_scope.mutation_targets(repo, base, flat)
+    trusted = tmp_path / "trusted"
+    trusted.mkdir()
+    (repo / "src").mkdir()  # a proposed tree adding src/ must not shrink the scope
+    targets = mutation_scope.mutation_targets(repo, base, head, source_root=trusted)
+    assert targets == ("pkg.core.*run__mutmut_*",)
 
 
 def test_scope_keeps_class_and_method_identity(tmp_path: Path):
