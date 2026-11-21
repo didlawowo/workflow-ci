@@ -37,6 +37,12 @@ def mutation_source_paths(root: Path) -> tuple[str, ...]:
                 item.strip() for item in re.split(r"[\n,]", raw) if item.strip()
             )
 
+    # Nothing configured: follow the same convention as mutmut and as the
+    # campaign inventory, which only generate mutants under ``src/`` when that
+    # directory exists. Requiring evidence for Python outside it would demand
+    # mutants that no campaign can ever produce.
+    if (root / "src").is_dir():
+        return ("src",)
     return ()
 
 
@@ -49,8 +55,8 @@ def _is_in_source_path(relative: str, source_paths: tuple[str, ...]) -> bool:
     if "tests" in parts or name.startswith("test_") or name.endswith("_test.py"):
         return False
     if not source_paths:
-        # Bootstrap repositories can have no protected mutmut scope yet.
-        # Default to production Python.
+        # No configuration and no ``src/`` directory: mutmut and the inventory
+        # fall back to the whole project, so does the scope.
         return True
 
     for raw in source_paths:

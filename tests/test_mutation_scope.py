@@ -239,6 +239,23 @@ def test_bootstrap_scope_ignores_tests_without_mutmut_config(tmp_path: Path):
     )
 
 
+def test_unconfigured_scope_follows_the_inventory_default(tmp_path: Path):
+    repo = _init_repo(tmp_path)
+    (repo / "pyproject.toml").write_text('[project]\nname = "x"\n', encoding="utf-8")
+    (repo / "scripts").mkdir()
+    for relative in ("src/service.py", "scripts/tool.py"):
+        (repo / relative).write_text("def run():\n    return 1\n", encoding="utf-8")
+    base = _commit(repo, "initial")
+    for relative in ("src/service.py", "scripts/tool.py"):
+        (repo / relative).write_text("def run():\n    return 2\n", encoding="utf-8")
+    head = _commit(repo, "change")
+    assert mutation_scope.mutation_targets(repo, base, head) == ("service.*run__mutmut_*",)
+    (repo / "src" / "service.py").rename(repo / "service.py")
+    (repo / "src").rmdir()
+    flat = _commit(repo, "flat layout")
+    assert "scripts.tool.*run__mutmut_*" in mutation_scope.mutation_targets(repo, base, flat)
+
+
 def test_scope_keeps_class_and_method_identity(tmp_path: Path):
     repo = _init_repo(tmp_path)
     source = repo / "src" / "service.py"
