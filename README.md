@@ -174,7 +174,7 @@ actions to the exact commit of the tagged workflow and prevents stale cross-vers
 Reusable workflows that run central scripts read them through the `central-implementation` action,
 loaded with that same self-reference: it copies the repository the runner already downloaded for
 the called workflow into the job workspace, after checking that the runner loaded it from the
-repository and the reference of that workflow. No job fetches this repository again.
+repository and the reference of that workflow, instead of fetching this repository again.
 
 ## Secrets Required
 
