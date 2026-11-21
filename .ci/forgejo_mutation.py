@@ -9,6 +9,7 @@ with setpriv; no Docker socket or host filesystem may be mounted in that contain
 from __future__ import annotations
 
 import argparse
+from collections.abc import Mapping
 from contextlib import contextmanager
 import json
 import os
@@ -130,6 +131,39 @@ def fetch(directory: Path, server: str, repository: str, sha: str, token: str) -
         raise ValueError("Checkout did not materialize the requested SHA")
 
 
+def reachable_by(directory: Path, uid: int) -> bool:
+    """Whether a process running as uid:uid without extra groups can traverse to directory."""
+    for ancestor in (directory, *directory.parents):
+        status = ancestor.stat()
+        if status.st_uid == uid:
+            search = 0o100
+        elif status.st_gid == uid:
+            search = 0o010
+        else:
+            search = 0o001
+        if not status.st_mode & search:
+            return False
+    return True
+
+
+def sandbox_parent(environ: Mapping[str, str], uid: int = UID) -> Path:
+    """Disposable scratch directory that will hold the sandbox root.
+
+    Job scratch first, system temporary directory otherwise. Never a dependency
+    cache: the whole sandbox is removed after the run.
+    """
+    for candidate in (environ.get("RUNNER_TEMP"), tempfile.gettempdir()):
+        if not candidate or not os.path.isabs(candidate):
+            continue
+        directory = Path(candidate).resolve()
+        if directory.is_dir() and reachable_by(directory, uid):
+            return directory
+    raise RuntimeError(
+        "Mutation requires a scratch directory reachable by the sandbox UID "
+        "(RUNNER_TEMP or the system temporary directory)"
+    )
+
+
 def prepare(event: dict) -> None:
     required = classify(event)
     output("required", str(required).lower())
@@ -144,7 +178,7 @@ def prepare(event: dict) -> None:
     head_repo = pr["head"]["repo"]["full_name"]
     token = os.environ["POLICY_TOKEN"]
     root = Path(
-        tempfile.mkdtemp(prefix="workflow-ci-forgejo-", dir=os.environ["UV_CACHE_DIR"])
+        tempfile.mkdtemp(prefix="workflow-ci-forgejo-", dir=sandbox_parent(os.environ))
     )
     try:
         trusted, proposed = root / "base", root / "verify"
