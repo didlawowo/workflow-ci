@@ -88,20 +88,17 @@ def test_hidden_scope_rejects_evaluator_substitution(tmp_path: Path) -> None:
 def test_hidden_workflow_checks_out_trusted_base_and_exact_candidate() -> None:
     workflow = WORKFLOW.read_text(encoding="utf-8")
     assert "workflow_call:" in workflow
-    assert "repository: ${{ job.workflow_repository }}" in workflow
-    assert "ref: ${{ job.workflow_sha }}" in workflow
+    assert "uses: $/.github/actions/central-implementation" in workflow
+    assert "workflow-repository: ${{ job.workflow_repository }}" in workflow
+    assert "workflow-sha: ${{ job.workflow_sha }}" in workflow
     assert "path: .workflow-ci-hidden" in workflow
     assert "repository: ${{ github.repository }}" in workflow
     assert "ref: ${{ github.event.pull_request.base.sha }}" in workflow
     assert "path: base" in workflow
     assert "ref: refs/pull/${{ github.event.pull_request.number }}/head" in workflow
     assert "path: candidate" in workflow
-    assert workflow.count("persist-credentials: false") >= 3
-    assert (
-        'test "$(git -C .workflow-ci-hidden rev-parse HEAD)" = '
-        "\"$(git -C .workflow-ci-hidden rev-parse '${{ job.workflow_sha }}^{commit}')\""
-        in workflow
-    )
+    assert workflow.count("persist-credentials: false") >= 2
+    assert 'diff -r "$CENTRAL_SOURCE" .workflow-ci-hidden' in workflow
     assert (
         'test "$(git -C base rev-parse HEAD)" = "${{ github.event.pull_request.base.sha }}"'
         in workflow

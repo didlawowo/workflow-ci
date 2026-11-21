@@ -10,20 +10,13 @@ inputs:
 runs:
   using: composite
   steps:
-    - name: Fetch central implementation
-      uses: actions/checkout@v7
+    # Verifies the central identity before any of its helpers is executed.
+    - name: Load central implementation without network access
+      uses: $/.github/actions/central-implementation
       with:
-        repository: ${{ inputs.workflow-repository }}
-        ref: ${{ inputs.workflow-sha }}
+        workflow-repository: ${{ inputs.workflow-repository }}
+        workflow-sha: ${{ inputs.workflow-sha }}
         path: .workflow-ci
-        persist-credentials: false
-    - name: Verify central identity before executing its helpers
-      shell: bash
-      env:
-        WORKFLOW_SHA: ${{ inputs.workflow-sha }}
-      run: |
-        set -euo pipefail
-        test "$(git -C .workflow-ci rev-parse HEAD)" = "$(git -C .workflow-ci rev-parse "${WORKFLOW_SHA}^{commit}")"
     - name: Checkout protected base without submodule traversal
       shell: bash
       env:

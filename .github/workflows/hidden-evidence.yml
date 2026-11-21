@@ -52,14 +52,13 @@ jobs:
           test -n "${{ github.event.pull_request.base.sha }}"
           test -n "${{ github.event.pull_request.head.sha }}"
 
-      - name: Checkout trusted workflow-ci evaluator
-        uses: actions/checkout@v7
+      - name: Load trusted workflow-ci evaluator without network access
+        id: central
+        uses: $/.github/actions/central-implementation
         with:
-          repository: ${{ job.workflow_repository }}
-          ref: ${{ job.workflow_sha }}
+          workflow-repository: ${{ job.workflow_repository }}
+          workflow-sha: ${{ job.workflow_sha }}
           path: .workflow-ci-hidden
-          fetch-depth: 1
-          persist-credentials: false
 
       - name: Checkout exact protected base
         uses: actions/checkout@v7
@@ -94,9 +93,11 @@ jobs:
 
       - name: Verify trusted, base and candidate identities
         shell: bash
+        env:
+          CENTRAL_SOURCE: ${{ steps.central.outputs.source }}
         run: |
           set -euo pipefail
-          test "$(git -C .workflow-ci-hidden rev-parse HEAD)" = "$(git -C .workflow-ci-hidden rev-parse '${{ job.workflow_sha }}^{commit}')"
+          diff -r "$CENTRAL_SOURCE" .workflow-ci-hidden
           test "$(git -C base rev-parse HEAD)" = "${{ github.event.pull_request.base.sha }}"
           test "$(git -C candidate rev-parse HEAD)" = "${{ github.event.pull_request.head.sha }}"
 

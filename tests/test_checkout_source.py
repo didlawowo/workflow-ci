@@ -147,7 +147,7 @@ def test_policy_integrity_checkouts_preserve_trusted_tree_with_orphans_on_both_s
         i
         for i, step in enumerate(steps)
         if step.get("name")
-        == "Verify trusted implementation before using its checkout helper"
+        == "Load trusted workflow-ci policy without network access"
     )
     assert verification < next(
         i

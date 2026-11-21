@@ -91,20 +91,12 @@ jobs:
             1|0) ;;
             *) exit 1 ;;
           esac
-      - name: Fetch central workflow implementation without submodule traversal
-        env:
-          WORKFLOW_REPOSITORY: ${{ job.workflow_repository }}
-          WORKFLOW_SHA: ${{ job.workflow_sha }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          DEST="$GITHUB_WORKSPACE/.workflow-ci"
-          rm -rf "$DEST"
-          mkdir -p "$DEST"
-          git -C "$DEST" init -q
-          URL="${GITHUB_SERVER_URL}/${WORKFLOW_REPOSITORY}.git"
-          git -C "$DEST" fetch --no-tags "$URL" "$WORKFLOW_SHA"
-          git -C "$DEST" checkout -q --detach "$WORKFLOW_SHA"
+      - name: Load central workflow implementation without network access
+        uses: $/.github/actions/central-implementation
+        with:
+          workflow-repository: ${{ job.workflow_repository }}
+          workflow-sha: ${{ job.workflow_sha }}
+          path: .workflow-ci
 
       - name: Fetch trusted base policy without submodule traversal
         env:
@@ -634,20 +626,12 @@ jobs:
       report-file: ${{ steps.trusted-output.outputs.report-file }}
       report-b64: ${{ steps.trusted-output.outputs.report-b64 }}
     steps:
-      - name: Fetch central workflow implementation without submodule traversal
-        env:
-          WORKFLOW_REPOSITORY: ${{ job.workflow_repository }}
-          WORKFLOW_SHA: ${{ job.workflow_sha }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          DEST="$GITHUB_WORKSPACE/.workflow-ci"
-          rm -rf "$DEST"
-          mkdir -p "$DEST"
-          git -C "$DEST" init -q
-          URL="${GITHUB_SERVER_URL}/${WORKFLOW_REPOSITORY}.git"
-          git -C "$DEST" fetch --no-tags "$URL" "$WORKFLOW_SHA"
-          git -C "$DEST" checkout -q --detach "$WORKFLOW_SHA"
+      - name: Load central workflow implementation without network access
+        uses: $/.github/actions/central-implementation
+        with:
+          workflow-repository: ${{ job.workflow_repository }}
+          workflow-sha: ${{ job.workflow_sha }}
+          path: .workflow-ci
 
       - name: Fetch trusted base policy without submodule traversal
         env:

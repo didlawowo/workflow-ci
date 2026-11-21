@@ -1,0 +1,30 @@
+name: Central implementation
+description: >
+  Copy the scripts of this repository into the workspace from the copy the
+  runner already loaded, at the exact commit of the called workflow, without
+  any network access. Reference it with the `$/` self-reference only.
+inputs:
+  workflow-repository:
+    required: true
+    description: Repository of the called workflow (job.workflow_repository)
+  workflow-sha:
+    required: true
+    description: Exact reference of the called workflow (job.workflow_sha)
+  path:
+    required: true
+    description: Destination directory, relative to the workspace
+outputs:
+  source:
+    value: ${{ steps.materialize.outputs.source }}
+    description: Directory the runner loaded, to compare the copy against later
+runs:
+  using: composite
+  steps:
+    - name: Copy the implementation loaded by the runner
+      id: materialize
+      shell: bash
+      env:
+        CENTRAL_WORKFLOW_REPOSITORY: ${{ inputs.workflow-repository }}
+        CENTRAL_WORKFLOW_SHA: ${{ inputs.workflow-sha }}
+        CENTRAL_DESTINATION: ${{ inputs.path }}
+      run: bash "$GITHUB_ACTION_PATH/materialize.sh"
