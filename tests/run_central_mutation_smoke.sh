@@ -3,7 +3,8 @@
 set -euo pipefail
 CENTRAL="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 FIXTURE="$(mktemp -d "${RUNNER_TEMP:-/tmp}/mutation-consumer.XXXXXX")"
-trap 'rm -rf "$FIXTURE"' EXIT
+RUNAWAY="$(mktemp -d "${RUNNER_TEMP:-/tmp}/mutation-runaway.XXXXXX")"
+trap 'rm -rf "$FIXTURE" "$RUNAWAY"' EXIT
 cd "$FIXTURE"
 git init -q
 git config user.email ci@example.test
@@ -25,14 +26,21 @@ pytest_add_cli_args_test_selection = ["tests/"]
 TOML
 printf 'def add(a, b):\n    return a + b\n' > src/calc.py
 cat > tests/test_calc.py <<'PY'
+import resource
 import sys
 from pathlib import Path
+import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from calc import add
 from packaging.version import Version
 
 
 def test_add():
+    # Central resource bounds: hard data limit, refused allocation above it.
+    limit = 4 * 1024**3
+    assert resource.getrlimit(resource.RLIMIT_DATA) == (limit, limit)
+    with pytest.raises(MemoryError):
+        bytes(limit + limit // 2)  # calloc: refused, or never touched
     assert Version("1.0") < Version("2.0")
     assert add(1, 1) == 3
     assert add(0, 0) == 1
@@ -59,4 +67,88 @@ repo = Path.cwd()
 report = validate_python_evidence(repo, mutation_targets(repo, sys.argv[2], sys.argv[3]), sys.argv[2], sys.argv[3])
 assert report["stats"]["killed"] > 0, report
 print("Real central mutation smoke passed:", report["stats"])
+PY
+
+# A mutant that allocates in an endless loop is stopped by the data limit and
+# is never counted as killed. This fixture lowers the limit itself (256 MiB),
+# so its runaway mutants stay small even if the central bound were missing.
+cd "$RUNAWAY"
+git init -q
+git config user.email ci@example.test
+git config user.name 'Mutation self-test'
+mkdir -p src tests
+cat > pyproject.toml <<'TOML'
+[project]
+name = "central-mutation-runaway"
+version = "0.0.1"
+requires-python = ">=3.12"
+dependencies = []
+[dependency-groups]
+dev = ["pytest>=8,<9", "pytest-cov>=6"]
+[tool.uv]
+package = false
+[tool.mutmut]
+source_paths = ["src/"]
+pytest_add_cli_args_test_selection = ["tests/"]
+TOML
+printf 'def unrelated():\n    return 1\n' > src/fill.py
+cat > tests/conftest.py <<'PY'
+import resource
+
+LIMIT = 256 * 1024**2
+resource.setrlimit(resource.RLIMIT_DATA, (LIMIT, LIMIT))
+PY
+cat > tests/test_fill.py <<'PY'
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+import fill
+
+
+def test_fill():
+    assert fill.fill(3) == [3, 2, 1]
+PY
+uv lock --python 3.12
+git add pyproject.toml uv.lock src tests
+git commit -qm base
+BASE="$(git rev-parse HEAD)"
+cat >> src/fill.py <<'PY'
+
+
+def fill(count):
+    items = []
+    j = count
+    while j > 0:
+        items.append(j)
+        j -= 1
+    return items
+PY
+git add src/fill.py
+git commit -qm head
+HEAD="$(git rev-parse HEAD)"
+env -u VIRTUAL_ENV MUTATION_BASE_SHA="$BASE" MUTATION_HEAD_SHA="$HEAD" \
+  bash "$CENTRAL/.ci/mutation.sh"
+cat .quality/mutmut-results.txt
+uv run --no-project --python 3.12 python - "$CENTRAL" "$BASE" "$HEAD" <<'PY'
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(sys.argv[1]) / ".ci"))
+from mutation_scope import mutation_targets
+from mutation_contract import validate_python_evidence
+repo = Path.cwd()
+verdicts = dict(
+    line.rsplit(": ", 1)
+    for line in (repo / ".quality/mutmut-results.txt").read_text().splitlines()
+)
+stopped = {key: verdict for key, verdict in verdicts.items() if verdict != "killed"}
+assert stopped, verdicts
+assert "killed" in verdicts.values(), verdicts
+assert "survived" not in verdicts.values(), verdicts
+try:
+    validate_python_evidence(repo, mutation_targets(repo, sys.argv[2], sys.argv[3]), sys.argv[2], sys.argv[3])
+except ValueError as error:
+    assert "non-killed mutants" in str(error), error
+else:
+    raise AssertionError("A mutant stopped by the memory limit passed the gate")
+print("Runaway mutants stopped by the memory limit and never counted as killed:", stopped)
 PY

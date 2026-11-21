@@ -22,7 +22,7 @@ pytest_add_cli_args_test_selection = ["tests/test_image_changes.py"]
 also_copy = ["tests", ".github"]
 TOML
 cd "$SCRATCH"
-mutmut run
+python3 "$ROOT/.ci/mutation_limits.py" mutmut run
 mutmut export-cicd-stats
 mutmut results
 python3 - <<'PY'
