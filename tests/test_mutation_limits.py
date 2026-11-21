@@ -160,3 +160,76 @@ def test_command_line_starts_mutmut_bounded(tmp_path):
     )
     assert 1 <= int(children) <= limits.MAX_CHILDREN
     assert int(data_limit) * 1024 <= limits.MEMORY_LIMIT_BYTES
+
+
+def test_mutmut_environment_loads_the_memory_verdict_plugin(monkeypatch):
+    monkeypatch.setattr(limits, "max_children", lambda: 2)
+    environment = limits.bounded_environment(
+        {"PATH": "/bin", "PYTEST_ADDOPTS": "-q", "PYTHONPATH": "/consumer"}
+    )
+    assert environment["PATH"] == "/bin"
+    assert environment["PYTEST_ADDOPTS"] == "-q -p mutation_memory_guard"
+    assert environment["PYTHONPATH"] == f"{limits.PLUGINS}{os.pathsep}/consumer"
+    assert (limits.PLUGINS / "mutation_memory_guard.py").is_file()
+    assert environment["OMP_NUM_THREADS"] == environment["OPENBLAS_NUM_THREADS"] == "2"
+    kept = limits.bounded_environment({"OMP_NUM_THREADS": "8"})
+    assert kept["OMP_NUM_THREADS"] == "8"
+    assert kept["PYTEST_ADDOPTS"] == "-p mutation_memory_guard"
+
+
+VERDICT_TESTS = """
+import pytest
+
+def test_out_of_memory():
+    raise MemoryError("limit reached")
+
+def test_chained_out_of_memory():
+    try:
+        raise MemoryError("limit reached")
+    except MemoryError as error:
+        raise RuntimeError("wrapped") from error
+
+def test_expected_out_of_memory():
+    with pytest.raises(MemoryError):
+        raise MemoryError("handled by the test")
+
+def test_ordinary_failure():
+    assert 1 == 2
+
+def test_success():
+    assert True
+"""
+
+
+@pytest.mark.parametrize(
+    ("selected", "expected"),
+    [
+        ("test_out_of_memory", 35),
+        ("test_chained_out_of_memory", 35),
+        ("test_out_of_memory or test_ordinary_failure", 35),
+        ("test_ordinary_failure", 1),
+        ("test_expected_out_of_memory or test_success", 0),
+    ],
+)
+def test_memory_error_is_never_reported_as_a_killed_mutant(
+    tmp_path, selected, expected
+):
+    (tmp_path / "test_verdict.py").write_text(VERDICT_TESTS)
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "pytest",
+            "-q",
+            "-p",
+            "no:cacheprovider",
+            "-k",
+            selected,
+        ],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        timeout=120,
+        env=limits.bounded_environment({"PATH": os.environ["PATH"]}),
+    )
+    assert result.returncode == expected, result.stdout + result.stderr

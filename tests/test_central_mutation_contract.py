@@ -414,6 +414,7 @@ def test_standalone_pytest_ini_is_staged_so_mutmut_hits_instrumented_sources(
         "mutation_limits.py",
     ):
         shutil.copy2(ROOT / ".ci" / name, repo / ".ci" / name)
+    shutil.copytree(ROOT / ".ci" / "pytest_plugins", repo / ".ci" / "pytest_plugins")
     subprocess.run(["git", "init", "-q", repo], check=True)
     subprocess.run(
         ["git", "-C", repo, "config", "user.email", "ci@example.test"], check=True

@@ -21,7 +21,7 @@ import sys
 from pathlib import Path
 
 from mutation_evidence import COUNTERS, digest_function
-from mutation_limits import bounded_command, limit_memory
+from mutation_limits import bounded_command, bounded_environment, limit_memory
 from mutation_campaign import partition, plan_digest
 from mutation_scope import _module_name, mutation_targets
 
@@ -291,6 +291,7 @@ def shard(project_root: Path, plan_json: dict, index: int) -> dict:
         bounded_command(["mutmut", "run", *keys]),
         cwd=project_root,
         check=False,
+        env=bounded_environment(dict(os.environ)),
         preexec_fn=limit_memory,
     )
     if completed.returncode:

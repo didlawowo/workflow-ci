@@ -6,8 +6,14 @@ child per core of the node, whatever CPU budget the job really has.
 
 The central engine therefore starts Mutmut under a hard data limit, inherited
 by every mutant process, and with a number of children derived from the CPU
-budget of the job. Neither bound is configurable: unprivileged code cannot
-raise a hard limit, and there is deliberately no option to lift them.
+budget of the job. A mutant stopped by the limit is never counted as killed
+(see pytest_plugins/mutation_memory_guard.py). There is deliberately no option
+to lift these bounds.
+
+They guard against accidents, not against an adversary: shared mappings,
+temporary filesystems and privileged helpers are outside a data limit, and
+each subprocess gets its own allowance. The memory limit of the job container
+remains the real bound of a run.
 """
 
 from __future__ import annotations
@@ -24,6 +30,10 @@ import sys
 MEMORY_LIMIT_BYTES = 4 * 1024**3
 MAX_CHILDREN = 4
 CGROUP_ROOT = Path("/sys/fs/cgroup")
+PLUGINS = Path(__file__).resolve().parent / "pytest_plugins"
+# Numeric libraries start one thread per core of the node, each with its own
+# stack and buffers, which a data limit counts.
+THREAD_VARIABLES = ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS")
 
 
 def _cgroup_cpu_quota(root: Path) -> float | None:
@@ -66,10 +76,31 @@ def limit_memory(limit: int = MEMORY_LIMIT_BYTES) -> None:
         # are Linux. A local run elsewhere keeps its previous behaviour.
         print("WARN: no per-mutant memory limit outside Linux", file=sys.stderr)
         return
-    hard = resource.getrlimit(resource.RLIMIT_DATA)[1]
-    if hard != resource.RLIM_INFINITY:
-        limit = min(limit, hard)  # never loosen a stricter limit of the runner
+    for existing in resource.getrlimit(resource.RLIMIT_DATA):
+        if existing != resource.RLIM_INFINITY:
+            limit = min(limit, existing)  # never loosen a limit of the runner
     resource.setrlimit(resource.RLIMIT_DATA, (limit, limit))
+
+
+def bounded_environment(environ: dict[str, str]) -> dict[str, str]:
+    """Environment of the Mutmut run: memory verdict plugin, bounded threads."""
+    if not (PLUGINS / "mutation_memory_guard.py").is_file():
+        raise RuntimeError(
+            "Central mutation engine is incomplete: pytest_plugins/"
+            "mutation_memory_guard.py is missing next to mutation_limits.py"
+        )
+    result = dict(environ)
+    result["PYTHONPATH"] = os.pathsep.join(
+        part for part in (str(PLUGINS), environ.get("PYTHONPATH")) if part
+    )
+    result["PYTEST_ADDOPTS"] = " ".join(
+        part
+        for part in (environ.get("PYTEST_ADDOPTS"), "-p mutation_memory_guard")
+        if part
+    )
+    for name in THREAD_VARIABLES:
+        result.setdefault(name, str(max_children()))
+    return result
 
 
 def bounded_command(command: list[str]) -> list[str]:
@@ -84,5 +115,9 @@ if __name__ == "__main__":
         bounded = bounded_command(sys.argv[1:])
     except ValueError as error:
         sys.exit(str(error))
+    try:
+        environment = bounded_environment(dict(os.environ))
+    except RuntimeError as error:
+        sys.exit(f"::error::{error}")
     limit_memory()
-    os.execvp(bounded[0], bounded)
+    os.execvpe(bounded[0], bounded, environment)
