@@ -3,7 +3,9 @@
 Trusted verifiers parse consumer sources with `ast`, and an interpreter older
 than the project cannot read its syntax. They follow the same convention as the
 isolated mutation environment: the `.python-version` of the project, limited to
-the supported minors. The file content is only compared, never executed.
+the supported minors, read the same way (first line, taken literally). The file
+content is only compared, never executed. MUTATION_PYTHON_VERSION, an optional
+runner default of the mutation environment, is not read here.
 """
 
 from __future__ import annotations
@@ -21,8 +23,7 @@ def analysis_python(project: Path) -> str:
         raise ValueError("Consumer .python-version must be a regular file")
     if not pin.is_file():
         return DEFAULT
-    lines = pin.read_text(encoding="utf-8", errors="replace").splitlines()
-    requested = lines[0] if lines else ""
+    requested = pin.read_bytes().split(b"\n", 1)[0].decode("utf-8", errors="replace")
     if requested not in SUPPORTED:
         raise ValueError(
             "Unsupported consumer .python-version; expected "
@@ -37,9 +38,12 @@ def running_python() -> str:
 
 
 if __name__ == "__main__":
-    if len(sys.argv) != 2:
-        sys.exit("usage: analysis_python.py <project directory>")
+    if len(sys.argv) != 3:
+        sys.exit("usage: analysis_python.py <checkout> <project directory>")
+    # Same directory validation as the verifiers, before anything is read.
+    from mutation_evidence import project
+
     try:
-        print(analysis_python(Path(sys.argv[1])))
-    except ValueError as error:
+        print(analysis_python(project(Path(sys.argv[1]), sys.argv[2])))
+    except (OSError, ValueError) as error:
         sys.exit(f"::error::{error}")

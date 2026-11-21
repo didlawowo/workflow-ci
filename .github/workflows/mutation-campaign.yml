@@ -99,7 +99,7 @@ jobs:
         run: |
           set -euo pipefail
           # Sources are parsed with the project's Python, like the mutation environment.
-          ANALYSIS_PYTHON="$(uv run --no-project --python 3.12 python .workflow-ci/.ci/analysis_python.py "pr/$DIRECTORY")"
+          ANALYSIS_PYTHON="$(uv run --no-project --python 3.12 python .workflow-ci/.ci/analysis_python.py pr "$DIRECTORY")"
           uv run --no-project --python "$ANALYSIS_PYTHON" python .workflow-ci/.ci/mutation_campaign.py plan \
             --plan "$RUNNER_TEMP/plan.json" --repo pr --base "$BASE_SHA" --head "$HEAD_SHA" \
             --directory "$DIRECTORY" --shards "$SHARDS" --output "$RUNNER_TEMP/validated-plan.json"
@@ -231,7 +231,7 @@ jobs:
         run: |
           set -euo pipefail
           # Sources are parsed with the project's Python, like the mutation environment.
-          ANALYSIS_PYTHON="$(uv run --no-project --python 3.12 python .workflow-ci/.ci/analysis_python.py "pr/$DIRECTORY")"
+          ANALYSIS_PYTHON="$(uv run --no-project --python 3.12 python .workflow-ci/.ci/analysis_python.py pr "$DIRECTORY")"
           uv run --no-project --python "$ANALYSIS_PYTHON" python .workflow-ci/.ci/mutation_campaign.py aggregate \
             --plan "$RUNNER_TEMP/campaign-plan/validated-plan.json" \
             --fragments "$RUNNER_TEMP/campaign-fragments" --repo pr --trusted .policy \

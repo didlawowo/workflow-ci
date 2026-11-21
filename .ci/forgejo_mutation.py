@@ -20,7 +20,7 @@ import subprocess
 import sys
 import tempfile
 
-from analysis_python import analysis_python, running_python
+from analysis_python import DEFAULT, SUPPORTED, analysis_python, running_python
 from mutation_environment import proxy_environment
 
 from mutation_contract import (
@@ -87,6 +87,45 @@ def git(directory: Path, *args: str, env: dict | None = None) -> str:
     ).stdout.strip()
 
 
+def python_targets(
+    proposed: Path, trusted: Path, base: str, head: str, version: str
+) -> list[str]:
+    """Changed Python functions, parsed with the Python version of the project."""
+    if version == running_python():
+        from mutation_scope import mutation_targets
+
+        return list(mutation_targets(proposed, base, head, source_root=trusted))
+    # Trusted script, untrusted data: the sources are parsed, never executed.
+    completed = subprocess.run(
+        [
+            "uv",
+            "run",
+            "--no-project",
+            "--python",
+            version,
+            "python",
+            str(ROOT / ".ci" / "mutation_scope.py"),
+            "--repo",
+            str(proposed),
+            "--base",
+            base,
+            "--head",
+            head,
+            "--source-root",
+            str(trusted),
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if completed.returncode:
+        raise ValueError(
+            f"Cannot compute mutation scope with Python {version}: "
+            + completed.stderr.strip()[-2000:]
+        )
+    return completed.stdout.splitlines()
+
+
 def fetch(directory: Path, server: str, repository: str, sha: str, token: str) -> None:
     if not re.fullmatch(r"https://[A-Za-z0-9.-]+(?::[0-9]+)?", server):
         raise ValueError("Invalid Forgejo server URL")
@@ -131,39 +170,6 @@ def fetch(directory: Path, server: str, repository: str, sha: str, token: str) -
         raise ValueError("Checkout did not materialize the requested SHA")
 
 
-def python_targets(proposed: Path, trusted: Path, base: str, head: str) -> list[str]:
-    """Changed Python functions, parsed with the Python version of the project."""
-    version = analysis_python(proposed)
-    if version == running_python():
-        from mutation_scope import mutation_targets
-
-        return list(mutation_targets(proposed, base, head, source_root=trusted))
-    # Trusted script, untrusted data: the sources are parsed, never executed.
-    completed = subprocess.run(
-        [
-            "uv",
-            "run",
-            "--no-project",
-            "--python",
-            version,
-            "python",
-            str(ROOT / ".ci" / "mutation_scope.py"),
-            "--repo",
-            str(proposed),
-            "--base",
-            base,
-            "--head",
-            head,
-            "--source-root",
-            str(trusted),
-        ],
-        check=True,
-        capture_output=True,
-        text=True,
-    )
-    return completed.stdout.splitlines()
-
-
 def prepare(event: dict) -> None:
     required = classify(event)
     output("required", str(required).lower())
@@ -187,10 +193,13 @@ def prepare(event: dict) -> None:
         fetch(proposed, server, head_repo, head, token)
         protect_config(trusted, proposed, base, head)
         engine = select_engine(trusted)
+        python = DEFAULT
         if engine == "python":
+            # Analysis and sandbox both follow the project's Python version.
+            python = analysis_python(proposed)
             # The scope default depends on the directory layout: read it from
             # the trusted base, never from the proposed tree.
-            targets = python_targets(proposed, trusted, base, head)
+            targets = python_targets(proposed, trusted, base, head, python)
         else:
             changed = git(
                 proposed, "diff", "--name-only", f"{base}...{head}", "--", "*.go"
@@ -219,7 +228,13 @@ def prepare(event: dict) -> None:
         state = root / "state.json"
         state.write_text(
             json.dumps(
-                {"engine": engine, "base": base, "head": head, "targets": targets}
+                {
+                    "engine": engine,
+                    "base": base,
+                    "head": head,
+                    "targets": targets,
+                    "python": python,
+                }
             )
         )
         state.chmod(0o600)
@@ -234,7 +249,9 @@ def prepare(event: dict) -> None:
         raise
 
 
-def sandbox_command(root: Path, engine: str, base: str, head: str) -> list[str]:
+def sandbox_command(
+    root: Path, engine: str, base: str, head: str, python: str = DEFAULT
+) -> list[str]:
     script = "mutation-go.sh" if engine == "go" else "mutation.sh"
     # No FORGEJO_TOKEN, POLICY_TOKEN, action command files, SSH material or shared
     # caches are inherited by untrusted test code.
@@ -262,6 +279,7 @@ def sandbox_command(root: Path, engine: str, base: str, head: str) -> list[str]:
         "TZ=Europe/Paris",
         "UV_LINK_MODE=copy",
         "CI=true",
+        f"MUTATION_PYTHON_VERSION={python}",
         f"MUTATION_BASE_SHA={base}",
         f"MUTATION_HEAD_SHA={head}",
         "bash",
@@ -282,9 +300,12 @@ def execute(state_path: Path) -> None:
     engine, base, head = plan["engine"], plan["base"], plan["head"]
     if engine not in {"python", "go"}:
         raise ValueError("Unsupported mutation engine")
+    python = plan.get("python", DEFAULT)
+    if python not in SUPPORTED:
+        raise ValueError("Unsupported Python version in the mutation plan")
     try:
         process = subprocess.Popen(
-            sandbox_command(root, engine, base, head),
+            sandbox_command(root, engine, base, head, python),
             cwd=root / "pr",
             start_new_session=True,
         )
