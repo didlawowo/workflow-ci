@@ -94,7 +94,7 @@ runs:
       if: inputs.use-docker-compose != 'true' && steps.uv-runtime.outputs.preinstalled != 'true'
       uses: astral-sh/setup-uv@v10.1.0
       with:
-        version: "latest"
+        version: "0.13.7"
         enable-cache: false
 
     - name: Setup Python environment
