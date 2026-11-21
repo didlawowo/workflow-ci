@@ -120,6 +120,7 @@ def test_real_engine_and_sandbox():
         try:
             plan = json.loads(state.read_text())
             assert plan["engine"] == "python" and plan["targets"]
+            assert plan["python"] == "3.12", plan
             bindir = sandbox / "engine/bin"
             bindir.mkdir(mode=0o755)
             shutil.copy2(shutil.which("uv"), bindir / "uv")
