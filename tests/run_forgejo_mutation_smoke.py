@@ -88,6 +88,9 @@ def test_real_engine_and_sandbox():
             git(destination, "checkout", "--detach", "--force", sha)
 
         adapter.fetch = fetch_local
+        # The Forgejo action provides no dependency cache: prove the sandbox
+        # root never depends on one.
+        os.environ.pop("UV_CACHE_DIR", None)
         output = Path(temp) / "outputs"
         os.environ.update(
             POLICY_PROVIDER="forgejo",

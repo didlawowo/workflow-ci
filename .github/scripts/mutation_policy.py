@@ -130,13 +130,15 @@ def _pull_request_file_entries(event: dict) -> list[dict] | None:
         return None
 
     entries: list[dict] = []
-    # Without a usable counter, only an empty page proves the end: Forgejo
-    # ignores per_page (30 items by default, 50 at most), so a short page
-    # proves nothing.
-    until_empty_page = not isinstance(changed_count, int)
+    # Forgejo ignores per_page and caps the page size below the requested
+    # limit (30 items by default, 50 at most): a short page proves nothing
+    # there. Without a usable counter either, only an empty page proves the end.
+    forgejo = os.environ.get("POLICY_PROVIDER", "github").lower() == "forgejo"
+    size = "limit=100" if forgejo else "per_page=100"
+    until_empty_page = forgejo or not isinstance(changed_count, int)
     page = 1
     while True:
-        suffix = "per_page=100" if page == 1 else f"per_page=100&page={page}"
+        suffix = size if page == 1 else f"{size}&page={page}"
         payload = _api_request("GET", f"pulls/{number}/files?{suffix}")
         if not isinstance(payload, list) or any(
             not isinstance(item, dict) for item in payload

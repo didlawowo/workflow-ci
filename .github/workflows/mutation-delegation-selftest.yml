@@ -47,9 +47,14 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          # Throwaway cache for the root uv that launches the smoke only. The
+          # smoke drops UV_CACHE_DIR before preparing the sandbox, like the
+          # Forgejo action, which provides none.
           ROOT_UV_CACHE="${RUNNER_TEMP:-/tmp}/forgejo-root-uv-cache"
           rm -rf "$ROOT_UV_CACHE"
           mkdir -p "$ROOT_UV_CACHE"
+          # Under sudo the cache receives root-owned files: remove it as root.
+          trap 'sudo -n rm -rf "$ROOT_UV_CACHE" 2>/dev/null || rm -rf "$ROOT_UV_CACHE"' EXIT
           if [[ "$(id -u)" == "0" ]]; then
             env \
               "PATH=$PATH" \
@@ -59,6 +64,7 @@ jobs:
             sudo -n env \
               "PATH=$PATH" \
               "UV_CACHE_DIR=$ROOT_UV_CACHE" \
+              "RUNNER_TEMP=${RUNNER_TEMP:-}" \
               uv run --no-project --python 3.12 python tests/run_forgejo_mutation_smoke.py
           else
             echo "::notice::Skipping root-to-65532 Forgejo boundary smoke: runner has no root/passwordless sudo."
