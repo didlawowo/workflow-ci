@@ -4,6 +4,18 @@ All notable changes to this project are documented here.
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 and follows the [Conventional Commits](https://www.conventionalcommits.org) spec.
 
+## [1.25.0] - 2026-11-22
+
+### Bug Fixes
+
+- *(release)* Charger l'action de release sans recloner le socle (#301)
+
+
+### Features
+
+- *(ci)* Lire les scripts du socle sans le recloner pendant les jobs (#300)
+
+
 ## [1.24.3] - 2026-11-21
 
 ### Bug Fixes
