@@ -621,9 +621,17 @@ def test_release_workflow_never_commits_workflow_ci_checkout():
     root = Path(__file__).resolve().parents[1]
     content = (root / ".github" / "workflows" / "release.yml").read_text()
 
-    assert "Exclude workflow-ci checkout from release commits" in content
-    assert "'.workflow-ci/' >> .git/info/exclude" in content
-    assert "git reset -- .workflow-ci 2>/dev/null || true" in content
+    # The release action is loaded by the runner at the commit of the called
+    # workflow: nothing of workflow-ci ever lands in the caller workspace.
+    assert "uses: $/.github/actions/git-cliff-bump" in content
+    assert ".workflow-ci/" not in content
+    assert "repository: didlawowo/workflow-ci" not in content
+    # The action reads these through paths relative to its own directory.
+    action = root / ".github" / "actions" / "git-cliff-bump"
+    assert (action / "../../../templates/common/cliff.toml").is_file()
+    assert (action / "../../scripts/release_commit_gate.py").is_file()
+    selftest = (root / ".github/workflows/quality-report-selftest.yml").read_text()
+    assert "uses: $/.github/actions/git-cliff-bump" in selftest
 
 
 def test_mutation_jobs_use_proxy_first_setup_without_nfs_cache_preflight():

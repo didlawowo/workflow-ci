@@ -41,7 +41,9 @@ on:
         type: boolean
         default: false
       workflow-ci-ref:
-        description: Ref of workflow-ci to use for the composite action and defaults.
+        description: >-
+          Ignored, kept so existing callers stay valid. The release action and its
+          defaults always come from the version of this workflow.
         required: false
         type: string
         default: "v1.8.0"
@@ -137,19 +139,6 @@ jobs:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Checkout workflow-ci (for composite action + default cliff.toml)
-        uses: actions/checkout@v4
-        with:
-          repository: didlawowo/workflow-ci
-          ref: ${{ inputs.workflow-ci-ref }}
-          path: .workflow-ci
-
-      - name: Exclude workflow-ci checkout from release commits
-        shell: bash
-        run: |
-          set -euo pipefail
-          printf '%s\n' '.workflow-ci/' >> .git/info/exclude
-
       - name: Configure git identity
         run: |
           git config user.name "github-actions[bot]"
@@ -174,7 +163,9 @@ jobs:
       - name: Compute bump + write CHANGELOG
         id: bump
         if: steps.recovery.outputs.pending != 'true'
-        uses: ./.workflow-ci/.github/actions/git-cliff-bump
+        # Loaded by the runner at the commit of this workflow: no checkout of
+        # workflow-ci in the caller workspace, nothing to keep out of the commit.
+        uses: $/.github/actions/git-cliff-bump
         with:
           config: ${{ inputs.cliff-config }}
           tag-prefix: ${{ inputs.tag-prefix }}
@@ -244,9 +235,6 @@ jobs:
         run: |
           set -euo pipefail
           git add -A
-          # Never let the helper checkout become part of the caller repository.
-          # This is a second guard in addition to .git/info/exclude.
-          git reset -- .workflow-ci 2>/dev/null || true
           if git diff --cached --quiet; then
             echo "::warning::no changes staged (CHANGELOG/version-files unchanged) — releasing current HEAD"
           else
