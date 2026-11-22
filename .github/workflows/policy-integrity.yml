@@ -30,22 +30,16 @@ jobs:
           test -n "${{ github.event.pull_request.base.sha }}"
           test -n "${{ github.event.pull_request.head.sha }}"
 
-      - name: Checkout trusted workflow-ci policy
-        uses: actions/checkout@v7
+      # The action refuses to copy anything but the implementation the runner
+      # loaded for the exact commit of this workflow: no network access, and
+      # the identity is verified before the checkout helper is used.
+      - name: Load trusted workflow-ci policy without network access
+        id: central
+        uses: $/.github/actions/central-implementation
         with:
-          repository: ${{ job.workflow_repository }}
-          ref: ${{ job.workflow_sha }}
+          workflow-repository: ${{ job.workflow_repository }}
+          workflow-sha: ${{ job.workflow_sha }}
           path: .workflow-ci-policy
-          fetch-depth: 1
-          persist-credentials: false
-
-      - name: Verify trusted implementation before using its checkout helper
-        shell: bash
-        env:
-          WORKFLOW_SHA: ${{ job.workflow_sha }}
-        run: |
-          set -euo pipefail
-          test "$(git -C .workflow-ci-policy rev-parse HEAD)" = "$(git -C .workflow-ci-policy rev-parse "${WORKFLOW_SHA}^{commit}")"
 
       - name: Checkout protected base
         shell: bash
@@ -75,9 +69,11 @@ jobs:
 
       - name: Verify checkout identities
         shell: bash
+        env:
+          CENTRAL_SOURCE: ${{ steps.central.outputs.source }}
         run: |
           set -euo pipefail
-          test "$(git -C .workflow-ci-policy rev-parse HEAD)" = "$(git -C .workflow-ci-policy rev-parse '${{ job.workflow_sha }}^{commit}')"
+          diff -rq "$CENTRAL_SOURCE" .workflow-ci-policy
           test "$(git -C .policy-base rev-parse HEAD)" = "${{ github.event.pull_request.base.sha }}"
           test "$(git -C .policy-candidate rev-parse HEAD)" = "${{ github.event.pull_request.head.sha }}"
 

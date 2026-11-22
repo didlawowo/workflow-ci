@@ -32,7 +32,8 @@ exemple, l'oracle d'`ioniq-control`.
 
 Le workflow :
 
-1. matérialise l'exact `job.workflow_sha` de `workflow-ci` dans un checkout trusted ;
+1. matérialise l'exact `job.workflow_sha` de `workflow-ci` dans une copie trusted, prise sans réseau dans
+   l'implémentation que le runner a déjà chargée pour ce commit ;
 2. matérialise l'exact `pull_request.head.sha` du consumer dans un checkout séparé ;
 3. vérifie les SHA avant toute exécution ;
 4. calcule le diff `base...head` et décide le scope à partir de `registry.json` ;

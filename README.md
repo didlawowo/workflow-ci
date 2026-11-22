@@ -171,6 +171,11 @@ not require another workflow-ci release.
 Same-repository action composition uses GitHub's `$/...` self-reference. This resolves internal
 actions to the exact commit of the tagged workflow and prevents stale cross-version pins.
 
+Reusable workflows that run central scripts read them through the `central-implementation` action,
+loaded with that same self-reference: it copies the repository the runner already downloaded for
+the called workflow into the job workspace, after checking that the runner loaded it from the
+repository and the reference of that workflow, instead of fetching this repository again.
+
 ## Secrets Required
 
 | Secret                 | Used by           |

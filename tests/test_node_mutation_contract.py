@@ -73,8 +73,8 @@ def test_node_mutation_materializes_central_workflow_after_candidate_checkout() 
     workflow = WORKFLOW.read_text(encoding="utf-8")
 
     checkout = workflow.index("- name: Checkout exact candidate")
-    central = workflow.index("- name: Fetch central workflow implementation")
+    central = workflow.index("- name: Load central workflow implementation")
     classify = workflow.index("- name: Classify mutation depth")
 
     assert checkout < central < classify
-    assert 'DEST="$GITHUB_WORKSPACE/.workflow-ci"' in workflow
+    assert "path: .workflow-ci" in workflow

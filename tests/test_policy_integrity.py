@@ -325,11 +325,12 @@ def test_policy_integrity_workflow_resolves_annotated_release_tags() -> None:
         / "policy-integrity.yml"
     ).read_text(encoding="utf-8")
 
-    assert (
-        'test "$(git -C .workflow-ci-policy rev-parse HEAD)" = '
-        "\"$(git -C .workflow-ci-policy rev-parse '${{ job.workflow_sha }}^{commit}')\""
-        in workflow
-    )
+    # An annotated tag makes job.workflow_sha the tag object, and the runner
+    # loads the implementation under that same reference: it is compared
+    # verbatim by the action, then the copy is compared to what was loaded.
+    assert "uses: $/.github/actions/central-implementation" in workflow
+    assert "workflow-sha: ${{ job.workflow_sha }}" in workflow
+    assert 'diff -rq "$CENTRAL_SOURCE" .workflow-ci-policy' in workflow
 
 
 def hidden_wrapper(version: str, evaluator: str, runner: str, extra: str = "") -> str:
@@ -510,92 +511,8 @@ def test_campaign_checkout_peels_annotated_release_tags() -> None:
         MODULE_PATH.parents[1] / "actions" / "mutation-campaign-checkout" / "action.yml"
     ).read_text(encoding="utf-8")
 
-    assert (
-        'test "$(git -C .workflow-ci rev-parse HEAD)" = '
-        '"$(git -C .workflow-ci rev-parse "${WORKFLOW_SHA}^{commit}")"' in action
-    )
-
-
-def test_initial_trust_check_peels_tags_and_rejects_wrong_commit(
-    tmp_path: Path,
-) -> None:
-    import os
-    import subprocess
-
-    import yaml
-
-    workflow = yaml.safe_load(
-        (MODULE_PATH.parents[1] / "workflows" / "policy-integrity.yml").read_text()
-    )
-    step = next(
-        s
-        for s in workflow["jobs"]["policy-integrity"]["steps"]
-        if s["name"] == "Verify trusted implementation before using its checkout helper"
-    )
-    repo = tmp_path / ".workflow-ci-policy"
-    repo.mkdir()
-
-    def git(*args: str) -> str:
-        return subprocess.check_output(
-            ["git", "-C", str(repo), *args], text=True
-        ).strip()
-
-    git("init")
-    git(
-        "-c",
-        "user.name=Test",
-        "-c",
-        "user.email=test@example.invalid",
-        "commit",
-        "--allow-empty",
-        "-m",
-        "first",
-    )
-    first = git("rev-parse", "HEAD")
-    git(
-        "-c",
-        "user.name=Test",
-        "-c",
-        "user.email=test@example.invalid",
-        "tag",
-        "-a",
-        "v1.0.0",
-        "-m",
-        "release",
-    )
-    tag_object = git("rev-parse", "v1.0.0")
-    assert tag_object != first
-    for ref in (first, tag_object):
-        assert (
-            subprocess.run(
-                ["bash", "-c", step["run"]],
-                cwd=tmp_path,
-                env={**os.environ, "WORKFLOW_SHA": ref},
-                capture_output=True,
-                check=False,
-            ).returncode
-            == 0
-        )
-    git(
-        "-c",
-        "user.name=Test",
-        "-c",
-        "user.email=test@example.invalid",
-        "commit",
-        "--allow-empty",
-        "-m",
-        "second",
-    )
-    assert (
-        subprocess.run(
-            ["bash", "-c", step["run"]],
-            cwd=tmp_path,
-            env={**os.environ, "WORKFLOW_SHA": tag_object},
-            capture_output=True,
-            check=False,
-        ).returncode
-        != 0
-    )
+    assert "uses: $/.github/actions/central-implementation" in action
+    assert "workflow-sha: ${{ inputs.workflow-sha }}" in action
 
 
 def test_policy_integrity_never_starts_a_job_for_forks() -> None:

@@ -45,13 +45,12 @@ jobs:
           enable-cache: false
           prune-cache: false
 
-      - name: Checkout central workflow implementation
-        uses: actions/checkout@v7
+      - name: Load central workflow implementation without network access
+        uses: $/.github/actions/central-implementation
         with:
-          repository: ${{ job.workflow_repository }}
-          ref: ${{ job.workflow_sha }}
+          workflow-repository: ${{ job.workflow_repository }}
+          workflow-sha: ${{ job.workflow_sha }}
           path: .workflow-ci
-          persist-credentials: false
 
       - name: Explain mandatory mutation testing
         env:
@@ -93,13 +92,12 @@ jobs:
           enable-cache: false
           prune-cache: false
 
-      - name: Checkout central workflow implementation
-        uses: actions/checkout@v7
+      - name: Load central workflow implementation without network access
+        uses: $/.github/actions/central-implementation
         with:
-          repository: ${{ job.workflow_repository }}
-          ref: ${{ job.workflow_sha }}
+          workflow-repository: ${{ job.workflow_repository }}
+          workflow-sha: ${{ job.workflow_sha }}
           path: .workflow-ci
-          persist-credentials: false
 
       - name: Recompute linked pull request mutation policy
         env:
