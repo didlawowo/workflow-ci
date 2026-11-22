@@ -59,3 +59,12 @@ def test_proxy_credentials_are_never_passed_to_candidate(value):
 
 def test_no_endpoint_is_invented_when_runner_has_no_registry_configuration():
     assert environment.proxy_environment({}) == {}
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [("2", "2"), ("", None), ("0", None), ("2\nX=1", None), ("default", None)],
+)
+def test_runner_cpu_count_reaches_candidate_only_as_a_plain_integer(value, expected):
+    child = environment.execution_environment({"PYTHON_CPU_COUNT": value})
+    assert child.get("PYTHON_CPU_COUNT") == expected

@@ -46,6 +46,11 @@ EXECUTION_KEYS = (
     "MUTATION_SHARD_COUNT",
     "MUTATION_PLAN",
 )
+# Non-secret sizing hint set by runner infrastructure. Python >= 3.13 reads it
+# in os.cpu_count(), which otherwise reports every core of the node instead of
+# the container CPU limit: test tools then fork one worker per node core and
+# exhaust the runner memory limit.
+CPU_COUNT_KEY = "PYTHON_CPU_COUNT"
 
 
 def proxy_environment(environment: dict[str, str]) -> dict[str, str]:
@@ -69,6 +74,9 @@ def proxy_environment(environment: dict[str, str]) -> dict[str, str]:
 def execution_environment(environment: dict[str, str]) -> dict[str, str]:
     result = {key: environment[key] for key in EXECUTION_KEYS if key in environment}
     result.update(proxy_environment(environment))
+    cpu_count = environment.get(CPU_COUNT_KEY, "")
+    if cpu_count.isascii() and cpu_count.isdigit() and 1 <= int(cpu_count) <= 1024:
+        result[CPU_COUNT_KEY] = cpu_count
     result["TZ"] = "Europe/Paris"
     return result
 
