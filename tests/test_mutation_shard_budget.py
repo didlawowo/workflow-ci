@@ -67,7 +67,7 @@ def test_campaign_workflow_sizes_the_shard_job_from_the_plan():
         "${{ steps.shard-budget.outputs.shard-timeout || '45' }}"
     )
     assert shard_job["timeout-minutes"] == (
-        "${{ needs.plan.outputs.shard-timeout || 45 }}"
+        "${{ fromJSON(needs.plan.outputs.shard-timeout || '45') }}"
     )
     budget_step = next(
         s for s in plan_job["steps"] if s.get("id") == "shard-budget"
