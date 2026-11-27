@@ -586,6 +586,7 @@ def ci_checks(
 def aggregate_gate(report: dict[str, Any]) -> dict[str, Any]:
     failures: list[str] = []
     missing: list[str] = []
+    cancelled = False
 
     # Documentation-only pull request: tests, coverage and Sonar are not
     # applicable; quality and security (secret scan) remain required.
@@ -624,7 +625,12 @@ def aggregate_gate(report: dict[str, Any]) -> dict[str, Any]:
 
     mutation = report.get("mutation") or {}
     if "execution_status" in mutation:
-        if mutation["execution_status"] in {"failure", "cancelled"}:
+        if mutation["execution_status"] == "cancelled":
+            # Superseded by a newer revision or a re-run: no verdict, not a
+            # regression. Never PASS; the latest run decides.
+            cancelled = True
+            missing.append("mutation-execution")
+        elif mutation["execution_status"] == "failure":
             failures.append("mutation-execution")
         elif mutation["execution_status"] != "success":
             missing.append("mutation-execution")
@@ -647,6 +653,8 @@ def aggregate_gate(report: dict[str, Any]) -> dict[str, Any]:
 
     if failures:
         status = "FAIL"
+    elif cancelled:
+        status = "CANCELLED"
     elif missing:
         status = "INCOMPLETE"
     else:
@@ -841,7 +849,7 @@ def render_markdown(report: dict[str, Any]) -> str:
     build_summary = build.get("status", "not measured")
     e2e_summary = e2e.get("status", "not measured")
 
-    gate_icon = {"PASS": "✅", "FAIL": "❌", "INCOMPLETE": "⚠️"}[gate["status"]]
+    gate_icon = {"PASS": "✅", "FAIL": "❌", "INCOMPLETE": "⚠️", "CANCELLED": "⏹️"}[gate["status"]]
     gate_details = []
     if gate["failures"]:
         gate_details.append("failed: " + ", ".join(gate["failures"]))
@@ -849,6 +857,8 @@ def render_markdown(report: dict[str, Any]) -> str:
         gate_details.append("missing: " + ", ".join(gate["missing"]))
     if report.get("documentation_only"):
         gate_details.append("documentation only: tests, coverage and Sonar not applicable")
+    if gate["status"] == "CANCELLED":
+        gate_details.append("run cancelled by a newer revision or a re-run: not a regression, the latest run decides")
     gate_summary = f"{gate_icon} **{gate['status']}**"
     if gate_details:
         gate_summary += " · " + " · ".join(gate_details)

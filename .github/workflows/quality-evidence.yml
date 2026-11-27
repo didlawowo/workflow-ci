@@ -89,7 +89,7 @@ on:
         default: ""
     outputs:
       trusted-status:
-        description: "Blocking trusted gate verdict independent from report publication"
+        description: "Blocking trusted gate verdict independent from report publication: pass, fail, or cancelled (no verdict, run superseded); only pass passes"
         value: ${{ jobs.trusted-gate.outputs.status }}
     secrets:
       SONAR_TOKEN:
@@ -419,6 +419,14 @@ jobs:
             echo "status=pass" >> "$GITHUB_OUTPUT"
             echo "Trusted gate: PASS"
             exit 0
+          fi
+
+          # A run cancelled by a newer revision or a re-run produced no verdict:
+          # still blocking, but reported as cancelled rather than as a failure.
+          if [[ "$SCOPE_RESULT" == "cancelled" || "$QUALITY_RESULT" == "cancelled" || "$MUTATION_RESULT" == "cancelled" ]]; then
+            echo "status=cancelled" >> "$GITHUB_OUTPUT"
+            echo "::notice::Trusted gate: CANCELLED. This run was cancelled (newer revision or re-run) before producing a verdict; it is not a regression. The latest run decides."
+            exit 1
           fi
 
           echo "status=fail" >> "$GITHUB_OUTPUT"

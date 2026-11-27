@@ -550,6 +550,9 @@ def test_quality_evidence_separates_blocking_gate_from_best_effort_publication()
     assert "MUTATION_RESULT: ${{ needs.mutation.result }}" in gate
     assert 'echo "status=pass" >> "$GITHUB_OUTPUT"' in gate
     assert 'echo "status=fail" >> "$GITHUB_OUTPUT"' in gate
+    # #311 : annulé reste bloquant (exit 1) mais se lit comme tel.
+    cancelled = gate.split('echo "status=cancelled" >> "$GITHUB_OUTPUT"', 1)[1]
+    assert cancelled.split("\n", 3)[2].strip() == "exit 1"
     assert "pull-requests: write" not in gate
 
     assert "needs: [trusted-gate, independent-verification, mutation]" in publisher
