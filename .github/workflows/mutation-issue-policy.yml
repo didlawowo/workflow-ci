@@ -41,6 +41,9 @@ jobs:
       - name: Install uv for policy helpers
         if: steps.uv-runtime.outputs.preinstalled != 'true'
         uses: $/.github/actions/setup-uv
+        with:
+          enable-cache: false
+          prune-cache: false
 
       - name: Load central workflow implementation without network access
         uses: $/.github/actions/central-implementation
@@ -85,6 +88,9 @@ jobs:
       - name: Install uv for policy helpers
         if: steps.uv-runtime.outputs.preinstalled != 'true'
         uses: $/.github/actions/setup-uv
+        with:
+          enable-cache: false
+          prune-cache: false
 
       - name: Load central workflow implementation without network access
         uses: $/.github/actions/central-implementation

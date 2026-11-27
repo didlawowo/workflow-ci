@@ -159,6 +159,9 @@ jobs:
       - name: Install uv for policy and mutation helpers
         if: steps.uv-runtime.outputs.preinstalled != 'true'
         uses: $/.github/actions/setup-uv
+        with:
+          enable-cache: false
+          prune-cache: false
 
       - name: Classify pull request from trusted policy
         id: policy
@@ -691,6 +694,9 @@ jobs:
       - name: Install uv for verification helpers
         if: steps.uv-runtime.outputs.preinstalled != 'true'
         uses: $/.github/actions/setup-uv
+        with:
+          enable-cache: false
+          prune-cache: false
 
       - name: Re-classify pull request independently
         id: policy

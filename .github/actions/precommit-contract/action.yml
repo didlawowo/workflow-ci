@@ -27,6 +27,9 @@ runs:
     - name: Install uv
       if: steps.uv-runtime.outputs.preinstalled != 'true'
       uses: $/.github/actions/setup-uv
+      with:
+        enable-cache: false
+        prune-cache: false
 
     - name: Validate pre-commit configuration exists
       shell: bash

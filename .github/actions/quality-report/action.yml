@@ -120,6 +120,9 @@ runs:
     - name: Install uv for quality reporter
       if: steps.uv-runtime.outputs.preinstalled != 'true'
       uses: $/.github/actions/setup-uv
+      with:
+        enable-cache: false
+        prune-cache: false
 
     - name: Provision quality reporter Python
       shell: bash

@@ -38,6 +38,8 @@ runs:
       if: steps.uv-runtime.outputs.preinstalled != 'true'
       uses: $/.github/actions/setup-uv
       with:
+        enable-cache: false
+        prune-cache: false
         working-directory: ${{ inputs.working-directory }}
 
     - name: Set up Python
