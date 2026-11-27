@@ -44,6 +44,7 @@ jobs:
       depth: ${{ steps.policy.outputs.depth }}
       matrix: ${{ steps.plan.outputs.matrix }}
       shard-count: ${{ steps.generate.outputs.shard-count }}
+      shard-timeout: ${{ steps.shard-budget.outputs.shard-timeout || '45' }}
     steps:
       - uses: $/.github/actions/mutation-campaign-checkout
         with:
@@ -103,6 +104,17 @@ jobs:
           uv run --no-project --python "$ANALYSIS_PYTHON" python .workflow-ci/.ci/mutation_campaign.py plan \
             --plan "$RUNNER_TEMP/plan.json" --repo pr --base "$BASE_SHA" --head "$HEAD_SHA" \
             --directory "$DIRECTORY" --shards "$SHARDS" --output "$RUNNER_TEMP/validated-plan.json"
+      - name: Derive shard timeout from campaign size
+        id: shard-budget
+        if: steps.policy.outputs.required == 'true'
+        env:
+          PLAN_FILE: ${{ runner.temp }}/validated-plan.json
+          MUTATION_SHARD_PACE_SECONDS: ${{ vars.MUTATION_SHARD_PACE_SECONDS || '30' }}
+          MUTATION_SHARD_SETUP_MINUTES: ${{ vars.MUTATION_SHARD_SETUP_MINUTES || '15' }}
+        run: |
+          set -euo pipefail
+          uv run --no-project --python 3.12 python .workflow-ci/.ci/mutation_shard_budget.py \
+            "$PLAN_FILE" >> "$GITHUB_OUTPUT"
       - name: Publish required execution plan
         if: steps.policy.outputs.required == 'true'
         uses: actions/upload-artifact@v6
@@ -118,7 +130,11 @@ jobs:
     if: needs.plan.outputs.required == 'true'
     needs: plan
     runs-on: ${{ vars.UNTRUSTED_RUNNER || inputs.runner }}
-    timeout-minutes: 45
+    # Sized from the plan itself: a fixed ceiling cancels campaigns whose
+    # per-mutant cost exceeds the assumption (cancelled shard = missing
+    # mandatory evidence = gate red on every PR touching a sizeable function).
+    # fromJSON casts the string output to the number the runner requires.
+    timeout-minutes: ${{ fromJSON(needs.plan.outputs.shard-timeout || '45') <= 360 && fromJSON(needs.plan.outputs.shard-timeout || '45') || 45 }}
     strategy:
       fail-fast: false
       max-parallel: 4
