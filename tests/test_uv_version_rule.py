@@ -61,7 +61,10 @@ def run_contains_resolve(step: dict) -> bool:
     else:
         return False
 
-    return "resolve-version.sh" in text or "required-version" in text
+    if re.search(r'echo "version=\$\(bash [^)]*resolve-version\.sh', text):
+        return False  # the script's failure would be swallowed by echo
+    code = "\n".join(line for line in text.splitlines() if not line.lstrip().startswith("#"))
+    return "resolve-version.sh" in code or "required-version[[:space:]]*=" in code
 
 
 def iter_yaml_files() -> list[Path]:

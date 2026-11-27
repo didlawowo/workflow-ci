@@ -2,7 +2,9 @@ name: "Setup uv"
 description: >
   Install uv at the version pinned by the shared CI, unless the project
   declares its own `required-version` (uv.toml or [tool.uv] in pyproject.toml),
-  which then takes precedence.
+  which then takes precedence. Only `working-directory` is searched: steps that
+  install uv for the central helpers before any project checkout (mutation
+  policy and campaign jobs) apply the pinned version.
 
 inputs:
   working-directory:
@@ -26,7 +28,10 @@ runs:
       shell: bash
       env:
         PROJECT_DIR: ${{ inputs.working-directory }}
-      run: echo "version=$(bash "$GITHUB_ACTION_PATH/resolve-version.sh" "$PROJECT_DIR")" >> "$GITHUB_OUTPUT"
+      # Run apart from echo: a failure of the script must fail this step.
+      run: |
+        version="$(bash "$GITHUB_ACTION_PATH/resolve-version.sh" "$PROJECT_DIR")"
+        echo "version=$version" >> "$GITHUB_OUTPUT"
 
     - name: Install uv
       uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
