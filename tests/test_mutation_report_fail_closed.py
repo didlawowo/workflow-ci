@@ -41,8 +41,8 @@ def evidence(tmp_path):
         ("failure", "false", False, "FAIL"),
         ("failure", "true", True, "FAIL"),
         # #311 : annulé = aucun verdict, jamais PASS, distinct d'un échec.
-        ("cancelled", "", False, "CANCELLED"),
-        ("cancelled", "false", True, "CANCELLED"),
+        ("cancelled", "", False, "INCOMPLETE"),
+        ("cancelled", "false", True, "INCOMPLETE"),
         ("skipped", "false", False, "INCOMPLETE"),
         ("", "false", False, "INCOMPLETE"),
         ("unknown", "true", True, "INCOMPLETE"),
@@ -378,7 +378,7 @@ def test_gate_decision_table_checks_all_required_sections_and_failure_precedence
         ("mutation", {"suspicious": 1}, ["mutation"], []),
         ("mutation", {"not_covered": 1}, ["mutation"], []),
         ("mutation", {"required": False, "available": False}, [], []),
-        ("mutation", {"execution_status": "cancelled"}, [], ["mutation-execution"]),
+        ("mutation", {"execution_status": "cancelled"}, [], ["mutation-execution-cancelled"]),
         ("mutation", {"execution_status": "failure"}, ["mutation-execution"], []),
         ("mutation", {"execution_status": "unknown"}, [], ["mutation-execution"]),
         ("mutation", {"policy_status": "unknown"}, [], ["mutation-policy"]),
@@ -391,9 +391,7 @@ def test_gate_decision_table_checks_all_required_sections_and_failure_precedence
         data = copy.deepcopy(passing)
         data[section].update(changes)
         assert quality_report.aggregate_gate(data) == {
-            "status": "FAIL" if failures
-            else "CANCELLED" if changes.get("execution_status") == "cancelled"
-            else "INCOMPLETE" if missing else "PASS",
+            "status": "FAIL" if failures else "INCOMPLETE" if missing else "PASS",
             "failures": failures,
             "missing": missing,
         }, (section, changes)
