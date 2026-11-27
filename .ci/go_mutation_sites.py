@@ -56,7 +56,7 @@ def changed_lines(project: Path, base: str, head: str) -> dict[str, set[int]]:
         "--relative",
         "--name-only",
         "-z",
-        "--diff-filter=ACMR",
+        "--diff-filter=ACMRT",
         f"{base}...{head}",
         "--",
         ".",
@@ -66,12 +66,17 @@ def changed_lines(project: Path, base: str, head: str) -> dict[str, set[int]]:
         if not is_production_go(path):
             continue
         lines: set[int] = set()
+        hunks = 0
         diff = _git(
             project,
             "diff",
             "--relative",
             "--no-color",
             "--no-ext-diff",
+            # A PR-controlled .gitattributes (-diff, binary, textconv) must not
+            # hide its hunks: force a textual diff of the raw content.
+            "--text",
+            "--no-textconv",
             "-U0",
             f"{base}...{head}",
             "--",
@@ -80,9 +85,12 @@ def changed_lines(project: Path, base: str, head: str) -> dict[str, set[int]]:
         for row in diff.splitlines():
             match = _HUNK.match(row)
             if match:
+                hunks += 1
                 start = int(match[1])
                 count = 1 if match[2] is None else int(match[2])
                 lines.update(range(start, start + count))
+        if not hunks:
+            raise ValueError(f"Changed Go file without a textual diff: {path}")
         result[path] = lines
     return result
 

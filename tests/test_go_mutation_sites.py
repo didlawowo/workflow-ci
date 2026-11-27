@@ -539,3 +539,17 @@ def test_runner_propage_code_sortie_gremlins_quand_preuve_valide(tmp_path: Path)
     assert report["stats"]["total"] == 1
     assert report["stats"]["killed"] == 1
     assert report["scope"]["no_targets"] is False
+
+
+def test_check_no_mutable_sites_ignore_gitattributes_qui_masque_le_diff(tmp_path: Path) -> None:
+    repo = _init_repo(tmp_path)
+    _write(repo, "a.go", "package a\n\nfunc Add(a, b int) int { return a + b }\n")
+    base_sha = _commit_all(repo, "base")
+    _write(repo, ".gitattributes", "*.go -diff\n")
+    _write(repo, "a.go", "package a\n\nfunc Add(a, b int) int { return a - b }\n")
+    head_sha = _commit_all(repo, "head")
+
+    with pytest.raises(ValueError):
+        go_mutation_sites.check_no_mutable_sites(
+            repo, base_sha, head_sha, [{"file": "a.go", "line": 3}]
+        )
