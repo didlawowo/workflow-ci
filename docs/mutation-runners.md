@@ -130,6 +130,24 @@ code must be resolved from the protected script's directory. No forge credential
 or action output files are passed to them. They write only their ordinary scratch
 output argument. Preparation and verification use separate exact SHA checkouts.
 
+Trusted policy integrity rejects any pull request that introduces, changes or
+removes these entrypoints. One exception exists for repositories that are
+themselves forks of an upstream project, where the default campaign would
+mutate upstream code the fork does not maintain: such a pull request may
+**add** `.ci/mutation-plan.sh` when the base branch has nothing at that path, as
+a regular file inside the checkout. Fork status is read from the forge's
+metadata for the base repository (`github.event.repository.fork` in the
+`pull_request_target` payload), never from a candidate file; on any other
+repository, or for any other value, the rule is unchanged. The exception covers
+the plan only: changing or removing it later, and `.ci/mutation-shard.sh` or
+`.ci/mutation.sh`, stay violations. Entrypoints always run from the protected
+base, so the added plan does not run in the pull request that introduces it; it
+applies from the first pull request after merge, in the unprivileged campaign
+job, without forge credentials. The integrity check cannot judge which code a
+plan selects: reviewing that scope belongs to the review of the pull request
+that adds it, which should contain nothing else. Decision recorded on
+[issue #274](https://github.com/didlawowo/workflow-ci/issues/274).
+
 The plan schema is:
 
 ```json
