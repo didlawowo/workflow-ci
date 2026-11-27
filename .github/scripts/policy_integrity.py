@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 from pathlib import Path
 from typing import Any
@@ -20,6 +21,12 @@ PROTECTED_PATHS = (
     ".ci/mutation-shard.sh",
     "sonar-project.properties",
 )
+
+# A repository that is itself a fork (repository.fork in the forge's own
+# metadata, never a candidate file) may introduce these entrypoints once, to
+# bound the campaign to the code it maintains. Afterwards they are protected
+# like any other policy file. Decision recorded on workflow-ci issue #274.
+FORK_INTRODUCIBLE_PATHS = (".ci/mutation-plan.sh",)
 
 WRAPPER = ".github/workflows/trusted-quality-evidence.yml"
 SEMVER_WRAPPERS = {
@@ -245,7 +252,33 @@ def _hosted_runner_violations(candidate: Path) -> list[dict[str, str]]:
     return violations
 
 
-def evaluate(base: Path, candidate: Path, repository: str = "") -> dict[str, Any]:
+def _fork_introduction(base: Path, candidate: Path, relative: str) -> tuple[bool, str]:
+    """Accept a fork's first entrypoint only as a regular file inside the checkout.
+
+    The trusted job follows links when reading, so a link, or a parent folder
+    linked outside the candidate, is refused. Anything left at that path on the
+    base (dangling link, folder) means the path is not new.
+    """
+    if os.path.lexists(base / relative):
+        return False, "protected policy file already exists on the trusted base"
+    path = candidate / relative
+    if path.is_symlink() or not path.is_file():
+        return False, "fork-introduced policy file must be a regular file"
+    if not path.resolve().is_relative_to(candidate.resolve()):
+        return False, "fork-introduced policy file resolves outside the candidate"
+    return True, (
+        "fork repository introduced its own entrypoint; it runs from the "
+        "protected base only after merge"
+    )
+
+
+def evaluate(
+    base: Path,
+    candidate: Path,
+    repository: str = "",
+    *,
+    repository_is_fork: bool = False,
+) -> dict[str, Any]:
     changed: list[str] = []
     allowed: list[dict[str, str]] = []
     violations: list[dict[str, str]] = []
@@ -333,6 +366,19 @@ def evaluate(base: Path, candidate: Path, repository: str = "") -> dict[str, Any
             violations.append({"path": relative, "reason": reason})
             continue
 
+        if (
+            repository_is_fork
+            and relative in FORK_INTRODUCIBLE_PATHS
+            and before is None
+            and after is not None
+        ):
+            ok, reason = _fork_introduction(base, candidate, relative)
+            if ok:
+                allowed.append({"path": relative, "reason": reason})
+            else:
+                violations.append({"path": relative, "reason": reason})
+            continue
+
         if before is None:
             reason = "protected policy file was introduced by the candidate"
         elif after is None:
@@ -367,9 +413,17 @@ def main() -> int:
     parser.add_argument("--candidate", required=True, type=Path)
     parser.add_argument("--report", required=True, type=Path)
     parser.add_argument("--repository", required=True)
+    # Forge metadata of the base repository (GitHub repository.fork), passed by
+    # the trusted workflow. Only the exact value "true" changes the verdict.
+    parser.add_argument("--repository-fork", choices=("true", "false"), default="false")
     args = parser.parse_args()
 
-    report = evaluate(args.base.resolve(), args.candidate.resolve(), args.repository)
+    report = evaluate(
+        args.base.resolve(),
+        args.candidate.resolve(),
+        args.repository,
+        repository_is_fork=args.repository_fork == "true",
+    )
     args.report.parent.mkdir(parents=True, exist_ok=True)
     args.report.write_text(
         json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8"
