@@ -826,3 +826,14 @@ def test_trusted_gate_reports_cancelled_only_without_real_failure(tmp_path, qual
            "MUTATION_REPORT_FILE": "r" if report == "true" else "", "MUTATION_REPORT_PRESENT": report}
     code = subprocess.run(["bash", "-c", script], env=env, capture_output=True).returncode
     assert (code == 0) == (status == "pass") and output.read_text() == f"status={status}\n"
+
+
+def test_trusted_gate_reads_a_cascade_from_a_cancelled_scope_as_cancelled(tmp_path):
+    """#311 : portée annulée, exécution indépendante sautée en cascade : annulé, pas échec."""
+    script = yaml.safe_load(WORKFLOW.read_text())["jobs"]["trusted-gate"]["steps"][0]["run"]
+    output = tmp_path / "out"
+    env = {"PATH": os.environ["PATH"], "GITHUB_OUTPUT": str(output), "SCOPE_REQUESTED": "true", "SCOPE_RESULT": "cancelled",
+           "INDEPENDENT_ENABLED": "true", "QUALITY_RESULT": "skipped", "MUTATION_RESULT": "cancelled", "MUTATION_REQUIRED": "",
+           "MUTATION_REPORT_FILE": "", "MUTATION_REPORT_PRESENT": "false"}
+    assert subprocess.run(["bash", "-c", script], env=env).returncode == 1
+    assert output.read_text() == "status=cancelled\n"

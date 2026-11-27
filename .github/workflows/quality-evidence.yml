@@ -392,7 +392,8 @@ jobs:
           if [[ "$INDEPENDENT_ENABLED" == "true" ]]; then
             if [[ "$QUALITY_RESULT" != "success" ]]; then
               echo "::error::Independent quality execution did not succeed: $QUALITY_RESULT"
-              fail "$QUALITY_RESULT"
+              # Skipped because the change-scope job it depends on was cancelled.
+              if [[ "$QUALITY_RESULT" == skipped && "$SCOPE_RESULT" == cancelled ]]; then fail cancelled; else fail "$QUALITY_RESULT"; fi
             fi
           elif [[ "$QUALITY_RESULT" != "skipped" ]]; then
             echo "::error::Independent verification is disabled but the job did not skip: $QUALITY_RESULT"
