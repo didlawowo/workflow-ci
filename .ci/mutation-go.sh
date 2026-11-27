@@ -138,7 +138,7 @@ if [[ ! -s "$RAW_REPORT" ]]; then
   exit "${gremlins_rc:-1}"
 fi
 
-uv run --no-project --python 3.12 python - "$BASE_SHA" "$HEAD_SHA" "$GREMLINS_VERSION" "$RAW_REPORT" "$REPORT" "$SCRIPT_DIR" "$gremlins_rc" <<'PY'
+uv run --no-project --python 3.12 python - "$BASE_SHA" "$HEAD_SHA" "$GREMLINS_VERSION" "$RAW_REPORT" "$REPORT" "$SCRIPT_DIR" <<'PY'
 import json
 import sys
 from collections import Counter
@@ -193,7 +193,8 @@ if total <= 0:
     message = (
         "Gremlins produced no viable mutation evidence for changed non-test Go files"
     )
-    if sys.argv[7] != "0" or payload["engine"]["mutants_not_viable"]:
+    # A failed Gremlins run still fails below on its exit code.
+    if payload["engine"]["mutants_not_viable"]:
         raise SystemExit(message)
     # Zero mutants is accepted only with a proof that no reported site, of any
     # status, lies on a changed line (go_mutation_sites, rechecked by the verifier).
