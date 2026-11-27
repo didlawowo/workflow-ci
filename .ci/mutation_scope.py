@@ -187,12 +187,26 @@ def _is_inert_value(value: ast.expr | None) -> bool:
     return isinstance(value, ast.Name) and value.id not in _MUTMUT_MUTATED_NAMES
 
 
+# Method names mutmut swaps even without arguments (a.lower() -> a.upper()):
+# supported_symmetric_str_methods_swap and supported_unsymmetrical_str_methods_swap
+# in mutmut/mutation/mutators.py. split/rsplit are kept mutable by caution.
+_MUTMUT_SWAPPED_METHODS = frozenset(
+    {
+        "lower", "upper", "lstrip", "rstrip", "find", "rfind", "ljust", "rjust",
+        "index", "rindex", "removeprefix", "removesuffix", "partition",
+        "rpartition", "split", "rsplit",
+    }
+)
+
+
 def _is_inert_callee(node: ast.expr) -> bool:
     """A callee mutmut leaves intact: a plain name, an attribute chain or call."""
     if isinstance(node, ast.Name):
         return node.id not in _MUTMUT_MUTATED_NAMES
     if isinstance(node, ast.Attribute):
-        return _is_inert_callee(node.value)
+        return node.attr not in _MUTMUT_SWAPPED_METHODS and _is_inert_callee(
+            node.value
+        )
     return _is_inert_call(node)
 
 
@@ -201,7 +215,8 @@ def _is_inert_call(node: ast.expr) -> bool:
 
     Measured on mutmut 3.8: ``f()``, ``self.a.b()``, ``f()()`` and
     ``f().g()`` produce no mutant; any positional, starred or keyword
-    argument keeps the call mutable.
+    argument keeps the call mutable, and so does a method mutmut swaps
+    (``_MUTMUT_SWAPPED_METHODS``).
     """
     return (
         isinstance(node, ast.Call)

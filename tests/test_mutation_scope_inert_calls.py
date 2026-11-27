@@ -93,6 +93,17 @@ def test_call_with_mutable_part_stays_a_target(tmp_path: Path, template: str):
     )
 
 
+SWAPPED = sorted(mutation_scope._MUTMUT_SWAPPED_METHODS)
+
+
+@pytest.mark.parametrize("method", SWAPPED)
+def test_method_mutmut_swaps_stays_a_target(tmp_path: Path, method: str):
+    """Revue PR 309 : mutmut échange s.lower() en s.upper() même sans argument."""
+    before = "def f(s):\n    return s.a()\n"
+    after = f"def f(s):\n    return s.{method}()\n"
+    assert _targets(tmp_path, before, after) == ("m.*f__mutmut_*",)
+
+
 @pytest.mark.parametrize("name", ["deepcopy", "True"])
 def test_call_of_a_name_mutmut_rewrites_stays_a_target(tmp_path: Path, name: str):
     before = "def f():\n    a()\n"
