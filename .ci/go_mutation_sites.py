@@ -50,20 +50,40 @@ def _git(project: Path, *args: str) -> str:
 
 def changed_lines(project: Path, base: str, head: str) -> dict[str, set[int]]:
     """Head-side line numbers added or modified, per production Go file."""
-    listing = _git(
+    # Raw entries carry modes and blobs. A symlink or a submodule anywhere in
+    # the diff can change compiled Go code without a reviewable .go hunk, and a
+    # tracked .go symlink compiles its target: none of them can prove "empty".
+    raw = _git(
         project,
         "diff",
         "--relative",
-        "--name-only",
+        "--raw",
+        "--no-abbrev",
+        "--no-renames",
         "-z",
-        "--diff-filter=ACMRT",
         f"{base}...{head}",
         "--",
         ".",
-    )
+    ).split("\0")
+    entries = []
+    for header, path in zip(raw[0::2], raw[1::2]):
+        old_mode, new_mode, old_blob, new_blob, status = header.lstrip(":").split()
+        if {old_mode, new_mode} & {"120000", "160000"}:
+            raise ValueError(f"Symlink or submodule changed: {path}")
+        if status != "D":
+            entries.append((path, old_blob == new_blob))
+    tree = _git(project, "ls-tree", "-r", "-z", head, "--", ".").split("\0")
+    for row in filter(None, tree):
+        mode, _, rest = row.partition(" ")
+        if mode == "120000" and rest.split("\t", 1)[1].endswith(".go"):
+            raise ValueError("Go file tracked as a symlink: " + rest.split("\t", 1)[1])
     result: dict[str, set[int]] = {}
-    for path in filter(None, listing.split("\0")):
+    for path, same_content in entries:
         if not is_production_go(path):
+            continue
+        if same_content:
+            # Mode-only change (chmod): no line changed.
+            result[path] = set()
             continue
         lines: set[int] = set()
         hunks = 0

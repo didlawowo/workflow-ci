@@ -198,9 +198,11 @@ if total <= 0:
         raise SystemExit(message)
     # Zero mutants is accepted only with a proof that no reported site, of any
     # status, lies on a changed line (go_mutation_sites, rechecked by the verifier).
-    changed = set(go_mutation_sites.changed_lines(Path("."), sys.argv[1], sys.argv[2]))
-    sites = go_mutation_sites.reported_sites(raw, changed)
     try:
+        changed = set(
+            go_mutation_sites.changed_lines(Path("."), sys.argv[1], sys.argv[2])
+        )
+        sites = go_mutation_sites.reported_sites(raw, changed)
         go_mutation_sites.check_no_mutable_sites(
             Path("."), sys.argv[1], sys.argv[2], sites
         )

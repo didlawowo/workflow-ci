@@ -553,3 +553,26 @@ def test_check_no_mutable_sites_ignore_gitattributes_qui_masque_le_diff(tmp_path
         go_mutation_sites.check_no_mutable_sites(
             repo, base_sha, head_sha, [{"file": "a.go", "line": 3}]
         )
+
+
+def test_check_no_mutable_sites_refuse_un_fichier_go_en_lien_symbolique(tmp_path: Path) -> None:
+    repo = _init_repo(tmp_path)
+    _write(repo, "a.go", "package a\n\nfunc Add(a, b int) int { return a + b }\n")
+    _write(repo, "impl.txt", "package a\n\nfunc Add(a, b int) int { return a - b }\n")
+    base_sha = _commit_all(repo, "base")
+    (repo / "a.go").unlink()
+    (repo / "a.go").symlink_to("impl.txt")
+    head_sha = _commit_all(repo, "head")
+
+    with pytest.raises(ValueError):
+        go_mutation_sites.check_no_mutable_sites(repo, base_sha, head_sha, [])
+
+
+def test_changed_lines_accepte_un_simple_chmod(tmp_path: Path) -> None:
+    repo = _init_repo(tmp_path)
+    _write(repo, "a.go", "package a\n\nfunc Add(a, b int) int { return a + b }\n")
+    base_sha = _commit_all(repo, "base")
+    (repo / "a.go").chmod(0o755)
+    head_sha = _commit_all(repo, "head")
+
+    assert go_mutation_sites.changed_lines(repo, base_sha, head_sha) == {"a.go": set()}
