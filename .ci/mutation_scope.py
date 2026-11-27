@@ -187,6 +187,52 @@ def _is_inert_value(value: ast.expr | None) -> bool:
     return isinstance(value, ast.Name) and value.id not in _MUTMUT_MUTATED_NAMES
 
 
+# Method names mutmut swaps even without arguments (a.lower() -> a.upper()):
+# supported_symmetric_str_methods_swap and supported_unsymmetrical_str_methods_swap
+# in mutmut/mutation/mutators.py. split/rsplit are kept mutable by caution.
+_MUTMUT_SWAPPED_METHODS = frozenset(
+    {
+        "lower", "upper", "lstrip", "rstrip", "find", "rfind", "ljust", "rjust",
+        "index", "rindex", "removeprefix", "removesuffix", "partition",
+        "rpartition", "split", "rsplit",
+    }
+)
+
+
+def _is_inert_callee(node: ast.expr) -> bool:
+    """A callee mutmut leaves intact: a plain name, an attribute chain or call."""
+    if isinstance(node, ast.Name):
+        return node.id not in _MUTMUT_MUTATED_NAMES
+    if isinstance(node, ast.Attribute):
+        return node.attr not in _MUTMUT_SWAPPED_METHODS and _is_inert_callee(
+            node.value
+        )
+    return _is_inert_call(node)
+
+
+def _is_inert_call(node: ast.expr) -> bool:
+    """A call without arguments: mutmut 3 has no operator for ``f()``.
+
+    Measured on mutmut 3.8: ``f()``, ``self.a.b()``, ``f()()`` and
+    ``f().g()`` produce no mutant; any positional, starred or keyword
+    argument keeps the call mutable, and so does a method mutmut swaps
+    (``_MUTMUT_SWAPPED_METHODS``).
+    """
+    return (
+        isinstance(node, ast.Call)
+        and not node.args
+        and not node.keywords
+        and _is_inert_callee(node.func)
+    )
+
+
+def _is_inert_expression(value: ast.expr | None) -> bool:
+    """An expression statement or return value mutmut never rewrites."""
+    if isinstance(value, ast.Await):
+        value = value.value
+    return _is_inert_value(value) or (value is not None and _is_inert_call(value))
+
+
 _TYPE_PARAM_NODES = tuple(
     getattr(ast, name)
     for name in ("TypeVar", "ParamSpec", "TypeVarTuple")
@@ -293,11 +339,11 @@ def _has_mutable_code(node: _FunctionNode, source: str) -> bool:
                 and isinstance(value.value, str)
                 and _is_triple_quoted(value, source)
             )
-            if is_docstring or _is_inert_value(value):
+            if is_docstring or _is_inert_expression(value):
                 continue
             return True
         if isinstance(statement, ast.Return):
-            if _is_inert_value(statement.value):
+            if _is_inert_expression(statement.value):
                 continue
             return True
         if isinstance(statement, (ast.FunctionDef, ast.AsyncFunctionDef)):

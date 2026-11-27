@@ -107,10 +107,12 @@ jobs:
         if: steps.policy.outputs.required == 'true'
         uses: actions/upload-artifact@v6
         with:
-          name: mutation-plan-${{ github.run_id }}-${{ github.run_attempt }}
+          name: mutation-plan-${{ github.run_id }}
           path: ${{ runner.temp }}/validated-plan.json
           retention-days: 7
           if-no-files-found: error
+          # A full re-run replaces the plan; a re-run of failed jobs reads it.
+          overwrite: true
 
   shard:
     if: needs.plan.outputs.required == 'true'
@@ -143,7 +145,7 @@ jobs:
           prune-cache: false
       - uses: actions/download-artifact@v7
         with:
-          name: mutation-plan-${{ github.run_id }}-${{ github.run_attempt }}
+          name: mutation-plan-${{ github.run_id }}
           path: ${{ runner.temp }}/campaign-plan
       - name: Run exact partition using protected runner
         env:
@@ -162,10 +164,12 @@ jobs:
       - name: Publish required partition evidence
         uses: actions/upload-artifact@v6
         with:
-          name: mutation-fragment-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.index }}
+          name: mutation-fragment-${{ github.run_id }}-${{ matrix.index }}
           path: ${{ runner.temp }}/fragment.json
           retention-days: 7
           if-no-files-found: error
+          # A stale fragment from an older plan fails closed on plan_sha256.
+          overwrite: true
 
   verify:
     if: always()
@@ -213,12 +217,12 @@ jobs:
       - uses: actions/download-artifact@v7
         if: needs.plan.outputs.required == 'true'
         with:
-          name: mutation-plan-${{ github.run_id }}-${{ github.run_attempt }}
+          name: mutation-plan-${{ github.run_id }}
           path: ${{ runner.temp }}/campaign-plan
       - uses: actions/download-artifact@v7
         if: needs.plan.outputs.required == 'true'
         with:
-          pattern: mutation-fragment-${{ github.run_id }}-${{ github.run_attempt }}-*
+          pattern: mutation-fragment-${{ github.run_id }}-*
           path: ${{ runner.temp }}/campaign-fragments
       - name: Verify complete campaign independently
         if: needs.plan.outputs.required == 'true'
