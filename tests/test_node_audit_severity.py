@@ -20,8 +20,8 @@ ROOT = Path(__file__).resolve().parents[1]
         ({"low": 4, "moderate": 3}, "moderate", 1, 3),
         ({"low": 4, "moderate": 3}, "low", 1, 7),
         ({}, "high", 0, 0),
-        ({}, "high", 1, 1),
-        ({"high": 2}, "invalid", 0, 1),
+        ({}, "high", 1, None),
+        ({"high": 2}, "invalid", 0, None),
     ],
 )
 def test_audit_counts_only_requested_severity(
@@ -36,7 +36,8 @@ def test_audit_counts_only_requested_severity(
 
 @pytest.mark.parametrize("payload", ["invalid json", "", '{"error":{"code":"E500"}}'])
 def test_invalid_audit_response_cannot_report_clean(tmp_path, payload):
-    assert run_audit(tmp_path, payload, "high", 0) == 1
+    # #317 : illisible = erreur du scanner (None), jamais une faille ni un vert.
+    assert run_audit(tmp_path, payload, "high", 0) is None
 
 
 def run_audit(tmp_path, payload, level, status):
@@ -64,7 +65,11 @@ def run_audit(tmp_path, payload, level, status):
         check=True,
         capture_output=True,
     )
-    return int(output.read_text().strip().split("=", 1)[1])
+    values = dict(line.split("=", 1) for line in output.read_text().splitlines())
+    if values["status"] == "error":
+        assert values["scan-errors"] == "1" and values["vuln-count"] == "0"
+        return None
+    return int(values["vuln-count"])
 
 
 @pytest.mark.parametrize(
@@ -79,4 +84,4 @@ def run_audit(tmp_path, payload, level, status):
 )
 def test_incomplete_or_invalid_severity_breakdown_cannot_report_clean(tmp_path, counts):
     payload = json.dumps({"metadata": {"vulnerabilities": counts}})
-    assert run_audit(tmp_path, payload, "high", 0) == 1
+    assert run_audit(tmp_path, payload, "high", 0) is None

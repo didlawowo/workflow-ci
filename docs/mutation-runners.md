@@ -90,6 +90,19 @@ fail. No consumer review hook runs in the verification job. An older report that
 only lists reviewed IDs is intentionally insufficient; the consumer runner must
 first export the auditable function evidence and exact head SHA.
 
+### Time budget of the single mutation job
+
+The central Stryker runner replays the consumer's whole test command for every
+mutant, so its duration follows the number of mutants. `mutation-policy.yml` and
+`node-mutation-evidence.yml` therefore size the mutation step from the exact PR
+scope: the lines Stryker is told to mutate (changed hunks at `medium`, whole changed
+files at `high`) at `MUTATION_NODE_PACE_SECONDS` per line (default 40) plus
+`MUTATION_NODE_SETUP_MINUTES` (default 15), between 45 and 360 minutes
+(`.ci/mutation_run_budget.py`). Other engines keep 45 minutes. The step runs under
+`.ci/mutation_deadline.py`, which stops the whole process group on expiry and says
+so; the policy gate then reports a duration limit, or a cancellation, instead of a
+generic failure. Both remain blocking. The job `timeout-minutes` is only a ceiling.
+
 ### Complete campaigns with bounded workers
 
 Set `mutation-shards` on `quality-evidence.yml`, `ci.yml` or `mutation-policy.yml`

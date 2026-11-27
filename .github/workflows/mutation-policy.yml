@@ -78,11 +78,15 @@ jobs:
       issues: read
       pull-requests: read
     runs-on: ${{ vars.UNTRUSTED_RUNNER || vars.RUNNER || format('arc-runner-{0}', github.event.repository.name) }}
-    timeout-minutes: 45
+    # Ceiling only: the mutation step enforces the budget derived from the PR
+    # scope (.ci/mutation_run_budget.py, 45 to 360 minutes) and reports its expiry.
+    timeout-minutes: 375
     outputs:
       required: ${{ steps.policy.outputs.required }}
       labels: ${{ steps.policy.outputs.labels }}
       depth: ${{ steps.policy.outputs.depth }}
+      time-budget: ${{ steps.budget.outputs.time-budget }}
+      stop-reason: ${{ steps.run-mutation.outputs.stop-reason }}
       evidence-file: ${{ steps.inline-evidence.outputs.file }}
       evidence-b64: ${{ steps.inline-evidence.outputs.evidence-b64 }}
     steps:
@@ -388,6 +392,26 @@ jobs:
             exit 1
           fi
 
+      - name: Size mutation time budget from the PR scope
+        id: budget
+        if: steps.policy.outputs.required == 'true'
+        shell: bash
+        env:
+          SOURCE: ${{ steps.runner.outputs.source }}
+          PROJECT_DIRECTORY: ${{ steps.runner.outputs.working-directory }}
+          DEPTH: ${{ steps.policy.outputs.depth }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          MUTATION_NODE_PACE_SECONDS: ${{ vars.MUTATION_NODE_PACE_SECONDS || '40' }}
+          MUTATION_NODE_SETUP_MINUTES: ${{ vars.MUTATION_NODE_SETUP_MINUTES || '15' }}
+        run: |
+          set -euo pipefail
+          BUDGET="$(uv run --no-project --python 3.12 python .workflow-ci/.ci/mutation_run_budget.py \
+            --source "$SOURCE" --repo pr --base "$BASE_SHA" --head "$HEAD_SHA" \
+            --directory "${PROJECT_DIRECTORY:-.}" --depth "${DEPTH:-medium}")"
+          echo "$BUDGET" >> "$GITHUB_OUTPUT"
+          echo "Mutation time budget: $(tr '\n' ' ' <<<"$BUDGET")"
+
       - name: Verify mutation configuration is unchanged
         if: steps.policy.outputs.required == 'true'
         shell: bash
@@ -491,10 +515,12 @@ jobs:
           fi
 
       - name: Run trusted mutation runner against PR code
+        id: run-mutation
         if: steps.policy.outputs.required == 'true'
         shell: bash
         working-directory: pr
         env:
+          MUTATION_TIME_BUDGET: ${{ steps.budget.outputs.time-budget }}
           MUTATION_POLICY_LABELS: ${{ steps.policy.outputs.labels }}
           MUTATION_DEPTH: ${{ steps.policy.outputs.depth }}
           MUTATION_VENV: ${{ steps.mutation-python.outputs.venv }}
@@ -522,6 +548,10 @@ jobs:
 
           # No forge token, persistent HOME or shared dependency cache is
           # exposed to PR code; only fresh runner-local scratch namespaces are passed.
+          # The scope-derived budget stops the run with an explicit duration error.
+          set +e
+          python3 "$GITHUB_WORKSPACE/.workflow-ci/.ci/mutation_deadline.py" \
+            --minutes "$MUTATION_TIME_BUDGET" -- \
           env \
             PATH="$MUTATION_PATH" \
             HOME="$ISOLATED_HOME" \
@@ -537,6 +567,13 @@ jobs:
             MUTATION_WORKING_DIRECTORY="$MUTATION_WORKING_DIRECTORY" \
             python3 "$GITHUB_WORKSPACE/.workflow-ci/.ci/mutation_environment.py" -- \
             bash "${{ steps.runner.outputs.path }}"
+          status=$?
+          set -e
+          if [[ "$status" -eq 124 ]]; then
+            echo "stop-reason=time-budget" >> "$GITHUB_OUTPUT"
+            echo "::error::Mutation stopped at its ${MUTATION_TIME_BUDGET}-minute budget (derived from the PR scope). Reduce the PR scope or speed up the test command; a repository can raise the per-line pace with the MUTATION_NODE_PACE_SECONDS variable."
+          fi
+          exit "$status"
       - name: Capture mutmut diagnostics
         if: always() && steps.policy.outputs.required == 'true' && steps.mutation-python.outputs.venv != ''
         shell: bash
@@ -717,9 +754,19 @@ jobs:
       - name: Require successful mutation execution
         if: steps.policy.outputs.required == 'true'
         shell: bash
+        env:
+          RUN_RESULT: ${{ needs.mutation-run.result }}
+          STOP_REASON: ${{ needs.mutation-run.outputs.stop-reason }}
+          TIME_BUDGET: ${{ needs.mutation-run.outputs.time-budget }}
         run: |
           set -euo pipefail
-          if [[ "${{ needs.mutation-run.result }}" != "success" ]]; then
+          if [[ "$RUN_RESULT" != "success" ]]; then
+            # Same blocking verdict; the message names the actual cause.
+            if [[ "$STOP_REASON" == "time-budget" ]]; then
+              echo "::error::Mandatory mutation execution stopped at its ${TIME_BUDGET}-minute time budget before producing a verdict: this is a duration limit, not surviving mutants."
+            elif [[ "$RUN_RESULT" == "cancelled" ]]; then
+              echo "::error::Mandatory mutation execution was cancelled before producing a verdict (newer revision, manual cancellation or runner job limit): this is not a mutation result."
+            fi
             echo "::error::Mandatory mutation execution did not complete successfully."
             exit 1
           fi

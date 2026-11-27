@@ -232,6 +232,7 @@ jobs:
     outputs:
       quality-passed: ${{ steps.python-quality.outputs.quality-passed || steps.go-quality.outputs.quality-passed || steps.node-quality.outputs.quality-passed }}
       security-issues: ${{ steps.python-quality.outputs.security-issues || steps.go-quality.outputs.security-issues || steps.node-quality.outputs.security-issues }}
+      security-scan-errors: ${{ steps.python-quality.outputs.security-scan-errors || steps.node-quality.outputs.security-scan-errors || '0' }}
     steps:
       - uses: $/.github/actions/checkout-source
         with:
@@ -366,6 +367,7 @@ jobs:
           changed-lines-coverage: ${{ needs.tests.outputs.sonar-changed-lines-coverage }}
           quality-status: ${{ needs.quality.outputs.quality-passed }}
           security-issues: ${{ needs.quality.outputs.security-issues }}
+          security-scan-errors: ${{ needs.quality.outputs.security-scan-errors }}
           mutation-report: ${{ needs.mutation.outputs.report-file != '' && format('.mutation-evidence/{0}', needs.mutation.outputs.report-file) || '' }}
           mutation-required: ${{ needs.mutation.outputs.required || 'unknown' }}
           mutation-result: ${{ needs.mutation.result || 'unknown' }}
