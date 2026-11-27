@@ -110,7 +110,84 @@ def bounded_command(command: list[str]) -> list[str]:
     return [*command[:2], "--max-children", str(max_children()), *command[2:]]
 
 
+# Messages of a test process stopped by its memory limit. Go and Node report
+# an ordinary test failure in that case, which their engines count as killed.
+MEMORY_SIGNATURES = (
+    "fatal error: runtime: out of memory",
+    "fatal error: out of memory",
+    "JavaScript heap out of memory",
+    "Reached heap limit",
+    "Fatal process out of memory",
+    # go test reports a test binary killed by the kernel (cgroup OOM killer).
+    "signal: killed",
+)
+# A process killed by SIGKILL is most often the OOM killer: never killed.
+_SIGKILL_STATUSES = (-9, 137)
+
+
+def guard(marker: Path, memory_exit: int, command: list[str]) -> int:
+    """Run one test command under the data limit, never as killed on exhaustion.
+
+    Standard output and error are streamed unchanged, each to its own stream.
+    When either shows a memory exhaustion, the marker file is written and
+    ``memory_exit`` is returned instead of the command status: the engine then
+    records the mutant as not killed, and the central script fails on the
+    marker.
+    """
+    import subprocess
+    import threading
+
+    if not command:
+        raise ValueError("guard requires a command after --")
+    limit_memory()
+    exhausted = threading.Event()
+
+    def relay(source, target) -> None:
+        for line in source:
+            target.write(line)
+            target.flush()
+            if not exhausted.is_set():
+                text = line.decode("utf-8", "replace")
+                if any(signature in text for signature in MEMORY_SIGNATURES):
+                    exhausted.set()
+
+    process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    relays = [
+        threading.Thread(target=relay, args=(process.stdout, sys.stdout.buffer)),
+        threading.Thread(target=relay, args=(process.stderr, sys.stderr.buffer)),
+    ]
+    for thread in relays:
+        thread.start()
+    status = process.wait()
+    for thread in relays:
+        thread.join()
+    if status in _SIGKILL_STATUSES:
+        exhausted.set()
+    if not exhausted.is_set():
+        return status if status >= 0 else 128 - status
+    with marker.open("a", encoding="utf-8") as handle:
+        handle.write(" ".join(command)[:200] + "\n")
+    return memory_exit
+
+
+def _guard_main(arguments: list[str]) -> int:
+    import argparse
+
+    parser = argparse.ArgumentParser(prog="mutation_limits.py guard")
+    parser.add_argument("--marker", type=Path, required=True)
+    parser.add_argument("--memory-exit", type=int, required=True)
+    parser.add_argument("command", nargs=argparse.REMAINDER)
+    args = parser.parse_args(arguments)
+    command = args.command[1:] if args.command[:1] == ["--"] else args.command
+    return guard(args.marker, args.memory_exit, command)
+
+
 if __name__ == "__main__":
+    if sys.argv[1:2] == ["children"]:
+        print(max_children())
+        sys.exit(0)
+    if sys.argv[1:2] == ["guard"]:
+        sys.exit(_guard_main(sys.argv[2:]))
     try:
         bounded = bounded_command(sys.argv[1:])
     except ValueError as error:
