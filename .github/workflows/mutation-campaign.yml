@@ -109,8 +109,8 @@ jobs:
         if: steps.policy.outputs.required == 'true'
         env:
           PLAN_FILE: ${{ runner.temp }}/validated-plan.json
-          SHARD_PACE_SECONDS: ${{ vars.MUTATION_SHARD_PACE_SECONDS || '30' }}
-          SHARD_SETUP_MINUTES: ${{ vars.MUTATION_SHARD_SETUP_MINUTES || '15' }}
+          MUTATION_SHARD_PACE_SECONDS: ${{ vars.MUTATION_SHARD_PACE_SECONDS || '30' }}
+          MUTATION_SHARD_SETUP_MINUTES: ${{ vars.MUTATION_SHARD_SETUP_MINUTES || '15' }}
         run: |
           set -euo pipefail
           uv run --no-project --python 3.12 python .workflow-ci/.ci/mutation_shard_budget.py \

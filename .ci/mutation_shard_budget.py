@@ -48,11 +48,11 @@ def main() -> int:
         plan = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
         pace = int(os.environ.get("MUTATION_SHARD_PACE_SECONDS") or DEFAULT_PACE_SECONDS)
         setup = int(os.environ.get("MUTATION_SHARD_SETUP_MINUTES") or DEFAULT_SETUP_MINUTES)
+        total = len(plan.get("mutants") or {})
+        timeout = shard_timeout_minutes(total, plan.get("shard_count"), pace, setup)
     except (OSError, ValueError) as error:
         print(f"::error::Invalid shard budget inputs: {error}", file=sys.stderr)
         return 1
-    total = len(plan.get("mutants") or {})
-    timeout = shard_timeout_minutes(total, plan.get("shard_count"), pace, setup)
     print(f"shard-timeout={timeout}")
     return 0
 
