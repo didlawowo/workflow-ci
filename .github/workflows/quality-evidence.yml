@@ -423,7 +423,9 @@ jobs:
 
           # A run cancelled by a newer revision or a re-run produced no verdict:
           # still blocking, but reported as cancelled rather than as a failure.
-          if [[ "$SCOPE_RESULT" == "cancelled" || "$QUALITY_RESULT" == "cancelled" || "$MUTATION_RESULT" == "cancelled" ]]; then
+          # Only when nothing really failed: a failure next to a cancellation stays a failure.
+          if [[ " $SCOPE_RESULT $QUALITY_RESULT $MUTATION_RESULT " == *" cancelled "* \
+            && " $SCOPE_RESULT $QUALITY_RESULT $MUTATION_RESULT " != *" failure "* ]]; then
             echo "status=cancelled" >> "$GITHUB_OUTPUT"
             echo "::notice::Trusted gate: CANCELLED. This run was cancelled (newer revision or re-run) before producing a verdict; it is not a regression. The latest run decides."
             exit 1

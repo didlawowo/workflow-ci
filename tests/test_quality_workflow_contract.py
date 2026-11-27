@@ -553,6 +553,7 @@ def test_quality_evidence_separates_blocking_gate_from_best_effort_publication()
     # #311 : annulé reste bloquant (exit 1) mais se lit comme tel.
     cancelled = gate.split('echo "status=cancelled" >> "$GITHUB_OUTPUT"', 1)[1]
     assert cancelled.split("\n", 3)[2].strip() == "exit 1"
+    assert '!= *" failure "*' in gate.split('echo "status=cancelled"', 1)[0]
     assert "pull-requests: write" not in gate
 
     assert "needs: [trusted-gate, independent-verification, mutation]" in publisher
