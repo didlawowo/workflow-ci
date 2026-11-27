@@ -27,7 +27,7 @@ def test_quality_evidence_cancels_stale_caller_revisions():
         "${{ github.event.pull_request.number || github.ref_name }}-"
         "${{ inputs.repo-type }}-${{ inputs.working-directory }}"
     ) in header
-    assert "cancel-in-progress: true" in header
+    assert "cancel-in-progress: ${{ !(github.event_name == 'pull_request'" in header
 
 
 def test_quality_report_publisher_concurrency_is_scoped_per_consumer():
@@ -101,7 +101,7 @@ def test_mutation_policy_classifies_every_pr_event_it_subscribes_to():
     assert "group: mutation-policy-${{ github.repository }}-" in header
     assert "github.event.pull_request.number || github.run_id" in header
     assert "inputs.scope-key || 'default'" in header
-    assert "cancel-in-progress: true" in header
+    assert "cancel-in-progress: ${{ !(github.event_name == 'pull_request'" in header
     # Publishing is fail-closed when mutation classification is absent, so a
     # title-only edited event must still classify instead of skipping both jobs.
     assert "github.event.changes.body != null" not in mutation_run
