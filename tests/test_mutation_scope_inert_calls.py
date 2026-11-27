@@ -93,7 +93,12 @@ def test_call_with_mutable_part_stays_a_target(tmp_path: Path, template: str):
     )
 
 
-SWAPPED = sorted(mutation_scope._MUTMUT_SWAPPED_METHODS)
+# Recopiés des tableaux de swap de mutmut 3.8.1 : retirer un nom du modèle doit casser ce test.
+SWAPPED = [
+    "find", "index", "ljust", "lower", "lstrip", "partition", "removeprefix",
+    "removesuffix", "rfind", "rindex", "rjust", "rpartition", "rsplit",
+    "rstrip", "split", "upper",
+]
 
 
 @pytest.mark.parametrize("method", SWAPPED)
