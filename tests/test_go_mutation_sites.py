@@ -576,3 +576,20 @@ def test_changed_lines_accepte_un_simple_chmod(tmp_path: Path) -> None:
     head_sha = _commit_all(repo, "head")
 
     assert go_mutation_sites.changed_lines(repo, base_sha, head_sha) == {"a.go": set()}
+
+
+@pytest.mark.parametrize("directive, rejected", [
+    ("//line a.go:1000\n", True), ("/*line other.go:4*/ ", True), ("// line comment\n", False)])
+def test_line_directive_in_changed_go_file_is_rejected(tmp_path, directive, rejected):
+    """Revue PR 318 (S1) : //line déplace les sites de Gremlins hors du diff."""
+    repo = _init_repo(tmp_path)
+    _write(repo, "go.mod", "module example.test/consumer\ngo 1.25\n")
+    _write(repo, "a.go", "package consumer\nfunc F(x int) bool { return x > 0 }\n")
+    base = _commit_all(repo, "base")
+    _write(repo, "a.go", f"package consumer\n{directive}func F(x int) bool {{ return x > 1 && x < 100 }}\n")
+    head = _commit_all(repo, "head")
+    if rejected:
+        with pytest.raises(ValueError, match="Line directive"):
+            go_mutation_sites.reject_line_directives(repo, base, head)
+    else:
+        go_mutation_sites.reject_line_directives(repo, base, head)

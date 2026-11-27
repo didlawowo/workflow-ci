@@ -242,6 +242,8 @@ def validate(
     else:
         has_targets = changed_engine_sources(candidate_project, base, head, engine)
         targets = ()
+        if engine == "gremlins" and has_targets:
+            go_mutation_sites.reject_line_directives(candidate_project, base, head)
         if engine == "gremlins" and has_targets and scope["no_targets"] is True:
             # Accept "no target" only when the trusted diff confirms that no
             # Gremlins site of the changed files lies on a changed line.

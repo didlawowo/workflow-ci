@@ -30,6 +30,10 @@ EXCLUDED_PARTS = frozenset(
     }
 )
 _HUNK = re.compile(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@")
+# A //line or /*line directive rewrites the positions the Go toolchain, hence
+# Gremlins, reports: a site on a changed line can be moved to another line or
+# to a fictitious file, outside --diff and outside any trusted intersection.
+_LINE_DIRECTIVE = re.compile(r"(?m)^\s*//line\s|/\*line\s")
 
 
 def is_production_go(path: str) -> bool:
@@ -115,6 +119,27 @@ def changed_lines(project: Path, base: str, head: str) -> dict[str, set[int]]:
             raise ValueError(f"Changed Go file without a textual diff: {path}")
         result[path] = lines
     return result
+
+
+def reject_line_directives(project: Path, base: str, head: str) -> None:
+    """Raise when a changed production Go file contains a line directive.
+
+    Read from the verified checkout, never from engine output. Applies to every
+    Go mutation verdict, with or without measured mutants.
+    """
+    names = _git(
+        project, "diff", "--relative", "--name-only", "--no-renames",
+        f"{base}...{head}", "--", "*.go",
+    ).splitlines()
+    for name in names:
+        path = project / name
+        if not is_production_go(name) or not path.is_file() or path.is_symlink():
+            continue
+        if _LINE_DIRECTIVE.search(path.read_text(encoding="utf-8", errors="replace")):
+            raise ValueError(
+                f"Line directive in changed Go file {name}: mutation positions "
+                "cannot be trusted"
+            )
 
 
 def in_nested_module(project: Path, path: str) -> bool:
