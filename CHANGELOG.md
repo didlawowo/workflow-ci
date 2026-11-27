@@ -4,6 +4,15 @@ All notable changes to this project are documented here.
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 and follows the [Conventional Commits](https://www.conventionalcommits.org) spec.
 
+## [1.25.1] - 2026-11-27
+
+### Bug Fixes
+
+- *(mutation)* Fonctions sans site mutable et re-run des jobs en échec (#307) (#309)
+
+- *(mutation)* Dimensionner le timeout du shard de campagne depuis le plan (#306)
+
+
 ## [1.25.0] - 2026-11-22
 
 ### Bug Fixes
