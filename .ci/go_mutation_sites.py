@@ -52,7 +52,7 @@ def changed_lines(project: Path, base: str, head: str) -> dict[str, set[int]]:
     """Head-side line numbers added or modified, per production Go file."""
     # Raw entries carry modes and blobs. A symlink or a submodule anywhere in
     # the diff can change compiled Go code without a reviewable .go hunk, and a
-    # tracked .go symlink compiles its target: none of them can prove "empty".
+    # tracked symlink compiles its target: none of them can prove "empty".
     raw = _git(
         project,
         "diff",
@@ -75,8 +75,10 @@ def changed_lines(project: Path, base: str, head: str) -> dict[str, set[int]]:
     tree = _git(project, "ls-tree", "-r", "-z", head, "--", ".").split("\0")
     for row in filter(None, tree):
         mode, _, rest = row.partition(" ")
-        if mode == "120000" and rest.split("\t", 1)[1].endswith(".go"):
-            raise ValueError("Go file tracked as a symlink: " + rest.split("\t", 1)[1])
+        # Any tracked symlink, file or directory: Go can compile through it
+        # code whose changes the project-relative diff never shows.
+        if mode == "120000":
+            raise ValueError("Symlink tracked in the module: " + rest.split("\t", 1)[1])
     result: dict[str, set[int]] = {}
     for path, same_content in entries:
         if not is_production_go(path):
