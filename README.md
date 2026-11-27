@@ -129,6 +129,39 @@ submodules. An empty diff, a non pull request event or an
 unavailable comparison keeps the full verification; a failed or cancelled classification fails
 the trusted gate. Without the input the Change scope check is reported as skipped and nothing else changes.
 
+## Pull request events that keep the running evidence
+
+A pull request event cancels the running evidence only when it can change the code or the
+mutation classification: `opened`, `synchronize`, `reopened`, a re-run, a `labeled` or
+`unlabeled` event on a `complexity:*` or `mutation:*` label, and an `edited` event that changes
+the body (linked `Closes #N` issues) or the base branch. Any other label, or a title-only edit,
+does not cancel the campaign in progress: `quality-evidence.yml` and `mutation-policy.yml` use
+this rule for `cancel-in-progress`. No gate, threshold or classification input changes, and no
+result is reused: every evidence run still classifies and verifies its own head commit.
+
+A caller wrapper subscribed to `labeled`, `unlabeled` or `edited` keeps its own `concurrency`
+from cancelling the run, and avoids repeating it, by applying the same rule at the caller job.
+Skip the job that calls `quality-evidence.yml`, never a job inside it: a skipped job inside
+the called workflow would replace the running verdict under the same check name, while a
+skipped caller job only adds its own `evidence` check. Jobs that do not call the evidence,
+such as a ref policy check, keep running on every event.
+
+```yaml
+concurrency:
+  group: trusted-quality-${{ github.repository }}-${{ github.event.pull_request.number || github.ref_name }}${{ (github.event_name == 'pull_request' && github.run_attempt == '1' && ((contains(fromJSON('["labeled","unlabeled"]'), github.event.action) && !startsWith(github.event.label.name, 'complexity:') && !startsWith(github.event.label.name, 'mutation:')) || (github.event.action == 'edited' && github.event.changes.title != null && github.event.changes.body == null && github.event.changes.base == null))) && format('-noop-{0}', github.run_id) || '' }}
+  cancel-in-progress: true
+
+jobs:
+  evidence:
+    if: ${{ !(github.event_name == 'pull_request' && github.run_attempt == '1' && ((contains(fromJSON('["labeled","unlabeled"]'), github.event.action) && !startsWith(github.event.label.name, 'complexity:') && !startsWith(github.event.label.name, 'mutation:')) || (github.event.action == 'edited' && github.event.changes.title != null && github.event.changes.body == null && github.event.changes.base == null))) }}
+    # uses: quality-evidence.yml at the pinned release; needs, with and secrets unchanged
+```
+
+The no-op condition must stay identical in the group and in `if`. A re-run (`run_attempt` above
+1), including the re-run started by `mutation-issue-policy.yml` when a linked issue gains a
+risk label, always joins the pull request group, cancels the running evidence and classifies
+again.
+
 ## SonarQube Quality Gate
 
 The reusable `quality-evidence.yml` workflow runs the official SonarQube scanner against

@@ -103,7 +103,11 @@ concurrency:
   # A newer revision of the same caller PR supersedes stale evidence work.
   # Keep the group repository-scoped because this is a reusable workflow.
   group: quality-evidence-${{ github.repository }}-${{ github.event.pull_request.number || github.ref_name }}-${{ inputs.repo-type }}-${{ inputs.working-directory }}
-  cancel-in-progress: true
+  # Only events that can change the code or the mutation classification
+  # cancel the running evidence: a label outside complexity:*/mutation:*, or a
+  # title-only edit, waits for it instead (README: Pull request events that keep
+  # the running evidence). Re-runs always cancel, to apply a refreshed policy.
+  cancel-in-progress: ${{ !(github.event_name == 'pull_request' && github.run_attempt == '1' && ((contains(fromJSON('["labeled","unlabeled"]'), github.event.action) && !startsWith(github.event.label.name, 'complexity:') && !startsWith(github.event.label.name, 'mutation:')) || (github.event.action == 'edited' && github.event.changes.title != null && github.event.changes.body == null && github.event.changes.base == null))) }}
 
 jobs:
   mutation:
