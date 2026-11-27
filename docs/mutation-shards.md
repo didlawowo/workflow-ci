@@ -59,7 +59,7 @@ change it. A non-Python repository with `0` runs the single-job path.
 
 ## How mutants are assigned to shards
 
-Each mutant belongs to the shard `int(sha256(mutant_id), 16) % N`. This is
+Each mutant belongs to the shard `int(sha256(mutant_id.encode()).hexdigest(), 16) % N`. This is
 deterministic, so the plan, the shards and the verifier all agree without
 exchanging a list. It is also blind to cost: shards receive about the same
 number of mutants, but not the same amount of work. A shard that happens to
@@ -80,8 +80,8 @@ others. Sizes are statistically even, durations are not.
   `MUTATION_SHARD_SETUP_MINUTES`. These variables only move the timeout; they
   do not speed up anything.
 - Plan and shards run on `UNTRUSTED_RUNNER` if set, otherwise on the runner
-  given by the caller (`RUNNER`, then `arc-runner-<repo>`). Verify uses the
-  trusted runner. All jobs queue for a free runner of that scale set.
+  given by the caller (`RUNNER`, then `arc-runner-<repo>`). Verify always runs on the runner given by
+  the caller (`inputs.runner`), never on `UNTRUSTED_RUNNER`. All jobs queue for a free runner of that scale set.
 
 ## Estimating the wall-clock duration
 
@@ -179,8 +179,12 @@ About the last message: the scope computation (`mutation_targets` in
 does not mutate: those with any decorator other than a single bare
 `@staticmethod` or `@classmethod`, the dunder methods `__getattribute__`,
 `__setattr__` and `__new__`, and functions without mutable code. A decorated
-function is therefore normally not a target and cannot trigger the error. When
-every changed function is of that kind, the scope is empty (empty one-shard
+function (other than a bare `@staticmethod` or `@classmethod`) is therefore
+not a target at medium depth. At high depth the target is the whole module
+(`module.*__mutmut_*`): it is only emitted when at least one function of the
+module is mutable, so a module made only of decorated handlers yields no target
+either (before workflow-ci#316 it produced this error). When every changed
+function is of that kind, the scope is empty (empty one-shard
 campaign in auto mode, an error with a fixed `mutation-shards`). The error
 appears when a target exists but mutmut produced no matching mutant, which means
 the scope computation and mutmut disagree on that function. The code does not
