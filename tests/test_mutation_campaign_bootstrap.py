@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 from pathlib import Path
 
@@ -130,7 +131,7 @@ def test_toolchain_keeps_consumer_pytest_and_requires_pytest9_safe_mutmut(
     install = next(line for line in calls.splitlines() if "pip install" in line)
     specs = install.split("-q ", 1)[1].split()
     assert specs[0] == "pytest" and all("<" not in spec for spec in specs[:2])
-    assert "mutmut>=3.8.1,<4" in install
+    assert "mutmut==3.8.1" in install
 
 
 def test_shard_stages_pytest_ini_before_running_mutmut(tmp_path: Path) -> None:
@@ -161,3 +162,14 @@ def test_shard_stages_pytest_ini_before_running_mutmut(tmp_path: Path) -> None:
         check=False,
     )
     assert result.returncode == 0, result.stderr
+
+
+def test_mutmut_is_pinned_to_the_version_mutation_scope_mirrors():
+    """Revue PR 316 et 322 : toute installation de mutmut du socle est exactement 3.8.1."""
+    root = Path(__file__).resolve().parents[1]
+    tree = [p for d in (".ci", ".github", "templates", ".forgejo") for p in (root / d).rglob("*")
+            if p.suffix in {".sh", ".yml", ".yaml", ".py"} and p.is_file()]
+    specs = [(p.name, spec) for p in tree for line in p.read_text().splitlines()
+             if "mutmut" in line and (re.search(r"pip\s+install|--with\b", line) or "mutmut_spec=" in line)
+             for spec in re.findall(r"(?<![\w/.-])mutmut(?:\s*[<>=~!]=?\s*[\w.,<>=]*)?(?=['\"\s]|$)", line)]
+    assert specs and all(spec == "mutmut==3.8.1" for _, spec in specs), specs
