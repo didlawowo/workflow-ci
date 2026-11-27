@@ -20,6 +20,14 @@ cat > "$SCRATCH/pyproject.toml" <<'TOML'
 source_paths = ["image_changes.py"]
 pytest_add_cli_args_test_selection = ["tests/test_image_changes.py"]
 also_copy = ["tests", ".github"]
+# Mutmut bounds a mutant by wall clock: (measured test time + constant) *
+# multiplier, with the measure taken once, alone, before 4 mutants run side by
+# side. Mutants that only the slowest git-backed tests kill run nearly the whole
+# suite and sit closest to the default bound (15), so a loaded runner turned a
+# kill into a timeout (#299). A wider bound only gives a slow mutant more time:
+# a timeout is never a kill, and the check below still rejects any of them.
+timeout_multiplier = 30
+timeout_constant = 5
 TOML
 cd "$SCRATCH"
 python3 "$ROOT/.ci/mutation_limits.py" mutmut run
