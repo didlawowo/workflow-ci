@@ -4,6 +4,28 @@ All notable changes to this project are documented here.
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 and follows the [Conventional Commits](https://www.conventionalcommits.org) spec.
 
+## [1.25.2] - 2026-11-27
+
+### Bug Fixes
+
+- *(mutation)* Pas de cible module en profondeur high sans fonction mutable (#316)
+
+- *(mutation)* Borne mémoire et parallélisme des mutants Go et Node (#288) (#313)
+
+- *(quality)* Une annulation se lit comme annulée, pas comme un échec (#311) (#314)
+
+- *(mutation)* Figer mutmut à 3.8.1, version que reproduit mutation_scope.py (#322)
+
+- *(ci)* Élargir le délai Mutmut du self-test image-change-mutation (#321)
+
+- *(go-quality)* Golangci-lint v2 par défaut sans configuration (#327)
+
+
+### Documentation
+
+- *(mutation)* Expliquer le découpage en lots de la campagne (#315)
+
+
 ## [1.25.1] - 2026-11-27
 
 ### Bug Fixes
