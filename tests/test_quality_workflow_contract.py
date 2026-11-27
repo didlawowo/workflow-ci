@@ -794,3 +794,12 @@ def test_documentation_only_flag_never_comes_from_the_job_environment():
         "TRUSTED_DOCUMENTATION_ONLY=\"${{ needs.change-scope.outputs.documentation-only == 'true' }}\""
         in enforce["run"]
     )
+
+
+def test_campaign_artifacts_survive_a_rerun_of_failed_jobs():
+    """#307 : un re-run des seuls jobs en échec relit le plan publié par une tentative antérieure."""
+    content = (ROOT / ".github" / "workflows" / "mutation-campaign.yml").read_text()
+    assert "run_attempt" not in content
+    assert content.count("name: mutation-plan-${{ github.run_id }}\n") == 3
+    assert "name: mutation-fragment-${{ github.run_id }}-${{ matrix.index }}\n" in content
+    assert content.count("overwrite: true") == 2

@@ -1,0 +1,40 @@
+# TEMPORAIRE (#307) : preuve qu'un re-run des jobs en échec relit un artefact
+# publié par la tentative 1 sous un nom sans numéro de tentative. Retiré avant
+# la fusion.
+name: Rerun artifact probe
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/zz-rerun-artifact-probe.yml"
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  produce:
+    runs-on: arc-runner-workflow-ci
+    timeout-minutes: 5
+    steps:
+      - run: echo "attempt ${{ github.run_attempt }}" > "$RUNNER_TEMP/probe.txt"
+      - uses: actions/upload-artifact@v6
+        with:
+          name: probe-${{ github.run_id }}
+          path: ${{ runner.temp }}/probe.txt
+          retention-days: 1
+          overwrite: true
+
+  consume:
+    needs: produce
+    runs-on: arc-runner-workflow-ci
+    timeout-minutes: 5
+    steps:
+      - uses: actions/download-artifact@v7
+        with:
+          name: probe-${{ github.run_id }}
+          path: ${{ runner.temp }}/probe
+      - run: |
+          cat "$RUNNER_TEMP/probe/probe.txt"
+          echo "consumer attempt ${{ github.run_attempt }}"
+          test "${{ github.run_attempt }}" != 1
