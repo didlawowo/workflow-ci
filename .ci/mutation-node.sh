@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+LIMITS="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)/mutation_limits.py"
 
 BASE_SHA="${MUTATION_BASE_SHA:-}"
 HEAD_SHA="${MUTATION_HEAD_SHA:-}"
@@ -153,21 +154,38 @@ else
   exit 1
 fi
 
-python3 - "$CONFIG" "$REPORT" "$TEST_COMMAND" "${mutate_entries[@]}" <<'PY'
+# Memory bound per test process (#288): the command runner counts a test that
+# ran out of memory as killed. The central guard runs it under the data limit,
+# caps the V8 heap below it, and reports exhaustion as survived plus a marker.
+MEMORY_MARKER="$ROOT/.quality/mutation-memory-exhausted"
+rm -f "$MEMORY_MARKER"
+CHILDREN="$(python3 "$LIMITS" children)"
+
+python3 - "$CONFIG" "$REPORT" "$TEST_COMMAND" "$LIMITS" "$MEMORY_MARKER" "$CHILDREN" "${mutate_entries[@]}" <<'PY'
 import json
+import shlex
 import sys
 from pathlib import Path
 
-config, report, command, *mutate = sys.argv[1:]
+config, report, command, limits, marker, children, *mutate = sys.argv[1:]
+bounded = (
+    'export NODE_OPTIONS="${NODE_OPTIONS:+$NODE_OPTIONS }--max-old-space-size=3072"; '
+    + command
+)
+guarded = ' '.join(
+    shlex.quote(part)
+    for part in (sys.executable, limits, 'guard', '--marker', marker,
+                 '--memory-exit', '0', '--', 'sh', '-c', bounded)
+)
 payload = {
     'mutate': mutate,
     'testRunner': 'command',
-    'commandRunner': {'command': command},
+    'commandRunner': {'command': guarded},
     'coverageAnalysis': 'off',
     'reporters': ['clear-text', 'json'],
     'jsonReporter': {'fileName': report},
     'thresholds': {'high': 100, 'low': 100, 'break': 100},
-    'concurrency': 2,
+    'concurrency': min(2, int(children)),
     'timeoutMS': 20000,
     'timeoutFactor': 2,
 }
@@ -178,6 +196,11 @@ set +e
 (cd "$PROJECT" && PATH="$TOOLS/node_modules/.bin:$PATH" stryker run "$CONFIG")
 stryker_rc=$?
 set -e
+
+if [[ -s "$MEMORY_MARKER" ]]; then
+  echo "::error::A Node test process reached the per-process memory limit; its mutant is not counted as killed."
+  exit 1
+fi
 
 [[ -s "$REPORT" ]] || {
   echo "::error::Stryker did not produce mutation evidence (exit=$stryker_rc)."

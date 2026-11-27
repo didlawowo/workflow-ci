@@ -2,6 +2,7 @@
 set -euo pipefail
 
 GREMLINS_VERSION="0.6.0"
+LIMITS="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)/mutation_limits.py"
 BASE_SHA="${MUTATION_BASE_SHA:-}"
 HEAD_SHA="${MUTATION_HEAD_SHA:-}"
 WORKING_DIRECTORY="${MUTATION_WORKING_DIRECTORY:-.}"
@@ -51,8 +52,10 @@ esac
 
 GREMLINS=""
 tmp=""
+guard_dir=""
 cleanup() {
   [[ -z "$tmp" ]] || rm -rf "$tmp"
+  [[ -z "$guard_dir" ]] || rm -rf "$guard_dir"
 }
 trap cleanup EXIT
 
@@ -127,10 +130,29 @@ PY
   exit 0
 fi
 
+# Memory bound per test process and bounded workers (#288): Gremlins starts one
+# worker per core of the node and counts a test stopped by its memory limit as
+# killed. Every `go` it runs goes through the central guard (mutation_limits.py).
+GUARD_PYTHON="$(uv run --no-project --python 3.12 python -c 'import sys; print(sys.executable)')"
+REAL_GO="$(command -v go)"
+WORKERS="$("$GUARD_PYTHON" "$LIMITS" children)"
+MEMORY_MARKER="$QUALITY_DIR/mutation-memory-exhausted"
+rm -f "$MEMORY_MARKER"
+guard_dir="$(mktemp -d "${RUNNER_TEMP:-/tmp}/gremlins-guard.XXXXXX")"
+printf '#!/usr/bin/env bash\nexec %q %q guard --marker %q --memory-exit 3 -- %q "$@"\n' \
+  "$GUARD_PYTHON" "$LIMITS" "$MEMORY_MARKER" "$REAL_GO" > "$guard_dir/go"
+chmod +x "$guard_dir/go"
+echo "Mutation bounds: $WORKERS concurrent mutants, data limit per test process (mutation_limits.py)"
+
 set +e
-"$GREMLINS" unleash --diff "$BASE_SHA" --output "$RAW_REPORT"
+PATH="$guard_dir:$PATH" "$GREMLINS" unleash --workers "$WORKERS" --diff "$BASE_SHA" --output "$RAW_REPORT"
 gremlins_rc=$?
 set -e
+
+if [[ -s "$MEMORY_MARKER" ]]; then
+  echo "::error::A Go test process reached the per-process memory limit; its mutant is not counted as killed."
+  exit 1
+fi
 
 if [[ ! -s "$RAW_REPORT" ]]; then
   echo "::error::Gremlins did not produce machine-readable evidence (exit=$gremlins_rc)."
