@@ -99,12 +99,25 @@ EXPECTED_SIGNATURES = (
     "JavaScript heap out of memory",
     "Reached heap limit",
     "Fatal process out of memory",
+    "Allocation failed - process out of memory",
+    "JS heap out of memory",
+    "Array buffer allocation failed",
+    "signal SIGKILL",
+    'signal "SIGKILL"',
+    "signal=SIGKILL",
     "signal: killed",
 )
 
 
 def test_signatures_attendues_toutes_presentes():
-    assert set(EXPECTED_SIGNATURES) <= set(limits.MEMORY_SIGNATURES)
+    assert set(EXPECTED_SIGNATURES) <= set(limits.MEMORY_SIGNATURES) | set(limits.MEMORY_LINES)
+
+
+def test_signal_killed_dans_un_texte_de_test_reste_un_echec(tmp_path):
+    """Revue PR 313 (R4) : seule la ligne de bilan exacte de go test compte."""
+    marker = tmp_path / "marker"
+    result = run_guard(marker, 3, sh_print("stdout", "cmd: signal: killed by context", 1))
+    assert result.returncode == 1 and not marker.exists()
 
 
 @pytest.mark.parametrize("signature", EXPECTED_SIGNATURES)

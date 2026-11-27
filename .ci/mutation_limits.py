@@ -118,9 +118,19 @@ MEMORY_SIGNATURES = (
     "JavaScript heap out of memory",
     "Reached heap limit",
     "Fatal process out of memory",
-    # go test reports a test binary killed by the kernel (cgroup OOM killer).
-    "signal: killed",
+    # Node outside the JavaScript heap (node_errors.cc), worker threads
+    # (ERR_WORKER_OUT_OF_MEMORY) and buffers refused by the data limit.
+    "Allocation failed - process out of memory",
+    "JS heap out of memory",
+    "Array buffer allocation failed",
+    # npm, yarn and pnpm report a test process killed by the kernel.
+    "signal SIGKILL",
+    'signal "SIGKILL"',
+    "signal=SIGKILL",
 )
+# Whole lines only: go test prints this summary for a test binary killed by the
+# kernel, while the same words inside test output can be ordinary text.
+MEMORY_LINES = ("signal: killed",)
 # A process killed by SIGKILL is most often the OOM killer: never killed.
 _SIGKILL_STATUSES = (-9, 137)
 
@@ -148,7 +158,9 @@ def guard(marker: Path, memory_exit: int, command: list[str]) -> int:
             target.flush()
             if not exhausted.is_set():
                 text = line.decode("utf-8", "replace")
-                if any(signature in text for signature in MEMORY_SIGNATURES):
+                if any(signature in text for signature in MEMORY_SIGNATURES) or (
+                    text.strip() in MEMORY_LINES
+                ):
                     exhausted.set()
 
     process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
