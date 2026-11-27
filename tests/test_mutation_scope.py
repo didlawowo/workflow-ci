@@ -439,11 +439,9 @@ def test_decorated_handler_change_yields_no_unsatisfiable_target(tmp_path: Path)
     head = _commit(repo, "change handler")
 
     assert mutation_scope.mutation_targets(repo, base, head, depth="medium") == ()
-    # high still emits the module-wide glob, which matches the mutable
-    # functions of the module — the pattern is satisfiable there.
-    assert mutation_scope.mutation_targets(repo, base, head, depth="high") == (
-        "api.*__mutmut_*",
-    )
+    # high must not emit the module-wide glob either: the module holds no
+    # function mutmut can mutate, so the glob could never match.
+    assert mutation_scope.mutation_targets(repo, base, head, depth="high") == ()
 
 
 def test_decorated_handler_change_targets_only_mutable_neighbours(tmp_path: Path):
@@ -766,3 +764,15 @@ def test_inert_looking_code_mutmut_rewrites_stays_a_target(tmp_path: Path, body:
     source.write_text(body.format("2", "2"), encoding="utf-8")
     head = _commit(repo, "change")
     assert mutation_scope.mutation_targets(repo, base, head, depth="medium") == ("m.*f__mutmut_*",)
+
+
+def test_high_depth_keeps_module_glob_when_only_decorated_handler_changes(tmp_path: Path):
+    repo = _init_repo(tmp_path)
+    source = repo / "src" / "api.py"
+    body = "app = object()\n\ndef helper(v):\n    return v * 2\n\n@app.get('/x')\nasync def x():\n    return {}\n"
+    source.write_text(body, encoding="utf-8")
+    base = _commit(repo, "initial")
+    source.write_text(body.replace("return {}", "return {'a': 1}"), encoding="utf-8")
+    head = _commit(repo, "change handler only")
+    assert mutation_scope.mutation_targets(repo, base, head, depth="medium") == ()
+    assert mutation_scope.mutation_targets(repo, base, head, depth="high") == ("api.*__mutmut_*",)
