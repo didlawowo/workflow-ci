@@ -8,7 +8,7 @@ inputs:
     description: Working directory
     default: '.'
   golangci-lint-version:
-    description: Exact release or auto (v2.13.2 without config or with version 2 config, v1.64.8 for an explicit legacy v1 config)
+    description: Exact release or auto (v2.13.2 without config or with version 2 config, v1.64.8 for any config that does not declare version 2)
     default: auto
   lint-timeout:
     description: Lint timeout

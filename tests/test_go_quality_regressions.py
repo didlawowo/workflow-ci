@@ -193,3 +193,14 @@ def test_gosec_uses_matching_preinstalled_binary_without_go_install(tmp_path):
     assert process.returncode == 0, process.stderr
     assert values == {"status": "passed", "issues": "0"}
     assert "Using preinstalled GoSec 2.29.0" in process.stdout
+
+
+def test_resolve_finds_a_parent_v1_config_from_a_subdirectory(tmp_path):
+    """Revue PR 327 (Q1) : une config v1 à la racine garde v1 depuis un sous-dossier."""
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+    (tmp_path / ".golangci.yml").write_text("linters:\n  enable: [errcheck]\n")
+    service = tmp_path / "services" / "api"
+    service.mkdir(parents=True)
+    process, values = run(service, "resolve", LINT_VERSION="auto")
+    assert process.returncode == 0, process.stderr
+    assert values["version"] == "v1.64.8"
