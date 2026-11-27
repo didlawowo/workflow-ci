@@ -124,7 +124,7 @@ def changed_lines(project: Path, base: str, head: str) -> dict[str, set[int]]:
 def reject_line_directives(project: Path, base: str, head: str) -> None:
     """Raise when a changed production Go file contains a line directive.
 
-    Read from the verified checkout, never from engine output. Applies to every
+    Read from the committed head blobs, never from engine output. Applies to every
     Go mutation verdict, with or without measured mutants.
     """
     names = _git(
@@ -132,10 +132,17 @@ def reject_line_directives(project: Path, base: str, head: str) -> None:
         f"{base}...{head}", "--", "*.go",
     ).splitlines()
     for name in names:
-        path = project / name
-        if not is_production_go(name) or not path.is_file() or path.is_symlink():
+        if not is_production_go(name):
             continue
-        if _LINE_DIRECTIVE.search(path.read_text(encoding="utf-8", errors="replace")):
+        # The committed blob, not the working tree: checkout filters such as
+        # working-tree-encoding cannot hide a directive from this check.
+        shown = subprocess.run(
+            ["git", "-C", str(project), "cat-file", "blob", f"{head}:./{name}"],
+            capture_output=True,
+        )
+        if shown.returncode:
+            continue  # deleted at head, or not a blob (symlinks fail elsewhere)
+        if _LINE_DIRECTIVE.search(shown.stdout.decode("utf-8", errors="replace")):
             raise ValueError(
                 f"Line directive in changed Go file {name}: mutation positions "
                 "cannot be trusted"
