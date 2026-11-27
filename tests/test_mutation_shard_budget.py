@@ -67,7 +67,7 @@ def test_campaign_workflow_sizes_the_shard_job_from_the_plan():
         "${{ steps.shard-budget.outputs.shard-timeout || '45' }}"
     )
     assert shard_job["timeout-minutes"] == (
-        "${{ fromJSON(needs.plan.outputs.shard-timeout || '45') }}"
+        "${{ fromJSON(needs.plan.outputs.shard-timeout || '45') <= 360 && fromJSON(needs.plan.outputs.shard-timeout || '45') || 45 }}"
     )
     budget_step = next(
         s for s in plan_job["steps"] if s.get("id") == "shard-budget"
@@ -85,8 +85,11 @@ def test_shard_budget_honours_the_variables_the_workflow_passes(tmp_path):
     plan = tmp_path / "plan.json"
     plan.write_text(json.dumps({"shard_count": 1, "mutants": {f"m{i}": {} for i in range(455)}}))
     step = next(s for s in yaml.load(WORKFLOW.read_text(), Loader=yaml.BaseLoader)["jobs"]["plan"]["steps"] if s.get("id") == "shard-budget")
-    env = {**os.environ, **{name: "1" for name in step["env"] if name != "PLAN_FILE"}}
+    values = {"MUTATION_SHARD_PACE_SECONDS": "1", "MUTATION_SHARD_SETUP_MINUTES": "100"}
+    assert set(step["env"]) - {"PLAN_FILE"} == set(values)
+    env = {key: value for key, value in os.environ.items() if not key.startswith("MUTATION_SHARD_")}
+    env.update({name: values[name] for name in step["env"] if name != "PLAN_FILE"})
     run = lambda e: subprocess.run([sys.executable, str(ROOT / ".ci" / "mutation_shard_budget.py"), str(plan)], capture_output=True, text=True, env=e)
-    assert run(env).stdout.strip() == "shard-timeout=45"
+    assert run(env).stdout.strip() == "shard-timeout=108"
     invalid = run({**env, "MUTATION_SHARD_PACE_SECONDS": "0"})
     assert invalid.returncode == 1 and "::error::Invalid shard budget inputs" in invalid.stderr

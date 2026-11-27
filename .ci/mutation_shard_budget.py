@@ -50,7 +50,7 @@ def main() -> int:
         setup = int(os.environ.get("MUTATION_SHARD_SETUP_MINUTES") or DEFAULT_SETUP_MINUTES)
         total = len(plan.get("mutants") or {})
         timeout = shard_timeout_minutes(total, plan.get("shard_count"), pace, setup)
-    except (OSError, ValueError) as error:
+    except (OSError, ValueError, AttributeError, TypeError) as error:
         print(f"::error::Invalid shard budget inputs: {error}", file=sys.stderr)
         return 1
     print(f"shard-timeout={timeout}")

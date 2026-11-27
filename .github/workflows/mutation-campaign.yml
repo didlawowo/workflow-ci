@@ -132,7 +132,7 @@ jobs:
     # per-mutant cost exceeds the assumption (cancelled shard = missing
     # mandatory evidence = gate red on every PR touching a sizeable function).
     # fromJSON casts the string output to the number the runner requires.
-    timeout-minutes: ${{ fromJSON(needs.plan.outputs.shard-timeout || '45') }}
+    timeout-minutes: ${{ fromJSON(needs.plan.outputs.shard-timeout || '45') <= 360 && fromJSON(needs.plan.outputs.shard-timeout || '45') || 45 }}
     strategy:
       fail-fast: false
       max-parallel: 4
