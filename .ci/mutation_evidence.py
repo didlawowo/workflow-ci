@@ -16,6 +16,7 @@ from pathlib import Path
 import re
 import sys
 
+import go_mutation_sites
 from mutation_contract import read_json
 from mutation_scope import matches_function, mutation_targets
 
@@ -241,6 +242,17 @@ def validate(
     else:
         has_targets = changed_engine_sources(candidate_project, base, head, engine)
         targets = ()
+        if engine == "gremlins" and has_targets:
+            go_mutation_sites.reject_line_directives(candidate_project, base, head)
+        if engine == "gremlins" and has_targets and scope["no_targets"] is True:
+            # Accept "no target" only when the trusted diff confirms that no
+            # Gremlins site of the changed files lies on a changed line.
+            if scope.get("reason") != go_mutation_sites.REASON:
+                raise ValueError("No-target Go evidence without a site proof")
+            go_mutation_sites.check_no_mutable_sites(
+                candidate_project, base, head, scope.get("sites")
+            )
+            has_targets = False
     if scope["no_targets"] is not (not has_targets):
         raise ValueError(
             "No-target evidence contradicts independently computed mutation scope"

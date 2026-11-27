@@ -12,6 +12,7 @@ if [[ -z "$BASE_SHA" || -z "$HEAD_SHA" ]]; then
   exit 1
 fi
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 REPO_ROOT="$(git rev-parse --show-toplevel)"
 REPO_ROOT="$(cd "$REPO_ROOT" && pwd -P)"
 if [[ "$WORKING_DIRECTORY" == /* ]]; then
@@ -159,11 +160,14 @@ if [[ ! -s "$RAW_REPORT" ]]; then
   exit "${gremlins_rc:-1}"
 fi
 
-uv run --no-project --python 3.12 python - "$BASE_SHA" "$HEAD_SHA" "$GREMLINS_VERSION" "$RAW_REPORT" "$REPORT" <<'PY'
+uv run --no-project --python 3.12 python - "$BASE_SHA" "$HEAD_SHA" "$GREMLINS_VERSION" "$RAW_REPORT" "$REPORT" "$SCRIPT_DIR" <<'PY'
 import json
 import sys
 from collections import Counter
 from pathlib import Path
+
+sys.path.insert(0, sys.argv[6])
+import go_mutation_sites
 
 raw = json.loads(Path(sys.argv[4]).read_text(encoding="utf-8"))
 statuses = Counter()
@@ -208,9 +212,36 @@ Path(sys.argv[5]).write_text(
 )
 
 if total <= 0:
-    raise SystemExit(
+    message = (
         "Gremlins produced no viable mutation evidence for changed non-test Go files"
     )
+    # A failed Gremlins run still fails below on its exit code.
+    if payload["engine"]["mutants_not_viable"]:
+        raise SystemExit(message)
+    # Zero mutants is accepted only with a proof that no reported site, of any
+    # status, lies on a changed line (go_mutation_sites, rechecked by the verifier).
+    try:
+        changed = set(
+            go_mutation_sites.changed_lines(Path("."), sys.argv[1], sys.argv[2])
+        )
+        sites = go_mutation_sites.reported_sites(raw, changed)
+        go_mutation_sites.check_no_mutable_sites(
+            Path("."), sys.argv[1], sys.argv[2], sites
+        )
+    except ValueError as error:
+        raise SystemExit(f"{message}: {error}") from None
+    payload["scope"].update(
+        {"no_targets": True, "reason": go_mutation_sites.REASON, "sites": sites}
+    )
+    Path(sys.argv[5]).write_text(
+        json.dumps(payload, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    print(
+        "::notice::No Gremlins mutation site on the changed Go lines "
+        f"({len(sites)} sites in changed files, all outside the diff)."
+    )
+    raise SystemExit(0)
 if survived or timeouts:
     raise SystemExit(
         f"Go mutation gate failed: killed={killed}, lived={lived}, "
