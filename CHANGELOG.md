@@ -4,6 +4,24 @@ All notable changes to this project are documented here.
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 and follows the [Conventional Commits](https://www.conventionalcommits.org) spec.
 
+## [1.26.0] - 2026-11-27
+
+### Bug Fixes
+
+- *(concurrency)* Ne pas annuler l'évidence en cours sur un événement sans effet (#323)
+
+- *(mutation)* Accepter un diff Go sans site mutable sur les lignes modifiées (#318)
+
+- *(uv)* Épingler la version de uv sauf required-version du projet (#319)
+
+- *(mutation)* Budget de durée Node issu du périmètre, cause lisible et audit npm illisible distinct d'une faille (#324)
+
+
+### Features
+
+- *(policy)* Un fork peut introduire son plan de mutation (#320)
+
+
 ## [1.25.2] - 2026-11-27
 
 ### Bug Fixes
