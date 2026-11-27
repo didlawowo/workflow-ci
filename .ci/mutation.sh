@@ -142,14 +142,15 @@ fi
 
 # pytest 9.2 removed the private _nodeid attribute mutmut 3 used (boxed/mutmut#615);
 # mutmut 3.8.1 fixes it, so the floor replaces any pytest cap and keeps the
-# consumer's own pytest.
+# consumer's own pytest. mutmut is pinned exactly: mutation_scope.py mirrors
+# the operators of this version, so a new release must be adopted deliberately.
 if command -v uv >/dev/null 2>&1; then
-  if ! uv pip install --python "$PYTHON" -q pytest pytest-cov 'mutmut>=3.8.1,<4'; then
+  if ! uv pip install --python "$PYTHON" -q pytest pytest-cov 'mutmut==3.8.1'; then
     bootstrap_error "uv failed to install pytest/mutmut into the isolated environment."
     exit 1
   fi
 else
-  if ! "$PYTHON" -m pip install -q pytest pytest-cov 'mutmut>=3.8.1,<4'; then
+  if ! "$PYTHON" -m pip install -q pytest pytest-cov 'mutmut==3.8.1'; then
     bootstrap_error "pip failed to install pytest/mutmut into the pre-provisioned environment."
     exit 1
   fi

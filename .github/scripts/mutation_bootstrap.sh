@@ -51,7 +51,7 @@ fi
 runtime_path="$PATH"
 runtime_pythonpath="${PYTHONPATH:-}"
 runtime_virtualenv=""
-mutmut_spec='mutmut>=3.8.1,<4'
+mutmut_spec='mutmut==3.8.1'
 pytest_spec='pytest'
 
 if [[ "$mutation_engine" == "mutmut" ]]; then
