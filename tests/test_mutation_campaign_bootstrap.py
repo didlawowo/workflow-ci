@@ -165,8 +165,11 @@ def test_shard_stages_pytest_ini_before_running_mutmut(tmp_path: Path) -> None:
 
 
 def test_mutmut_is_pinned_to_the_version_mutation_scope_mirrors():
-    """Revue PR 316 : le modèle statique de mutation_scope.py reproduit mutmut 3.8.1."""
+    """Revue PR 316 et 322 : toute installation de mutmut du socle est exactement 3.8.1."""
     root = Path(__file__).resolve().parents[1]
-    sources = [*root.glob(".ci/*.sh"), *root.glob(".github/scripts/*.sh"), *root.glob(".github/workflows/*.yml")]
-    loose = [p.name for p in sources if re.search(r"mutmut\s*(>=|~=|<|>)\s*\d", p.read_text())]
-    assert not loose, loose
+    tree = [p for d in (".ci", ".github", "templates", ".forgejo") for p in (root / d).rglob("*")
+            if p.suffix in {".sh", ".yml", ".yaml", ".py"} and p.is_file()]
+    specs = [(p.name, spec) for p in tree for line in p.read_text().splitlines()
+             if "mutmut" in line and (re.search(r"pip\s+install|--with\b", line) or "mutmut_spec=" in line)
+             for spec in re.findall(r"(?<![\w/.-])mutmut(?:\s*[<>=~!]=?\s*[\w.,<>=]*)?(?=['\"\s]|$)", line)]
+    assert specs and all(spec == "mutmut==3.8.1" for _, spec in specs), specs
