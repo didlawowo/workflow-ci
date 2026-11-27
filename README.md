@@ -277,6 +277,8 @@ CI can verify that the local contract still passes with the shared composite act
 an immutable published tag, never `main`.
 
 
+For how the mutation campaign is split into shards, why it lasts as long as it does and which settings change it, see [docs/mutation-shards.md](docs/mutation-shards.md).
+
 ### Repository-specific mutation requests
 
 `MUTATION_EXECUTION_MODE` is an Actions repository variable, read by both
