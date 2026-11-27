@@ -38,6 +38,9 @@ outputs:
   security-issues:
     description: "Number of security issues found"
     value: ${{ steps.summary.outputs.security-issues }}
+  security-scan-errors:
+    description: "Dependency audit execution errors (unreadable report); never counted as security issues"
+    value: ${{ steps.summary.outputs.security-scan-errors }}
   linting-status:
     description: "Linting status"
     value: ${{ steps.summary.outputs.linting-status }}
@@ -91,60 +94,108 @@ runs:
         set +e
         PM="${{ inputs.package-manager }}"
         LEVEL="${{ inputs.audit-level }}"
-        case "$PM" in
-          npm)
-            AUDIT_OUTPUT="$(npm audit --audit-level="$LEVEL" --json 2>/dev/null)"
-            AUDIT_STATUS=$?
-            ;;
-          pnpm)
-            AUDIT_OUTPUT="$(pnpm audit --audit-level="$LEVEL" --json 2>/dev/null)"
-            AUDIT_STATUS=$?
-            ;;
-          yarn)
-            YARN_MAJOR="$(yarn --version | cut -d. -f1)"
-            if [ "${YARN_MAJOR:-1}" -ge 2 ]; then
-              AUDIT_OUTPUT="$(yarn npm audit --severity "$LEVEL" --json 2>/dev/null)"
-            else
-              AUDIT_OUTPUT="$(yarn audit --level "$LEVEL" --json 2>/dev/null)"
-            fi
-            AUDIT_STATUS=$?
-            ;;
-          *)
-            echo "::error::Unsupported package manager: $PM"
-            exit 2
-            ;;
+        ERR_FILE="$(mktemp)"
+        trap 'rm -f "$ERR_FILE"' EXIT
+        # A vulnerability is counted only from a readable audit report. An
+        # unreadable or inconsistent report is a scanner execution error: it is
+        # retried once, then reported as such and still fails the quality gate.
+        report_error() {
+          echo "status=error" >> "$GITHUB_OUTPUT"
+          echo "vuln-count=0" >> "$GITHUB_OUTPUT"
+          echo "scan-errors=1" >> "$GITHUB_OUTPUT"
+          echo "::error::Dependency audit could not be read: $1. This is a scanner execution error, not a vulnerability finding; the quality gate still fails."
+          exit 0
+        }
+        case "$LEVEL" in
+          info|low|moderate|high|critical) ;;
+          *) report_error "unsupported audit-level '$LEVEL'" ;;
         esac
+
+        run_audit() {
+          case "$PM" in
+            npm)
+              AUDIT_OUTPUT="$(npm audit --audit-level="$LEVEL" --json 2>"$ERR_FILE")"
+              AUDIT_STATUS=$?
+              ;;
+            pnpm)
+              AUDIT_OUTPUT="$(pnpm audit --audit-level="$LEVEL" --json 2>"$ERR_FILE")"
+              AUDIT_STATUS=$?
+              ;;
+            yarn)
+              YARN_MAJOR="$(yarn --version | cut -d. -f1)"
+              if [ "${YARN_MAJOR:-1}" -ge 2 ]; then
+                AUDIT_OUTPUT="$(yarn npm audit --severity "$LEVEL" --json 2>"$ERR_FILE")"
+              else
+                AUDIT_OUTPUT="$(yarn audit --level "$LEVEL" --json 2>"$ERR_FILE")"
+              fi
+              AUDIT_STATUS=$?
+              ;;
+            *)
+              echo "::error::Unsupported package manager: $PM"
+              exit 2
+              ;;
+          esac
+        }
+
+        # Sets VULN_COUNT on a readable report; otherwise sets UNREADABLE.
+        read_audit() {
+          VULN_COUNT=""
+          UNREADABLE=""
+          local parsed
+          parsed="$(printf '%s\n' "$AUDIT_OUTPUT" | jq -s --arg level "$LEVEL" '
+            def ranks: {info: 0, low: 1, moderate: 2, high: 3, critical: 4};
+            if length == 1 and (.[0].metadata?.vulnerabilities?.total // null) != null then
+              .[0].metadata.vulnerabilities |
+              if (keys | sort) != (["total"] + (ranks | keys) | sort) then
+                error("Incomplete audit severity breakdown")
+              elif all(.[]; type == "number" and . >= 0 and floor == .) | not then
+                error("Invalid audit vulnerability count")
+              elif ([to_entries[] | select(.key != "total") | .value] | add) != .total then
+                error("Inconsistent audit vulnerability total")
+              else
+                [to_entries[] | select(.key != "total") |
+                  select(ranks[.key] >= ranks[$level]) | .value] | add // 0
+              end
+            elif length == 1 and (.[0].data?.vulnerabilities // null) != null then
+              .[0].data.vulnerabilities
+            elif any(.[]; .type? == "auditAdvisory" or .type? == "auditSummary") then
+              [ .[] | select(.type? == "auditAdvisory") ] | length
+            else
+              error("Unrecognized audit response")
+            end
+          ' 2>&1)"
+          local jq_status=$?
+          if [ "$jq_status" -ne 0 ] || ! [[ "$parsed" =~ ^[0-9]+$ ]]; then
+            UNREADABLE="exit=$AUDIT_STATUS, $(printf '%s' "$parsed" | tail -n 1 | cut -c1-200)"
+          elif [ "$AUDIT_STATUS" -ne 0 ] && [ "$parsed" -eq 0 ]; then
+            # Never convert a failing audit without a readable finding into a clean bill.
+            UNREADABLE="exit=$AUDIT_STATUS with no finding in a readable report"
+          else
+            VULN_COUNT="$parsed"
+          fi
+        }
+
+        run_audit
+        read_audit
+        if [ -n "$UNREADABLE" ]; then
+          echo "::warning::Dependency audit output unreadable ($UNREADABLE); retrying once."
+          tail -n 20 "$ERR_FILE"
+          run_audit
+          read_audit
+        fi
+        if [ -n "$UNREADABLE" ]; then
+          tail -n 20 "$ERR_FILE"
+          report_error "$UNREADABLE after 2 attempts"
+        fi
         set -e
 
-        VULN_COUNT="$(printf '%s\n' "$AUDIT_OUTPUT" | jq -s --arg level "$LEVEL" '
-          def ranks: {info: 0, low: 1, moderate: 2, high: 3, critical: 4};
-          if (ranks | has($level)) | not then error("Unknown audit severity") else . end |
-          if length == 1 and (.[0].metadata?.vulnerabilities?.total // null) != null then
-            .[0].metadata.vulnerabilities |
-            if (keys | sort) != (["total"] + (ranks | keys) | sort) then
-              error("Incomplete audit severity breakdown")
-            elif all(.[]; type == "number" and . >= 0 and floor == .) | not then
-              error("Invalid audit vulnerability count")
-            elif ([to_entries[] | select(.key != "total") | .value] | add) != .total then
-              error("Inconsistent audit vulnerability total")
-            else
-              [to_entries[] | select(.key != "total") |
-                select(ranks[.key] >= ranks[$level]) | .value] | add // 0
-            end
-          elif length == 1 and (.[0].data?.vulnerabilities // null) != null then
-            .[0].data.vulnerabilities
-          elif any(.[]; .type? == "auditAdvisory" or .type? == "auditSummary") then
-            [ .[] | select(.type? == "auditAdvisory") ] | length
-          else
-            error("Unrecognized audit response")
-          end
-        ' 2>/dev/null || echo 1)"
-
-        if [ "$AUDIT_STATUS" -ne 0 ] && [ "${VULN_COUNT:-0}" -eq 0 ]; then
-          # Never convert an unparseable failing audit into a false clean bill.
-          VULN_COUNT=1
+        if [ "$VULN_COUNT" -gt 0 ]; then
+          echo "status=findings" >> "$GITHUB_OUTPUT"
+        else
+          echo "status=passed" >> "$GITHUB_OUTPUT"
         fi
-        echo "vuln-count=${VULN_COUNT:-0}" >> "$GITHUB_OUTPUT"
+        echo "vuln-count=$VULN_COUNT" >> "$GITHUB_OUTPUT"
+        echo "scan-errors=0" >> "$GITHUB_OUTPUT"
 
         case "$PM" in
           npm) npm audit --audit-level="$LEVEL" || true ;;
@@ -167,6 +218,18 @@ runs:
         QUALITY_PASSED=true
         LINTING_STATUS="passed"
         SECURITY_ISSUES="${{ steps.audit.outputs.vuln-count || '0' }}"
+        SECURITY_SCAN_ERRORS=0
+        if [ "${{ inputs.run-audit }}" = "true" ]; then
+          case "${{ steps.audit.outputs.status }}" in
+            passed|findings) ;;
+            *)
+              # Unreadable audit or crashed audit step: a scanner execution
+              # error, never a finding and never a pass.
+              QUALITY_PASSED=false
+              SECURITY_SCAN_ERRORS=1
+              ;;
+          esac
+        fi
 
         if [ "${{ steps.lint.outputs.status }}" = "failed" ]; then
           QUALITY_PASSED=false
@@ -179,5 +242,6 @@ runs:
         {
           echo "passed=${QUALITY_PASSED}"
           echo "security-issues=${SECURITY_ISSUES}"
+          echo "security-scan-errors=${SECURITY_SCAN_ERRORS}"
           echo "linting-status=${LINTING_STATUS}"
         } >> "$GITHUB_OUTPUT"

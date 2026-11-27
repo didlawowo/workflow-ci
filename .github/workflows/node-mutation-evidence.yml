@@ -40,7 +40,9 @@ concurrency:
 jobs:
   node-mutation:
     runs-on: ${{ inputs.runner }}
-    timeout-minutes: 20
+    # Ceiling only: the Stryker step enforces the budget derived from the PR
+    # scope (.ci/mutation_run_budget.py, 45 to 360 minutes) and reports its expiry.
+    timeout-minutes: 375
     permissions:
       contents: read
       issues: read
@@ -115,6 +117,25 @@ jobs:
             *) echo "::error::Unsupported package manager: ${{ inputs.package-manager }}"; exit 1 ;;
           esac
 
+      - name: Size mutation time budget from the PR scope
+        id: budget
+        if: steps.policy.outputs.required == 'true' && contains(steps.policy.outputs.labels, 'node-production-change')
+        shell: bash
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          DEPTH: ${{ steps.policy.outputs.depth }}
+          PROJECT_DIRECTORY: ${{ inputs.working-directory }}
+          MUTATION_NODE_PACE_SECONDS: ${{ vars.MUTATION_NODE_PACE_SECONDS || '40' }}
+          MUTATION_NODE_SETUP_MINUTES: ${{ vars.MUTATION_NODE_SETUP_MINUTES || '15' }}
+        run: |
+          set -euo pipefail
+          BUDGET="$(python3 .workflow-ci/.ci/mutation_run_budget.py --source workflow-ci-node \
+            --repo . --base "$BASE_SHA" --head "$HEAD_SHA" \
+            --directory "${PROJECT_DIRECTORY:-.}" --depth "${DEPTH:-medium}")"
+          echo "$BUDGET" >> "$GITHUB_OUTPUT"
+          echo "Mutation time budget: $(tr '\n' ' ' <<<"$BUDGET")"
+
       - name: Run central Stryker gate
         id: execute
         if: steps.policy.outputs.required == 'true' && contains(steps.policy.outputs.labels, 'node-production-change')
@@ -126,7 +147,16 @@ jobs:
           MUTATION_DEPTH: ${{ steps.policy.outputs.depth }}
           MUTATION_WORKING_DIRECTORY: ${{ inputs.working-directory }}
           MUTATION_NODE_TEST_COMMAND: ${{ inputs.test-command }}
-        run: bash .workflow-ci/.ci/mutation-node.sh
+          MUTATION_TIME_BUDGET: ${{ steps.budget.outputs.time-budget }}
+        run: |
+          set +e
+          python3 .workflow-ci/.ci/mutation_deadline.py --minutes "$MUTATION_TIME_BUDGET" -- \
+            bash .workflow-ci/.ci/mutation-node.sh
+          status=$?
+          if [[ "$status" -eq 124 ]]; then
+            echo "stop-reason=time-budget" >> "$GITHUB_OUTPUT"
+          fi
+          exit "$status"
 
       - name: Collect Node mutation verdict
         id: collect
@@ -136,6 +166,8 @@ jobs:
           REQUIRED: ${{ steps.policy.outputs.required }}
           LABELS: ${{ steps.policy.outputs.labels }}
           EXECUTION: ${{ steps.execute.outcome || 'skipped' }}
+          STOP_REASON: ${{ steps.execute.outputs.stop-reason }}
+          TIME_BUDGET: ${{ steps.budget.outputs.time-budget }}
         run: |
           set -euo pipefail
           REPORT=".quality/stryker.json"
@@ -145,6 +177,11 @@ jobs:
             exit 0
           fi
           if [[ "$EXECUTION" != "success" || ! -s "$REPORT" ]]; then
+            if [[ "$STOP_REASON" == "time-budget" ]]; then
+              echo "::error::Node mutation stopped at its ${TIME_BUDGET}-minute time budget before producing a verdict: this is a duration limit, not surviving mutants."
+            elif [[ "$EXECUTION" == "cancelled" ]]; then
+              echo "::error::Node mutation was cancelled before producing a verdict: this is not a mutation result."
+            fi
             echo 'status=fail' >> "$GITHUB_OUTPUT"
             echo 'report-b64=' >> "$GITHUB_OUTPUT"
             exit 0

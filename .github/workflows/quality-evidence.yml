@@ -179,7 +179,7 @@ jobs:
       sonar-changed-lines-coverage: ${{ steps.sonarqube.outputs.changed-lines-coverage }}
       quality-status: ${{ steps.python-quality.outputs.quality-passed || steps.go-quality.outputs.quality-passed || steps.node-quality.outputs.quality-passed }}
       security-issues: ${{ steps.python-quality.outputs.security-issues || steps.go-quality.outputs.security-issues || steps.node-quality.outputs.security-issues }}
-      security-scan-errors: ${{ steps.python-quality.outputs.security-scan-errors || '0' }}
+      security-scan-errors: ${{ steps.python-quality.outputs.security-scan-errors || steps.node-quality.outputs.security-scan-errors || '0' }}
       coverage-threshold: ${{ steps.threshold.outputs.value }}
     steps:
       - uses: $/.github/actions/checkout-source

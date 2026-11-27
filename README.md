@@ -83,6 +83,10 @@ quality-evidence wrappers. Existing Go pipeline templates that explicitly pass
 the module. Dependency downloads continue to use the runner's `GOPROXY`.
 
 Node dependency audits use the selected `package-manager`: `npm audit`, `pnpm audit`, Yarn Classic `yarn audit`, or Yarn Berry `yarn npm audit`.
+Only a readable audit report counts vulnerabilities. An unreadable or inconsistent
+report (invalid JSON, non-zero exit without a finding) is retried once, then reported
+as a scanner execution error (`security-scan-errors`), distinct from a finding; it
+still fails the quality gate.
 
 ### Environnements preview (label-gated)
 
