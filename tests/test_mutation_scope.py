@@ -439,11 +439,9 @@ def test_decorated_handler_change_yields_no_unsatisfiable_target(tmp_path: Path)
     head = _commit(repo, "change handler")
 
     assert mutation_scope.mutation_targets(repo, base, head, depth="medium") == ()
-    # high still emits the module-wide glob, which matches the mutable
-    # functions of the module — the pattern is satisfiable there.
-    assert mutation_scope.mutation_targets(repo, base, head, depth="high") == (
-        "api.*__mutmut_*",
-    )
+    # high must not emit the module-wide glob either: the module holds no
+    # function mutmut can mutate, so the glob could never match.
+    assert mutation_scope.mutation_targets(repo, base, head, depth="high") == ()
 
 
 def test_decorated_handler_change_targets_only_mutable_neighbours(tmp_path: Path):

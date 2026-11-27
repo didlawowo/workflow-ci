@@ -459,7 +459,12 @@ def mutation_targets(
             continue
 
         if depth == "high":
-            targets.add(f"{module}.*__mutmut_*")
+            # A module-wide glob is only satisfiable when mutmut generates at
+            # least one mutant somewhere in the module (all decorated handlers
+            # or inert bodies produce none).
+            every_line = set(range(1, len(source.splitlines()) + 2))
+            if _changed_mutmut_functions(tree, every_line, source):
+                targets.add(f"{module}.*__mutmut_*")
             continue
 
         for qualified in _changed_mutmut_functions(tree, lines, source):
