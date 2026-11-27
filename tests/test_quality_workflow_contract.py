@@ -1,3 +1,7 @@
+import os
+import subprocess
+
+import pytest
 from pathlib import Path
 
 import yaml
@@ -550,6 +554,10 @@ def test_quality_evidence_separates_blocking_gate_from_best_effort_publication()
     assert "MUTATION_RESULT: ${{ needs.mutation.result }}" in gate
     assert 'echo "status=pass" >> "$GITHUB_OUTPUT"' in gate
     assert 'echo "status=fail" >> "$GITHUB_OUTPUT"' in gate
+    # #311 : annulé reste bloquant (exit 1) mais se lit comme tel.
+    cancelled = gate.split('echo "status=cancelled" >> "$GITHUB_OUTPUT"', 1)[1]
+    assert cancelled.split("\n", 3)[2].strip() == "exit 1"
+    assert 'if [[ "$REAL" -eq 0 ]]; then' in gate.split('echo "status=cancelled"', 1)[0]
     assert "pull-requests: write" not in gate
 
     assert "needs: [trusted-gate, independent-verification, mutation]" in publisher
@@ -803,3 +811,29 @@ def test_campaign_artifacts_survive_a_rerun_of_failed_jobs():
     assert content.count("name: mutation-plan-${{ github.run_id }}\n") == 3
     assert "name: mutation-fragment-${{ github.run_id }}-${{ matrix.index }}\n" in content
     assert content.count("overwrite: true") == 2
+
+
+@pytest.mark.parametrize("quality,mutation,report,status", [
+    ("success", "success", "true", "pass"), ("success", "cancelled", "false", "cancelled"),
+    ("cancelled", "success", "false", "fail"), ("failure", "cancelled", "false", "fail"),
+    ("cancelled", "skipped", "true", "fail")])
+def test_trusted_gate_reports_cancelled_only_without_real_failure(tmp_path, quality, mutation, report, status):
+    """#311 : exécute le script réel de la porte ; annulé n'est jamais pass ni n'efface un échec."""
+    script = yaml.safe_load(WORKFLOW.read_text())["jobs"]["trusted-gate"]["steps"][0]["run"]
+    output = tmp_path / "out"
+    env = {"PATH": os.environ["PATH"], "GITHUB_OUTPUT": str(output), "SCOPE_REQUESTED": "false", "SCOPE_RESULT": "skipped",
+           "INDEPENDENT_ENABLED": "true", "QUALITY_RESULT": quality, "MUTATION_RESULT": mutation, "MUTATION_REQUIRED": "true",
+           "MUTATION_REPORT_FILE": "r" if report == "true" else "", "MUTATION_REPORT_PRESENT": report}
+    code = subprocess.run(["bash", "-c", script], env=env, capture_output=True).returncode
+    assert (code == 0) == (status == "pass") and output.read_text() == f"status={status}\n"
+
+
+def test_trusted_gate_reads_a_cascade_from_a_cancelled_scope_as_cancelled(tmp_path):
+    """#311 : portée annulée, exécution indépendante sautée en cascade : annulé, pas échec."""
+    script = yaml.safe_load(WORKFLOW.read_text())["jobs"]["trusted-gate"]["steps"][0]["run"]
+    output = tmp_path / "out"
+    env = {"PATH": os.environ["PATH"], "GITHUB_OUTPUT": str(output), "SCOPE_REQUESTED": "true", "SCOPE_RESULT": "cancelled",
+           "INDEPENDENT_ENABLED": "true", "QUALITY_RESULT": "skipped", "MUTATION_RESULT": "cancelled", "MUTATION_REQUIRED": "",
+           "MUTATION_REPORT_FILE": "", "MUTATION_REPORT_PRESENT": "false"}
+    assert subprocess.run(["bash", "-c", script], env=env).returncode == 1
+    assert output.read_text() == "status=cancelled\n"

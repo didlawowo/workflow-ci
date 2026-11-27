@@ -624,7 +624,11 @@ def aggregate_gate(report: dict[str, Any]) -> dict[str, Any]:
 
     mutation = report.get("mutation") or {}
     if "execution_status" in mutation:
-        if mutation["execution_status"] in {"failure", "cancelled"}:
+        if mutation["execution_status"] == "cancelled":
+            # Superseded by a newer revision or a re-run (#311): no verdict,
+            # not a regression. Never PASS; the latest run decides.
+            missing.append("mutation-execution-cancelled")
+        elif mutation["execution_status"] == "failure":
             failures.append("mutation-execution")
         elif mutation["execution_status"] != "success":
             missing.append("mutation-execution")

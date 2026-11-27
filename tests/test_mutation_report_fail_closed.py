@@ -40,8 +40,9 @@ def evidence(tmp_path):
         ("failure", "", False, "FAIL"),
         ("failure", "false", False, "FAIL"),
         ("failure", "true", True, "FAIL"),
-        ("cancelled", "", False, "FAIL"),
-        ("cancelled", "false", True, "FAIL"),
+        # #311 : annulé = aucun verdict, jamais PASS, distinct d'un échec.
+        ("cancelled", "", False, "INCOMPLETE"),
+        ("cancelled", "false", True, "INCOMPLETE"),
         ("skipped", "false", False, "INCOMPLETE"),
         ("", "false", False, "INCOMPLETE"),
         ("unknown", "true", True, "INCOMPLETE"),
@@ -377,7 +378,7 @@ def test_gate_decision_table_checks_all_required_sections_and_failure_precedence
         ("mutation", {"suspicious": 1}, ["mutation"], []),
         ("mutation", {"not_covered": 1}, ["mutation"], []),
         ("mutation", {"required": False, "available": False}, [], []),
-        ("mutation", {"execution_status": "cancelled"}, ["mutation-execution"], []),
+        ("mutation", {"execution_status": "cancelled"}, [], ["mutation-execution-cancelled"]),
         ("mutation", {"execution_status": "failure"}, ["mutation-execution"], []),
         ("mutation", {"execution_status": "unknown"}, [], ["mutation-execution"]),
         ("mutation", {"policy_status": "unknown"}, [], ["mutation-policy"]),
@@ -478,3 +479,10 @@ def test_spurious_equivalence_credit_never_covers_unresolved_mutants():
         "reviewed_equivalents": 1,
     }
     assert quality_report.aggregate_gate(report(mutation))["status"] == "FAIL"
+
+
+def test_cancelled_run_never_hides_a_real_failure(evidence):
+    """#311 : une annulation ne masque pas un échec mesuré par ailleurs."""
+    data = report(quality_report.mutation_evidence(None, "true", "cancelled"))
+    data["tests"]["failed"] = 1
+    assert quality_report.aggregate_gate(data)["status"] == "FAIL"
