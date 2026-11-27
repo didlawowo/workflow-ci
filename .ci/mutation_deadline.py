@@ -55,8 +55,11 @@ def run(
         try:
             process.wait(timeout=grace)
         except subprocess.TimeoutExpired:
-            _signal_group(process, signal.SIGKILL)
-            process.wait()
+            pass
+        # The leader may exit on SIGTERM while another member of the group
+        # ignores it: always finish the whole group, not only a live leader.
+        _signal_group(process, signal.SIGKILL)
+        process.wait()
         return BUDGET_EXPIRED
     if status == BUDGET_EXPIRED:
         return 1

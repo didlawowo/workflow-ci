@@ -746,3 +746,17 @@ def test_node_mutation_collect_reports_time_budget_failure(tmp_path: Path) -> No
     outputs = _read_output_file(output)
     assert outputs["status"] == "fail"
     assert "time budget" in proc.stdout
+
+
+def test_deadline_kills_a_member_that_ignores_sigterm(tmp_path):
+    """Revue PR 324 (R1) : le chef sort au SIGTERM, un membre l'ignore ; tout le groupe meurt."""
+    pidfile = tmp_path / "pid"
+    script = f"(trap '' TERM; echo $BASHPID > {pidfile}; exec sleep 300) & wait"
+    assert deadline.run(["bash", "-c", script], minutes=1, grace=1, unit=0.5) == 124
+    pid = pidfile.read_text().strip()
+    for _ in range(20):
+        state = subprocess.run(["ps", "-o", "stat=", "-p", pid], capture_output=True, text=True).stdout.strip()
+        if not state or state.startswith("Z"):
+            break
+        time.sleep(0.1)
+    assert not state or state.startswith("Z"), state
