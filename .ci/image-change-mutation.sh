@@ -26,7 +26,7 @@ also_copy = ["tests", ".github"]
 # suite and sit closest to the default bound (15), so a loaded runner turned a
 # kill into a timeout (#299). A wider bound only gives a slow mutant more time:
 # a timeout is never a kill, and the check below still rejects any of them.
-timeout_multiplier = 60
+timeout_multiplier = 30
 timeout_constant = 5
 TOML
 cd "$SCRATCH"
