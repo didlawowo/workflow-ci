@@ -377,41 +377,46 @@ jobs:
         run: |
           set -euo pipefail
           FAILED=0
+          # REAL=1 when a cause is not explained by an upstream cancellation.
+          REAL=0
+          fail() { FAILED=1; [[ "$1" == cancelled ]] || REAL=1; }
 
           if [[ "$SCOPE_REQUESTED" == "true" && "$SCOPE_RESULT" != "success" ]]; then
             echo "::error::Change scope classification did not succeed: $SCOPE_RESULT"
-            FAILED=1
+            fail "$SCOPE_RESULT"
           elif [[ "$SCOPE_REQUESTED" != "true" && "$SCOPE_RESULT" != "skipped" ]]; then
             echo "::error::Change scope ran without documentation-only-paths: $SCOPE_RESULT"
-            FAILED=1
+            fail unexpected
           fi
 
           if [[ "$INDEPENDENT_ENABLED" == "true" ]]; then
             if [[ "$QUALITY_RESULT" != "success" ]]; then
               echo "::error::Independent quality execution did not succeed: $QUALITY_RESULT"
-              FAILED=1
+              fail "$QUALITY_RESULT"
             fi
           elif [[ "$QUALITY_RESULT" != "skipped" ]]; then
             echo "::error::Independent verification is disabled but the job did not skip: $QUALITY_RESULT"
-            FAILED=1
+            fail unexpected
           fi
 
           if [[ "$MUTATION_RESULT" != "success" ]]; then
             echo "::error::Mutation gate did not succeed: $MUTATION_RESULT"
-            FAILED=1
+            fail "$MUTATION_RESULT"
           fi
 
+          # Missing evidence or classification is a consequence of a cancelled
+          # mutation job only; otherwise it is a real failure.
           case "$MUTATION_REQUIRED" in
             true)
               if [[ -z "$MUTATION_REPORT_FILE" || "$MUTATION_REPORT_PRESENT" != "true" ]]; then
                 echo "::error::Mandatory mutation evidence is missing."
-                FAILED=1
+                fail "$MUTATION_RESULT"
               fi
               ;;
             false) ;;
             *)
               echo "::error::Mutation classification is missing."
-              FAILED=1
+              fail "$MUTATION_RESULT"
               ;;
           esac
 
@@ -423,9 +428,7 @@ jobs:
 
           # A run cancelled by a newer revision or a re-run produced no verdict:
           # still blocking, but reported as cancelled rather than as a failure.
-          # Only when nothing really failed: a failure next to a cancellation stays a failure.
-          if [[ " $SCOPE_RESULT $QUALITY_RESULT $MUTATION_RESULT " == *" cancelled "* \
-            && " $SCOPE_RESULT $QUALITY_RESULT $MUTATION_RESULT " != *" failure "* ]]; then
+          if [[ "$REAL" -eq 0 ]]; then
             echo "status=cancelled" >> "$GITHUB_OUTPUT"
             echo "::notice::Trusted gate: CANCELLED. This run was cancelled (newer revision or re-run) before producing a verdict; it is not a regression. The latest run decides."
             exit 1
