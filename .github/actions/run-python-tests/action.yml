@@ -92,10 +92,11 @@ runs:
 
     - name: Install uv
       if: inputs.use-docker-compose != 'true' && steps.uv-runtime.outputs.preinstalled != 'true'
-      uses: astral-sh/setup-uv@v10.1.0
+      uses: $/.github/actions/setup-uv
       with:
-        version: "0.13.7"
         enable-cache: false
+        prune-cache: false
+        working-directory: ${{ inputs.working-directory }}
 
     - name: Setup Python environment
       if: inputs.use-docker-compose != 'true'

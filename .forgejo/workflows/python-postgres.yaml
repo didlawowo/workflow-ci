@@ -39,8 +39,28 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Resolve the uv version
+        id: uv-version
+        working-directory: ${{ inputs.working-directory }}
+        shell: bash
+        run: |
+          # Same rule as .github/actions/setup-uv/resolve-version.sh: the
+          # project's own required-version wins, otherwise the shared pin.
+          if { [ -f uv.toml ] && grep -Eq '^[[:space:]]*required-version[[:space:]]*=' uv.toml; } ||
+            { [ -f pyproject.toml ] && awk '/^[[:space:]]*\[/ { u = ($0 ~ /^[[:space:]]*\[tool\.uv\][[:space:]]*(#.*)?$/) } u && /^[[:space:]]*required-version[[:space:]]*=/ { f = 1 } END { exit !f }' pyproject.toml; }; then
+            echo "version=" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=0.13.7" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Install uv
-        run: curl -fsSL https://astral.sh/uv/install.sh | env UV_INSTALL_DIR=/usr/local/bin sh
+        uses: https://github.com/astral-sh/setup-uv@v10.1.0
+        with:
+          version: ${{ steps.uv-version.outputs.version }}
+          working-directory: ${{ inputs.working-directory }}
+          enable-cache: false
+          prune-cache: false
+          github-token: ""
 
       - name: Install dependencies
         working-directory: ${{ inputs.working-directory }}

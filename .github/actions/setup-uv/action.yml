@@ -1,0 +1,54 @@
+name: "Setup uv"
+description: >
+  Install uv at the version pinned by the shared CI, unless the project
+  declares its own `required-version` (uv.toml or [tool.uv] in pyproject.toml),
+  which then takes precedence. Only `working-directory` is searched: steps that
+  install uv for the central helpers before any project checkout (mutation
+  policy and campaign jobs) apply the pinned version.
+
+inputs:
+  working-directory:
+    description: "Project directory searched for a required-version"
+    required: false
+    default: "."
+  enable-cache:
+    description: "Forwarded to astral-sh/setup-uv"
+    required: false
+    default: "false"
+  prune-cache:
+    description: "Forwarded to astral-sh/setup-uv"
+    required: false
+    default: "false"
+
+runs:
+  using: "composite"
+  steps:
+    - name: Resolve the uv version
+      id: uv-version
+      shell: bash
+      env:
+        PROJECT_DIR: ${{ inputs.working-directory }}
+      # Run apart from echo: a failure of the script must fail this step.
+      run: |
+        version="$(bash "$GITHUB_ACTION_PATH/resolve-version.sh" "$PROJECT_DIR")"
+        echo "version=$version" >> "$GITHUB_OUTPUT"
+
+    - name: Detect preinstalled uv
+      id: uv-runtime
+      shell: bash
+      run: |
+        if command -v uv >/dev/null 2>&1; then
+          echo "preinstalled=true" >> "$GITHUB_OUTPUT"
+          echo "Using preinstalled uv: $(uv --version)"
+        else
+          echo "preinstalled=false" >> "$GITHUB_OUTPUT"
+        fi
+
+    - name: Install uv
+      if: steps.uv-runtime.outputs.preinstalled != 'true'
+      uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+      with:
+        version: ${{ steps.uv-version.outputs.version }}
+        working-directory: ${{ inputs.working-directory }}
+        enable-cache: ${{ inputs.enable-cache }}
+        prune-cache: ${{ inputs.prune-cache }}

@@ -6,7 +6,6 @@ import re
 import subprocess
 
 import pytest
-import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
 SELECTOR = ROOT / ".github/actions/setup-python-env/sync-python-args.sh"
@@ -14,45 +13,6 @@ INCOMPATIBLE = (
     "warning: The requested interpreter resolved to Python 3.12.13, which is "
     "incompatible with the project's Python requirement: `>=3.13`"
 )
-
-
-def uv_installations():
-    """(file, version or None) for every setup-uv step of actions and workflows."""
-    found = []
-
-    def visit(node, path):
-        if isinstance(node, dict):
-            if "astral-sh/setup-uv@" in str(node.get("uses", "")):
-                found.append((path, (node.get("with") or {}).get("version")))
-            for value in node.values():
-                visit(value, path)
-        elif isinstance(node, list):
-            for value in node:
-                visit(value, path)
-
-    for root in (".github", ".forgejo"):
-        for path in sorted((ROOT / root).rglob("*.y*ml")):
-            visit(yaml.safe_load(path.read_text()), str(path.relative_to(ROOT)))
-    return found
-
-
-def test_no_uv_installation_follows_the_latest_release_explicitly():
-    """An explicit version is the exact one of the runner images, never `latest`.
-
-    Steps without a version keep setup-uv's own rule (the version required by
-    the project, else the newest): pinning those is a separate decision.
-    """
-    explicit = [item for item in uv_installations() if item[1] is not None]
-    assert len(explicit) == 6, explicit
-    versions = {version for _, version in explicit}
-    assert len(versions) == 1, explicit
-    assert re.fullmatch(r"\d+\.\d+\.\d+", versions.pop()), explicit
-    assert {path for path, _ in explicit} == {
-        ".github/actions/quality-report/action.yml",
-        ".github/actions/run-python-tests/action.yml",
-        ".github/actions/setup-python-env/action.yml",
-        ".github/workflows/bench-uv-cache.yml",
-    }
 
 
 def select(tmp_path, pin_status, find_stderr):

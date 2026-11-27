@@ -40,7 +40,7 @@ jobs:
           fi
       - name: Install uv for policy helpers
         if: steps.uv-runtime.outputs.preinstalled != 'true'
-        uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+        uses: $/.github/actions/setup-uv
         with:
           enable-cache: false
           prune-cache: false
@@ -87,7 +87,7 @@ jobs:
           fi
       - name: Install uv for policy helpers
         if: steps.uv-runtime.outputs.preinstalled != 'true'
-        uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+        uses: $/.github/actions/setup-uv
         with:
           enable-cache: false
           prune-cache: false

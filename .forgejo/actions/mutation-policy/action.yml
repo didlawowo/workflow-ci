@@ -23,8 +23,15 @@ outputs:
 runs:
   using: composite
   steps:
+    - name: Resolve the uv version
+      id: uv-version
+      shell: bash
+      run: |
+        version="$(bash "$GITHUB_ACTION_PATH/../../../.github/actions/setup-uv/resolve-version.sh")"
+        echo "version=$version" >> "$GITHUB_OUTPUT"
     - uses: https://github.com/astral-sh/setup-uv@v10.1.0
       with:
+        version: ${{ steps.uv-version.outputs.version }}
         enable-cache: false
         prune-cache: false
         github-token: ""
