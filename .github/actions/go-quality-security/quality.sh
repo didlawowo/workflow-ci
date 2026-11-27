@@ -6,7 +6,8 @@ case "${1:-}" in
   resolve)
     version="${LINT_VERSION:-auto}"
     if [[ "$version" == auto ]]; then
-      version=v1.64.8
+      # Sans configuration : v2 (jeu `standard`, équivalent aux défauts v1). Une config v1 reste en v1.
+      version=v2.13.2
       directory="$PWD"
       root="$(git rev-parse --show-toplevel 2>/dev/null || printf '%s' "$PWD")"
       while :; do
@@ -20,7 +21,7 @@ case "${1:-}" in
           else
             configured="$(sed -nE "s/^[[:space:]]*version[[:space:]]*[:=][[:space:]]*[\"']?([12])[\"']?([[:space:]]*(#.*)?)?$/\1/p" "$config" | head -1)"
           fi
-          [[ "$configured" != 2 ]] || version=v2.13.2
+          if [[ "$configured" == 2 ]]; then version=v2.13.2; else version=v1.64.8; fi
           break
         done
         [[ "$found" == false && "$directory" != "$root" && "$directory" != / ]] || break

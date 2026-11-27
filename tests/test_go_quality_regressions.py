@@ -49,6 +49,12 @@ def test_resolve_config_major_version(tmp_path, extension, config, expected):
     assert values["version"] == expected
 
 
+def test_resolve_without_config_defaults_to_v2(tmp_path):
+    process, values = run(tmp_path, "resolve", LINT_VERSION="auto")
+    assert process.returncode == 0, process.stderr
+    assert values["version"] == "v2.13.2"
+
+
 def test_explicit_version_and_invalid_pin(tmp_path):
     _, values = run(tmp_path, "resolve", LINT_VERSION="v2.10.0")
     assert values["version"] == "v2.10.0"

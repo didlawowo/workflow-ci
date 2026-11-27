@@ -45,7 +45,7 @@ on:
         type: string
         default: ""
       golangci-lint-version:
-        description: "Exact golangci-lint release or auto based on the configuration major version"
+        description: "Exact golangci-lint release or auto (v2 without configuration, otherwise the configuration major version)"
         required: false
         type: string
         default: "auto"
