@@ -26,9 +26,7 @@ runs:
         fi
     - name: Install uv
       if: steps.uv-runtime.outputs.preinstalled != 'true'
-      uses: astral-sh/setup-uv@v10.1.0
-      with:
-        enable-cache: false
+      uses: $/.github/actions/setup-uv
 
     - name: Validate pre-commit configuration exists
       shell: bash
