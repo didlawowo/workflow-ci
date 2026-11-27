@@ -97,10 +97,16 @@ to use `mutation-campaign.yml`. The default `0` runs the campaign automatically
 for Python repositories, sizing one to sixteen workers from the planned mutant
 inventory (about one worker per 1,200 mutants). Set `1` to force one ordinary
 mutation job, or a number from 2 to 16 to fix the worker count. The campaign
-uses at most four workers concurrently; planning and each worker are bounded to
-45 minutes, verification to ten minutes. Automatic mode tolerates a scope with no
-mutable changed function: an empty inventory becomes an empty one-worker campaign
-instead of a failure, while a fixed worker count keeps the previous error.
+runs at most four workers concurrently (`max-parallel: 4`). Planning is bounded
+to 45 minutes and verification to ten. Each worker is bounded to a timeout
+derived from the plan (at least 45 minutes, at most 360; see
+[mutation-shards.md](mutation-shards.md)). Automatic mode tolerates a scope with
+no mutable changed function: an empty inventory becomes an empty one-worker
+campaign instead of a failure, while a fixed worker count keeps the previous
+error.
+
+How the work is split, how long a campaign takes and which settings change it
+are explained in [mutation-shards.md](mutation-shards.md).
 
 This is a protected-runner protocol, not an automatic port of a consumer's native
 mutation engine. Python repositories get the central entrypoints shipped by this
